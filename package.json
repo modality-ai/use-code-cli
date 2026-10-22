@@ -1,0 +1,52 @@
+{
+  "private": true,
+  "version": "0.0.0",
+  "name": "use-code-cli",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/use-code-cli"
+  },
+  "homepage": "https://github.com/use-code-cli",
+  "description": "TODO: description",
+  "keywords": [
+    "use-code-cli"
+  ],
+  "author": "Hill <hill@kimo.com>",
+  "license": "ISC",
+  "git.addAICoAuthor": "off",
+  "dependencies": {
+    "modality-cli-kit": "*",
+    "modality-mcp-kit": "*",
+    "zod": "*"
+  },
+  "devDependencies": {
+    "@modality-counter/core": "*",
+    "modality-bun-kit": "*",
+    "react": "*",
+    "react-dom": "*"
+  },
+  "exports": {
+    "types": "./types/index.d.ts",
+    "require": "./dist/index.js",
+    "import": "./dist/index.js"
+  },
+  "types": "./types/index.d.ts",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "bin": {
+    "use-code-cli": "./dist/runner/cli.js"
+  },
+  "scripts": {
+    "clean": "find ./dist -name '*.*' | xargs rm -rf",
+    "build:types": "bun tsc -p ./",
+    "build:commands": "modality-cli generate-commands",
+    "build:cli": "bun build ./src/runner/cli.ts ./src/index.ts --target=bun --outdir=./dist --root=./src --external @modality-counter/core",
+    "build": "bun run build:commands && bun run clean && bun run build:types && bun run build:cli && chmod +x ./dist/runner/cli.js",
+    "test": "bun run build:commands && npm run build && bun test"
+  },
+  "files": [
+    "dist",
+    "package.json",
+    "README.md"
+  ]
+}

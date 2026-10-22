@@ -1,0 +1,42 @@
+---
+name: "*use-code-cli"
+description: "TODO: description"
+---
+
+```yaml
+method:
+  name: "*use-code-cli"
+  icon: 🛠️
+  category: cli
+  introduce: "TODO: description"
+  usage:
+    method: "*use-code-cli [task]"
+    parameters:
+      task:
+        description: Natural-language task to turn into a use-code-cli command.
+        type: string
+        required: false
+    examples:
+      - "*use-code-cli run foo against my-target → build the command and run it"
+  agent_compatibility:
+    - "✅ JAMES (Full Stack Developer) - CLI orchestration"
+
+methodology:
+  purpose: >-
+    Translate the user's task into a use-code-cli command, run it, and report the result.
+  expected_output:
+    - The command that was run, in a bash-fenced code block
+    - The command output in full, including exit status and any stderr
+    - A plain-language interpretation of the result
+
+integration_protocols:
+  run:
+    command: "use-code-cli foo <target>"
+    alias: "use-code-cli f <target>"
+    help: "use-code-cli --help"
+
+tactical_notes:
+  mission_critical:
+    - "Run use-code-cli --help to confirm available commands before building one"
+    - "Check the command output for success before reporting the result"
+```
