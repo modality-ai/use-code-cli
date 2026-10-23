@@ -115,13 +115,21 @@ function writeLine(sock: string, payload: string): Promise<void> {
   });
 }
 
-/** Deliver one message to one live session. Throws on failure. */
-export async function deliver(s: LiveSession, message: string): Promise<string> {
+/**
+ * Deliver one message to one live session. Throws on failure.
+ *
+ * `msgId` is caller-supplied when the body needs to carry its own id (the
+ * auto-reply marker does); otherwise a fresh one is generated.
+ */
+export async function deliver(
+  s: LiveSession,
+  message: string,
+  msgId: string = randomUUID(),
+): Promise<string> {
   if (!s.messagingSocketPath) throw new Error(`Session ${s.pid} has no messaging socket.`);
   const token = await peerToken(s.pid);
   if (!token) throw new Error(`No peer token found for pid ${s.pid}.`);
 
-  const msgId = randomUUID();
   // Claude Code wraps a cross-session message in its own
   // <cross-session-message from-name=... from-mode=...> envelope on arrival,
   // taken from the sender's socket. Wrapping again here would nest a second,

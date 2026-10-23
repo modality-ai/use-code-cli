@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { appendReplyInstruction, hasReplyInstruction } from "../../../lib/reply";
 
 const CLI = join(import.meta.dir, "../../../runner/cli.ts");
 
@@ -70,12 +69,24 @@ function setup() {
     );
   }
 
-  async function run(command: string, ...args: string[]) {
-    const proc = Bun.spawn([process.execPath, CLI, command, ...args], {
+  interface RunOptions {
+    /** Text piped to the CLI's stdin; omit to inherit the test runner's. */
+    stdin?: string;
+  }
+
+  async function run(command: string, ...rest: (string | RunOptions)[]) {
+    const last = rest.at(-1);
+    const options: RunOptions = typeof last === "object" ? (rest.pop() as RunOptions) : {};
+    const proc = Bun.spawn([process.execPath, CLI, command, ...(rest as string[])], {
       env: { ...process.env, HOME: home },
       stdout: "pipe",
       stderr: "pipe",
+      stdin: options.stdin === undefined ? "inherit" : "pipe",
     });
+    if (options.stdin !== undefined && proc.stdin) {
+      proc.stdin.write(options.stdin);
+      await proc.stdin.end();
+    }
     const code = await proc.exited;
     const [out, err] = await Promise.all([
       new Response(proc.stdout).text(),
@@ -86,7 +97,31 @@ function setup() {
     return { code, out, err, received: () => received };
   }
 
-  return { addSession, run };
+  return { addSession, run, home };
+}
+
+/** Poll until `predicate` holds or the budget runs out (socket drain is async). */
+async function waitFor(predicate: () => boolean, timeoutMs = 1000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (predicate()) return true;
+    await Bun.sleep(10);
+  }
+  return predicate();
+}
+
+/**
+ * The message text from the last payload the socket received. The socket sees
+ * the wire JSON, where a quoted placeholder arrives escaped — decode it to
+ * assert on what the peer's agent actually reads.
+ */
+function lastContent(raw: string): string {
+  const line = raw.split("\n").filter(Boolean).at(-1) ?? "";
+  try {
+    return (JSON.parse(line) as { message?: { content?: string } }).message?.content ?? "";
+  } catch {
+    return "";
+  }
 }
 
 describe("talk", () => {
@@ -184,7 +219,74 @@ describe("talk", () => {
 
     expect(res.code).toBe(0);
     expect(res.received()).toContain("run the tests");
-    expect(res.received()).toContain("When you're done, report back with use-code-cli talk caller");
+    expect(lastContent(res.received())).toContain(
+      "When you're done, report back with use-code-cli talk caller \"<your answer>\" --no-reply",
+    );
+  });
+
+  it("marks the message with the msg_id it reports", async () => {
+    const h = setup();
+    h.addSession("caller", { pid: process.pid });
+    h.addSession("worker");
+
+    const res = await h.run("talk", "worker", "run the tests");
+    const msgId = /msg_id=([0-9a-f-]{36})/.exec(res.out)?.[1];
+
+    expect(msgId).toBeDefined();
+    expect(res.received()).toContain(
+      `<!-- use-code-cli:auto-reply hop=1 id=${msgId} -->`,
+    );
+  });
+
+  it("never annotates an automatic reply", async () => {
+    const h = setup();
+    h.addSession("caller", { pid: process.pid });
+    h.addSession("worker");
+
+    const res = await h.run(
+      "talk",
+      "worker",
+      "Done.\n<!-- use-code-cli:auto-reply hop=1 id=abc -->",
+    );
+
+    expect(res.code).toBe(0);
+    expect(res.received()).toContain("Done.");
+    expect(res.received()).not.toContain("report back with");
+    expect(res.out).toContain("looks like an automatic reply");
+  });
+
+  it("answers a message by id, and refuses to answer it twice", async () => {
+    const h = setup();
+    h.addSession("caller", { pid: process.pid });
+    h.addSession("worker");
+
+    const first = await h.run("talk", "worker", "done", "--in-reply-to", "in-1");
+    expect(first.code).toBe(0);
+    expect(first.received()).toContain("re=in-1");
+
+    const second = await h.run("talk", "worker", "done again", "--in-reply-to", "in-1");
+    expect(second.code).toBe(1);
+    expect(second.err).toContain("Already replied to msg_id=in-1");
+    expect(await waitFor(() => second.received().includes("done again"))).toBe(false);
+  });
+
+  it("sends again with --force", async () => {
+    const h = setup();
+    h.addSession("caller", { pid: process.pid });
+    h.addSession("worker");
+
+    await h.run("talk", "worker", "done", "--in-reply-to", "in-1");
+    const forced = await h.run(
+      "talk",
+      "worker",
+      "done again",
+      "--in-reply-to",
+      "in-1",
+      "--force",
+    );
+
+    expect(forced.code).toBe(0);
+    expect(await waitFor(() => forced.received().includes("done again"))).toBe(true);
   });
 
   it("sends the message untouched with --no-reply", async () => {
@@ -219,7 +321,7 @@ describe("talk", () => {
     const res = await h.run(
       "talk",
       "worker",
-      "run the tests. When you're done, report back with use-code-cli talk someone",
+      "run the tests. When you're done, report back with use-code-cli talk someone --no-reply",
     );
 
     expect(res.code).toBe(0);
@@ -227,22 +329,154 @@ describe("talk", () => {
     expect(res.received()).toContain("use-code-cli talk someone");
     expect(res.received()).not.toContain("use-code-cli talk caller");
   });
+
+  it("still annotates a message that merely mentions the command", async () => {
+    const h = setup();
+    h.addSession("caller", { pid: process.pid });
+    h.addSession("worker");
+
+    const res = await h.run("talk", "worker", "the log shows use-code-cli talk worker failed");
+
+    expect(res.code).toBe(0);
+    expect(res.received()).toContain("report back with use-code-cli talk caller");
+  });
 });
 
-describe("reply instruction helpers", () => {
-  it("appends the instruction naming the sender", () => {
-    expect(appendReplyInstruction("ping", "caller")).toBe(
-      "ping\n\nWhen you're done, report back with use-code-cli talk caller",
+describe("talk — automatic-reply default", () => {
+  /** Pretend this session just received an automatic reply. */
+  function seedInbound(h: ReturnType<typeof setup>, sessionId: string) {
+    const dir = join(h.home, ".use-code-cli");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "talk-inbound.json"),
+      JSON.stringify([{ sessionId, at: Date.now() }]),
     );
+  }
+
+  it("marks the receiving session when it delivers an annotated message", async () => {
+    const h = setup();
+    h.addSession("caller", { pid: process.pid });
+    h.addSession("worker");
+
+    await h.run("talk", "worker", "please run the tests");
+
+    const marks = JSON.parse(
+      readFileSync(join(h.home, ".use-code-cli", "talk-inbound.json"), "utf8"),
+    ) as { sessionId: string }[];
+    expect(marks.some((m) => m.sessionId.startsWith("session-"))).toBe(true);
   });
 
-  it("leaves the message alone when the sender is unknown", () => {
-    expect(appendReplyInstruction("ping", undefined)).toBe("ping");
+  it("suppresses the instruction by default after receiving an automatic reply", async () => {
+    const h = setup();
+    h.addSession("caller", { pid: process.pid });
+    h.addSession("worker");
+    seedInbound(h, `session-${process.pid}`);
+
+    const res = await h.run("talk", "worker", "done");
+
+    expect(res.code).toBe(0);
+    expect(res.received()).not.toContain("report back with");
+    expect(res.out).toContain("received an automatic reply");
   });
 
-  it("does not duplicate an instruction the message already carries", () => {
-    const message = "done. use-code-cli talk someone";
-    expect(hasReplyInstruction(message)).toBe(true);
-    expect(appendReplyInstruction(message, "caller")).toBe(message);
+  it("--reply overrides the conservative default", async () => {
+    const h = setup();
+    h.addSession("caller", { pid: process.pid });
+    h.addSession("worker");
+    seedInbound(h, `session-${process.pid}`);
+
+    const res = await h.run("talk", "worker", "done", "--reply");
+
+    expect(res.code).toBe(0);
+    expect(res.received()).toContain("report back with use-code-cli talk caller");
+  });
+
+  it("clears the mark once the session answers", async () => {
+    const h = setup();
+    h.addSession("caller", { pid: process.pid });
+    h.addSession("worker");
+    seedInbound(h, `session-${process.pid}`);
+
+    await h.run("talk", "worker", "done");
+    const res = await h.run("talk", "worker", "next task");
+
+    expect(res.received()).toContain("report back with use-code-cli talk caller");
+  });
+});
+
+describe("talk — --- message separator", () => {
+  it("takes every token after the first --- as the message", async () => {
+    const h = setup();
+    h.addSession("worker");
+
+    const res = await h.run("talk", "worker", "---", "hello", "world");
+
+    expect(res.code).toBe(0);
+    expect(lastContent(res.received())).toContain("hello world");
+  });
+
+  it("keeps flags after --- as literal text", async () => {
+    const h = setup();
+    h.addSession("caller", { pid: process.pid });
+    h.addSession("worker");
+
+    const res = await h.run("talk", "worker", "---", "keep", "--no-reply");
+    const content = lastContent(res.received());
+
+    expect(content).toContain("keep --no-reply");
+    // The literal --no-reply did not disable the instruction.
+    expect(content).toContain("report back with use-code-cli talk caller");
+  });
+
+  it("still honours flags before ---", async () => {
+    const h = setup();
+    h.addSession("caller", { pid: process.pid });
+    h.addSession("worker");
+
+    const res = await h.run("talk", "worker", "--no-reply", "---", "hi");
+
+    expect(res.code).toBe(0);
+    expect(lastContent(res.received())).toContain("hi");
+    expect(lastContent(res.received())).not.toContain("report back with");
+  });
+
+  it("treats a later --- as message text", async () => {
+    const h = setup();
+    h.addSession("worker");
+
+    const res = await h.run("talk", "worker", "---", "a", "---", "b");
+
+    expect(lastContent(res.received())).toContain("a --- b");
+  });
+
+  it("auto-picks the session when the target is omitted", async () => {
+    const h = setup();
+    h.addSession("worker");
+
+    const res = await h.run("talk", "---", "hello");
+
+    expect(res.code).toBe(0);
+    expect(lastContent(res.received())).toContain("hello");
+  });
+
+  it("reads the message from stdin when nothing follows ---", async () => {
+    const h = setup();
+    h.addSession("worker");
+
+    const res = await h.run("talk", "worker", "---", { stdin: "line one\nline two\n" });
+
+    expect(res.code).toBe(0);
+    expect(lastContent(res.received())).toContain("line one\nline two");
+  });
+
+  it("errors clearly when --- has no message and stdin is empty", async () => {
+    const h = setup();
+    h.addSession("worker");
+
+    const res = await h.run("talk", "worker", "---", { stdin: "" });
+
+    expect(res.code).toBe(1);
+    expect(res.err).toContain("Message required after ---");
+    expect(res.received()).toBe("");
   });
 });

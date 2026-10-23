@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { CLICommand } from "modality-cli-kit";
 import {
@@ -7,7 +8,19 @@ import {
   liveSessions,
   type LiveSession,
 } from "../../lib/peer";
-import { appendReplyInstruction, hasReplyInstruction } from "../../lib/reply";
+import {
+  appendReplyInstruction,
+  hasReplyInstruction,
+  isAutoReply,
+  parseReplyMeta,
+} from "../../lib/reply";
+import {
+  clearInbound,
+  findReply,
+  hasPendingInbound,
+  markInbound,
+  recordReply,
+} from "../../lib/reply-ledger";
 
 const TalkArgsSchema = z.object({
   target: z
@@ -18,17 +31,39 @@ const TalkArgsSchema = z.object({
     .string()
     .min(1)
     .optional()
-    .describe("Message to deliver to the session's agent"),
+    .describe(
+      "Message to deliver to the session's agent. For literal text use '--- <message>' or stdin: the shell still expands $VAR, backticks and ! in unquoted words.",
+    ),
   reply: z
     .boolean()
     .optional()
-    .default(true)
     .describe(
-      "Append a reply instruction (default: on) — e.g. \"When you're done, report back with use-code-cli talk <sender>\". Pass --no-reply to send the message as written.",
+      "Append a reply instruction — e.g. \"When you're done, report back with use-code-cli talk <sender> \\\"<your answer>\\\" --no-reply\". On by default, but off when this session just received an automatic reply. --reply forces it on, --no-reply forces it off.",
     ),
+  // Quoted, kebab-case key: the CLI normalises camelCase fields to `--kebab-case`
+  // flags, so a camelCase key here would never receive the flag's value.
+  "in-reply-to": z
+    .string()
+    .optional()
+    .describe(
+      "msg_id of the message this answers — recorded so the same session cannot answer it twice",
+    ),
+  force: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe("Send even when this session already answered --in-reply-to"),
 });
 
 type TalkArgs = z.infer<typeof TalkArgsSchema>;
+
+type ReplyHint =
+  | "appended"
+  | "already-present"
+  | "auto-reply"
+  | "auto-disabled"
+  | "disabled"
+  | "skipped-no-sender";
 
 function label(s: LiveSession): string {
   return s.name ?? s.sessionId;
@@ -56,6 +91,7 @@ function autoTargets(sessions: LiveSession[]): LiveSession[] {
 async function talk(args: TalkArgs) {
   const sessions = await liveSessions();
   let { target, message } = args;
+  const inReplyTo = args["in-reply-to"];
 
   // `talk "hello"` parses as a lone target. When it names no session it is the
   // message, and the target is picked automatically; when it does name one the
@@ -114,55 +150,131 @@ async function talk(args: TalkArgs) {
     }
   }
 
-  let senderName: string | undefined;
-  let replyHint: "appended" | "already-present" | "disabled" | "skipped-no-sender" =
-    "disabled";
-  if (args.reply !== false) {
-    const sender = await currentSession(sessions);
-    if (!sender) {
-      replyHint = "skipped-no-sender";
-    } else {
-      senderName = label(sender);
-      replyHint = hasReplyInstruction(message) ? "already-present" : "appended";
+  // One inbound message, one answer: a retry or a second relay must not send
+  // the same reply again, which is how chains start looping.
+  if (inReplyTo && !args.force) {
+    const previous = await findReply(inReplyTo, session.sessionId);
+    if (previous) {
+      return {
+        success: false,
+        message: `Already replied to msg_id=${inReplyTo} for ${label(session)} at ${new Date(previous.at).toISOString()} (msg_id=${previous.msgId}). Pass --force to send again.`,
+      };
     }
   }
+
+  const sender = await currentSession(sessions);
+  const senderName = sender ? label(sender) : undefined;
+
+  // Resolve the effective default. An explicit flag wins. Otherwise a session
+  // that just received an automatic reply stays conservative: its answer goes
+  // out without an instruction, so loop safety does not depend on the agent
+  // reading the prose in the inbound message.
+  let replyHint: ReplyHint;
+  if (args.reply === false) {
+    replyHint = "disabled";
+  } else if (args.reply !== true && sender && (await hasPendingInbound(sender.sessionId))) {
+    replyHint = "auto-disabled";
+  } else if (!senderName) {
+    replyHint = "skipped-no-sender";
+  } else if (hasReplyInstruction(message)) {
+    replyHint = "already-present";
+  } else if (isAutoReply(message)) {
+    replyHint = "auto-reply";
+  } else {
+    replyHint = "appended";
+  }
+
+  const msgId = randomUUID();
   const body =
     replyHint === "appended"
-      ? appendReplyInstruction(message, senderName)
+      ? appendReplyInstruction(message, senderName, { msgId, inReplyTo })
       : message;
 
   try {
-    const msgId = await deliver(session, body);
-    const note =
-      replyHint === "skipped-no-sender"
-        ? "\nNote: could not determine the sender session — reply instruction skipped."
-        : "";
-    return {
-      success: true,
-      message: `Sent to ${label(session)} (pid ${session.pid}) msg_id=${msgId}${note}`,
-      data: {
-        pid: session.pid,
-        sessionId: session.sessionId,
-        msgId,
-        sender: senderName ?? null,
-        replyHint,
-      },
-    };
+    await deliver(session, body, msgId);
   } catch (err) {
     return { success: false, message: (err as Error).message };
   }
+
+  const notes: string[] = [];
+  if (replyHint === "skipped-no-sender") {
+    notes.push("could not determine the sender session — reply instruction skipped.");
+  }
+  if (replyHint === "auto-reply") {
+    notes.push("message looks like an automatic reply — no reply instruction appended.");
+  }
+  if (replyHint === "auto-disabled") {
+    notes.push(
+      "this session recently received an automatic reply — reply instruction suppressed by default. Pass --reply to force it.",
+    );
+  }
+
+  if (inReplyTo) {
+    try {
+      await recordReply({
+        inReplyTo,
+        targetSessionId: session.sessionId,
+        msgId,
+        at: Date.now(),
+      });
+    } catch (err) {
+      notes.push(
+        `LEDGER NOT UPDATED (${(err as Error).message}): a duplicate answer to msg_id=${inReplyTo} will not be blocked.`,
+      );
+    }
+  }
+
+  // The target now holds a message with a loop marker; its next reply should be
+  // conservative. The sender answered, so its own mark can be cleared.
+  if (parseReplyMeta(body)) {
+    try {
+      await markInbound(session.sessionId);
+    } catch (err) {
+      notes.push(
+        `LOOP SAFETY DEGRADED (${(err as Error).message}): ${label(session)} was not marked as holding an automatic reply.`,
+      );
+    }
+  }
+  if (sender) {
+    try {
+      await clearInbound(sender.sessionId);
+    } catch (err) {
+      notes.push(
+        `LOOP SAFETY DEGRADED (${(err as Error).message}): this session's inbound mark was not cleared.`,
+      );
+    }
+  }
+
+  const note = notes.map((n) => `\nNote: ${n}`).join("");
+
+  return {
+    success: true,
+    message: `Sent to ${label(session)} (pid ${session.pid}) msg_id=${msgId}${note}`,
+    data: {
+      pid: session.pid,
+      sessionId: session.sessionId,
+      msgId,
+      sender: senderName ?? null,
+      inReplyTo: inReplyTo ?? null,
+      replyHint,
+    },
+  };
 }
 
 export const talkCommand: CLICommand = {
   name: "talk",
   description: "Talk to an active Claude Code session (auto-picks the only one)",
   inputSchema: TalkArgsSchema,
-  usage: ['use-code-cli talk [target] "message" [--no-reply]'],
+  usage: [
+    'use-code-cli talk [target] "message" [--no-reply] [--in-reply-to <msg_id>]',
+    'use-code-cli talk [target] [flags] --- message text (literal; stdin if empty)',
+  ],
   positionalKeys: ["target", "message"],
   execute: talk,
   examples: [
     'use-code-cli talk "run the tests and report"',
-    'use-code-cli talk use-stock-3a "run the tests and report"',
-    'use-code-cli talk use-stock-3a "FYI only" --no-reply',
+    'use-code-cli talk use-stock-3a --no-reply --- exactly this text, --no-reply and all',
+    'use-code-cli talk use-stock-3a --- < message.txt',
+    'use-code-cli talk use-stock-3a "done" --in-reply-to 1f0c… --no-reply',
   ],
 };
