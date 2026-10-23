@@ -66,6 +66,23 @@ export async function liveSessions(): Promise<LiveSession[]> {
   return out;
 }
 
+/**
+ * The live session that launched this CLI — the nearest ancestor pid that is
+ * registered as a session. Undefined when the caller is not a Claude session
+ * (a plain shell, CI, or a test harness without one).
+ */
+export async function currentSession(
+  sessions?: LiveSession[],
+): Promise<LiveSession | undefined> {
+  const ancestors = ancestorPids();
+  const list = sessions ?? (await liveSessions());
+  for (const pid of ancestors) {
+    const match = list.find((s) => s.pid === pid);
+    if (match) return match;
+  }
+  return undefined;
+}
+
 /** The peer token lives in ~/.claude/sessions/<pid>.<hash>.key */
 async function peerToken(pid: number): Promise<string | undefined> {
   const files = (await readdir(SESSIONS_DIR)).filter(

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { appendReplyInstruction, hasReplyInstruction } from "../../../lib/reply";
 
 const CLI = join(import.meta.dir, "../../../runner/cli.ts");
 
@@ -173,4 +174,75 @@ describe("talk", () => {
     expect(res.received()).not.toContain("</cross-session-message");
   });
 
+  it("appends a reply instruction naming the caller session by default", async () => {
+    const h = setup();
+    // The test runner is the CLI's parent, so this session is the sender.
+    h.addSession("caller", { pid: process.pid });
+    h.addSession("worker");
+
+    const res = await h.run("talk", "worker", "run the tests");
+
+    expect(res.code).toBe(0);
+    expect(res.received()).toContain("run the tests");
+    expect(res.received()).toContain("When you're done, report back with use-code-cli talk caller");
+  });
+
+  it("sends the message untouched with --no-reply", async () => {
+    const h = setup();
+    h.addSession("caller", { pid: process.pid });
+    h.addSession("worker");
+
+    const res = await h.run("talk", "worker", "FYI only", "--no-reply");
+
+    expect(res.code).toBe(0);
+    expect(res.received()).toContain("FYI only");
+    expect(res.received()).not.toContain("report back with");
+  });
+
+  it("skips the reply instruction and says so when the sender is unknown", async () => {
+    const h = setup();
+    h.addSession("worker");
+
+    const res = await h.run("talk", "worker", "ping");
+
+    expect(res.code).toBe(0);
+    expect(res.received()).toContain("ping");
+    expect(res.received()).not.toContain("report back with");
+    expect(res.out).toContain("could not determine the sender session");
+  });
+
+  it("does not append a second reply instruction", async () => {
+    const h = setup();
+    h.addSession("caller", { pid: process.pid });
+    h.addSession("worker");
+
+    const res = await h.run(
+      "talk",
+      "worker",
+      "run the tests. When you're done, report back with use-code-cli talk someone",
+    );
+
+    expect(res.code).toBe(0);
+    expect(res.received().split("report back with").length - 1).toBe(1);
+    expect(res.received()).toContain("use-code-cli talk someone");
+    expect(res.received()).not.toContain("use-code-cli talk caller");
+  });
+});
+
+describe("reply instruction helpers", () => {
+  it("appends the instruction naming the sender", () => {
+    expect(appendReplyInstruction("ping", "caller")).toBe(
+      "ping\n\nWhen you're done, report back with use-code-cli talk caller",
+    );
+  });
+
+  it("leaves the message alone when the sender is unknown", () => {
+    expect(appendReplyInstruction("ping", undefined)).toBe("ping");
+  });
+
+  it("does not duplicate an instruction the message already carries", () => {
+    const message = "done. use-code-cli talk someone";
+    expect(hasReplyInstruction(message)).toBe(true);
+    expect(appendReplyInstruction(message, "caller")).toBe(message);
+  });
 });

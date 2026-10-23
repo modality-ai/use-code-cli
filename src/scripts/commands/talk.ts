@@ -1,6 +1,13 @@
 import { z } from "zod";
 import type { CLICommand } from "modality-cli-kit";
-import { ancestorPids, deliver, liveSessions, type LiveSession } from "../../lib/peer";
+import {
+  ancestorPids,
+  currentSession,
+  deliver,
+  liveSessions,
+  type LiveSession,
+} from "../../lib/peer";
+import { appendReplyInstruction, hasReplyInstruction } from "../../lib/reply";
 
 const TalkArgsSchema = z.object({
   target: z
@@ -12,6 +19,13 @@ const TalkArgsSchema = z.object({
     .min(1)
     .optional()
     .describe("Message to deliver to the session's agent"),
+  reply: z
+    .boolean()
+    .optional()
+    .default(true)
+    .describe(
+      "Append a reply instruction (default: on) — e.g. \"When you're done, report back with use-code-cli talk <sender>\". Pass --no-reply to send the message as written.",
+    ),
 });
 
 type TalkArgs = z.infer<typeof TalkArgsSchema>;
@@ -100,12 +114,39 @@ async function talk(args: TalkArgs) {
     }
   }
 
+  let senderName: string | undefined;
+  let replyHint: "appended" | "already-present" | "disabled" | "skipped-no-sender" =
+    "disabled";
+  if (args.reply !== false) {
+    const sender = await currentSession(sessions);
+    if (!sender) {
+      replyHint = "skipped-no-sender";
+    } else {
+      senderName = label(sender);
+      replyHint = hasReplyInstruction(message) ? "already-present" : "appended";
+    }
+  }
+  const body =
+    replyHint === "appended"
+      ? appendReplyInstruction(message, senderName)
+      : message;
+
   try {
-    const msgId = await deliver(session, message);
+    const msgId = await deliver(session, body);
+    const note =
+      replyHint === "skipped-no-sender"
+        ? "\nNote: could not determine the sender session — reply instruction skipped."
+        : "";
     return {
       success: true,
-      message: `Sent to ${label(session)} (pid ${session.pid}) msg_id=${msgId}`,
-      data: { pid: session.pid, sessionId: session.sessionId, msgId },
+      message: `Sent to ${label(session)} (pid ${session.pid}) msg_id=${msgId}${note}`,
+      data: {
+        pid: session.pid,
+        sessionId: session.sessionId,
+        msgId,
+        sender: senderName ?? null,
+        replyHint,
+      },
     };
   } catch (err) {
     return { success: false, message: (err as Error).message };
@@ -116,11 +157,12 @@ export const talkCommand: CLICommand = {
   name: "talk",
   description: "Talk to an active Claude Code session (auto-picks the only one)",
   inputSchema: TalkArgsSchema,
-  usage: ['use-code-cli talk [target] "message"'],
+  usage: ['use-code-cli talk [target] "message" [--no-reply]'],
   positionalKeys: ["target", "message"],
   execute: talk,
   examples: [
     'use-code-cli talk "run the tests and report"',
     'use-code-cli talk use-stock-3a "run the tests and report"',
+    'use-code-cli talk use-stock-3a "FYI only" --no-reply',
   ],
 };
