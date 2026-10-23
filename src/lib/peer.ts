@@ -105,9 +105,14 @@ export async function deliver(s: LiveSession, message: string): Promise<string> 
   if (!token) throw new Error(`No peer token found for pid ${s.pid}.`);
 
   const msgId = randomUUID();
-  const body = message.replace(/<\/?cross-session-message[^>]*>/g, "");
-  const content = `<cross-session-message from-name="use-code-cli">\n${body}\n</cross-session-message>`;
-  const msg = { msgV: 1, msg_id: msgId, type: "user", message: { role: "user", content }, priority: "next" };
+  // Claude Code wraps a cross-session message in its own
+  // <cross-session-message from-name=... from-mode=...> envelope on arrival,
+  // taken from the sender's socket. Wrapping again here would nest a second,
+  // hardcoded name inside the real one — receivers then attribute the message
+  // to this CLI instead of to the session that actually sent it. Send plain
+  // text, stripping any envelope the caller included.
+  const body = message.replace(/<\/?cross-session-message[^>]*>/g, "").trim();
+  const msg = { msgV: 1, msg_id: msgId, type: "user", message: { role: "user", content: body }, priority: "next" };
   const payload = JSON.stringify({ type: "auth", token }) + "\n" + JSON.stringify(msg) + "\n";
   await writeLine(s.messagingSocketPath, payload);
   return msgId;

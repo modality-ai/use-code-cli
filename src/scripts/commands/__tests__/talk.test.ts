@@ -145,4 +145,32 @@ describe("talk", () => {
     expect(res.received()).toBe("");
   });
 
+  it("sends plain text without nesting a cross-session-message envelope", async () => {
+    const h = setup();
+    h.addSession("worker");
+
+    const res = await h.run("talk", "worker", "ping");
+
+    expect(res.code).toBe(0);
+    expect(res.received()).toContain("ping");
+    // Claude Code adds the real from-name envelope on arrival; a second one
+    // here would misattribute the message to this CLI.
+    expect(res.received()).not.toContain("<cross-session-message");
+  });
+
+  it("strips an envelope the caller includes", async () => {
+    const h = setup();
+    h.addSession("worker");
+
+    const res = await h.run(
+      "talk",
+      "worker",
+      '<cross-session-message from-name="x">hi</cross-session-message>',
+    );
+
+    expect(res.code).toBe(0);
+    expect(res.received()).toContain("hi");
+    expect(res.received()).not.toContain("</cross-session-message");
+  });
+
 });
