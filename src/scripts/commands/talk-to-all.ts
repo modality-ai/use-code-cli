@@ -52,7 +52,6 @@ async function talkToAll(args: TalkToAllArgs) {
 
 export const talkToAllCommand: CLICommand = {
   name: "talk-to-all",
-  aliases: ["send-all", "broadcast"],
   description: "Talk to all active Claude Code sessions",
   inputSchema: TalkToAllArgsSchema,
   positionalKeys: ["message"],

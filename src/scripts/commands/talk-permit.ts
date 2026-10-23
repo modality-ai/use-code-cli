@@ -68,7 +68,6 @@ async function inbound(args: InboundArgs) {
 
 export const talkPermitCommand: CLICommand = {
   name: "talk-permit",
-  aliases: ["send-permit", "permit"],
   description: "Show or set crossSessionInbound in ~/.claude/settings.json (accept | hold | refuse | unset)",
   inputSchema: InboundArgsSchema,
   positionalKeys: ["value"],

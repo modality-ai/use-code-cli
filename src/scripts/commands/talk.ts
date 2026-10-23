@@ -114,7 +114,6 @@ async function talk(args: TalkArgs) {
 
 export const talkCommand: CLICommand = {
   name: "talk",
-  aliases: ["say", "send", "msg"],
   description: "Talk to an active Claude Code session (auto-picks the only one)",
   inputSchema: TalkArgsSchema,
   usage: ['use-code-cli talk [target] "message"'],

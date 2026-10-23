@@ -145,16 +145,4 @@ describe("talk", () => {
     expect(res.received()).toBe("");
   });
 
-  it("keeps the old say and send names as aliases", async () => {
-    const h = setup();
-    h.addSession("worker");
-
-    const said = await h.run("say", "from say");
-    const sent = await h.run("send", "from send");
-
-    expect(said.code).toBe(0);
-    expect(sent.code).toBe(0);
-    expect(said.received()).toContain("from say");
-    expect(sent.received()).toContain("from send");
-  });
 });
