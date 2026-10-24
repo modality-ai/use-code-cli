@@ -46,7 +46,7 @@ function setup() {
    */
   function addSession(
     name: string,
-    { pid, socket = socketPath }: { pid?: number; socket?: string } = {},
+    { pid, socket = socketPath, status }: { pid?: number; socket?: string; status?: string } = {},
   ): void {
     if (pid === undefined) {
       const proc = Bun.spawn(["sleep", "30"]);
@@ -61,6 +61,7 @@ function setup() {
         name,
         cwd: home,
         messagingSocketPath: socket,
+        ...(status === undefined ? {} : { status }),
       }),
     );
     writeFileSync(
@@ -478,5 +479,57 @@ describe("talk — --- message separator", () => {
     expect(res.code).toBe(1);
     expect(res.err).toContain("Message required after ---");
     expect(res.received()).toBe("");
+  });
+});
+
+describe("talk-to-all — filters", () => {
+  it("--filter-name sends only to matching sessions", async () => {
+    const h = setup();
+    h.addSession("alpha");
+    h.addSession("beta", { socket: join(h.home, "nowhere") });
+
+    const res = await h.run("talk-to-all", "ping", "--filter-name", "alph");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toContain("Sent to 1/1");
+    expect(res.received()).toContain("ping");
+  });
+
+  it("--filter-status sends only to sessions in that status", async () => {
+    const h = setup();
+    h.addSession("idle-one", { status: "idle" });
+    h.addSession("busy-one", { status: "busy", socket: join(h.home, "nowhere") });
+
+    const res = await h.run("talk-to-all", "ping", "--filter-status", "idle");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toContain("Sent to 1/1");
+    expect(res.received()).toContain("ping");
+  });
+
+  it("reports when no session matches the filters", async () => {
+    const h = setup();
+    h.addSession("busy-one", { status: "busy" });
+
+    const res = await h.run("talk-to-all", "ping", "--filter-status", "idle");
+
+    expect(res.code).toBe(1);
+    expect(res.err).toContain("No active sessions matching --filter-status=idle");
+    expect(res.received()).toBe("");
+  });
+});
+
+describe("talk-to-all — comma-separated filters", () => {
+  it("--filter-name sends to every comma-separated match", async () => {
+    const h = setup();
+    h.addSession("alpha");
+    h.addSession("beta");
+    h.addSession("gamma", { socket: join(h.home, "nowhere") });
+
+    const res = await h.run("talk-to-all", "ping", "--filter-name", "alph, bet");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toContain("Sent to 2/2");
+    expect(res.received()).toContain("ping");
   });
 });

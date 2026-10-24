@@ -11,6 +11,8 @@ export interface LiveSession {
   pid: number;
   sessionId: string;
   name?: string;
+  /** "busy" | "idle" while the session is running. */
+  status?: string;
   cwd: string;
   messagingSocketPath?: string;
 }

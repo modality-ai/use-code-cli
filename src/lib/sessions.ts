@@ -1,5 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { createReadStream } from "node:fs";
+import { createInterface } from "node:readline";
 import { open, readdir, readFile, stat } from "node:fs/promises";
 
 const SESSIONS_DIR = join(homedir(), ".claude", "sessions");
@@ -23,6 +25,52 @@ export interface SessionFile {
 
 export interface SessionInfo extends SessionFile {
   online: boolean;
+}
+
+/** What `--filter-name` / `--filter-status` narrow a session list to. */
+export interface SessionFilter {
+  filterName?: string;
+  filterStatus?: string;
+}
+
+/** The values `--filter-status` accepts. */
+export const SESSION_STATUSES = ["busy", "idle"] as const;
+
+/** Split a comma-separated flag value into trimmed, lowercase terms. */
+export function splitFilterTerms(value: string | undefined): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((term) => term.trim().toLowerCase())
+    .filter((term) => term !== "");
+}
+
+/**
+ * True when a session passes the name/status filters; an absent or empty filter
+ * passes. Both filters take a comma-separated list and match any of its terms.
+ */
+export function matchesSessionFilter(
+  s: { name?: string; status?: string },
+  filter: SessionFilter,
+): boolean {
+  const nameTerms = splitFilterTerms(filter.filterName);
+  if (nameTerms.length > 0) {
+    const name = (s.name ?? "").toLowerCase();
+    if (!nameTerms.some((term) => name.includes(term))) return false;
+  }
+
+  const statusTerms = splitFilterTerms(filter.filterStatus);
+  if (statusTerms.length > 0 && !statusTerms.includes((s.status ?? "").toLowerCase())) {
+    return false;
+  }
+  return true;
+}
+
+/** The active filters spelled out for an empty result, e.g. ` matching --filter-status=busy`. */
+export function describeSessionFilter(filter: SessionFilter): string {
+  const parts: string[] = [];
+  if (filter.filterName !== undefined) parts.push(`--filter-name=${filter.filterName}`);
+  if (filter.filterStatus !== undefined) parts.push(`--filter-status=${filter.filterStatus}`);
+  return parts.length > 0 ? ` matching ${parts.join(" ")}` : "";
 }
 
 /** The parts of a session's transcript worth surfacing in `session <target>`. */
@@ -230,4 +278,94 @@ export async function readTranscriptMeta(s: SessionInfo): Promise<TranscriptMeta
     branch: branch ? unescapeJsonString(branch) : undefined,
     lastPrompt: lastPrompt ? unescapeJsonString(lastPrompt) : undefined,
   };
+}
+
+/** Where a search term occurred in a transcript. */
+export interface TranscriptMatch {
+  /** Total occurrences across the whole transcript. */
+  matches: number;
+  /** 1-based line number of the first occurrence. */
+  line: number;
+  /** Readable context around the first occurrence, on one line. */
+  snippet: string;
+}
+
+const NO_MATCH: TranscriptMatch = { matches: 0, line: 0, snippet: "" };
+
+/** Non-overlapping occurrences of `needle` in `haystack`; both already lowercase. */
+function countOccurrences(haystack: string, needle: string): number {
+  let count = 0;
+  for (let at = haystack.indexOf(needle); at !== -1; at = haystack.indexOf(needle, at + needle.length)) {
+    count++;
+  }
+  return count;
+}
+
+/**
+ * The human-readable text of a transcript line. A hit can sit in any JSON field
+ * (tool input, prompt, reply), so unreadable lines fall back to their raw form.
+ */
+function readableLine(raw: string): string {
+  try {
+    const entry = JSON.parse(raw) as { message?: { content?: unknown }; lastPrompt?: unknown };
+    const content = entry.message?.content;
+    if (typeof content === "string") return content;
+    if (Array.isArray(content)) {
+      const texts = content
+        .map((block) =>
+          block && typeof block === "object" && typeof (block as { text?: unknown }).text === "string"
+            ? (block as { text: string }).text
+            : "",
+        )
+        .filter(Boolean);
+      if (texts.length > 0) return texts.join(" ");
+    }
+    if (typeof entry.lastPrompt === "string") return entry.lastPrompt;
+  } catch {
+    // Not JSON — the raw line is all there is.
+  }
+  return raw;
+}
+
+/** A one-line window of `text` around `index`, padded with ellipses. */
+function snippetAround(text: string, index: number, width = 100): string {
+  const start = Math.max(0, index - Math.floor(width / 2));
+  const end = Math.min(text.length, start + width);
+  const body = text.slice(start, end).trim();
+  return `${start > 0 ? "…" : ""}${body}${end < text.length ? "…" : ""}`;
+}
+
+/**
+ * Search one session's whole transcript for `term` (case-insensitive), streaming
+ * the file so a multi-megabyte transcript never lands in memory at once.
+ */
+export async function searchTranscript(s: SessionInfo, term: string): Promise<TranscriptMatch> {
+  const path = await transcriptPath(s);
+  if (!path) return NO_MATCH;
+
+  const needle = term.toLowerCase();
+  const lines = createInterface({
+    input: createReadStream(path, "utf8"),
+    crlfDelay: Infinity,
+  });
+
+  let matches = 0;
+  let first: { line: number; snippet: string } | undefined;
+  let lineNo = 0;
+
+  for await (const raw of lines) {
+    lineNo++;
+    const hits = countOccurrences(raw.toLowerCase(), needle);
+    if (hits === 0) continue;
+    matches += hits;
+    if (first) continue;
+
+    const readable = readableLine(raw).replace(/\s+/g, " ").trim();
+    const at = readable.toLowerCase().indexOf(needle);
+    const text = at >= 0 ? readable : raw.replace(/\s+/g, " ").trim();
+    const index = at >= 0 ? at : text.toLowerCase().indexOf(needle);
+    first = { line: lineNo, snippet: snippetAround(text, Math.max(0, index)) };
+  }
+
+  return first ? { matches, line: first.line, snippet: first.snippet } : NO_MATCH;
 }
