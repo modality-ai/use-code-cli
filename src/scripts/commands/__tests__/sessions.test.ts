@@ -249,7 +249,7 @@ describe("sessions — --recent", () => {
     expect(res.out).toContain('last="fix the sidebar and rerun tests"');
   });
 
-  it("shows no summary without --recent", async () => {
+  it("shows each session's hero without --recent", async () => {
     const h = setup();
     const { sessionId, cwd } = h.addSession("use-design-05", "idle");
     h.addTranscript(cwd, sessionId, [deployLine("WANDA")]);
@@ -258,7 +258,20 @@ describe("sessions — --recent", () => {
 
     expect(res.code).toBe(0);
     expect(res.out).toContain("use-design-05");
-    expect(res.out).not.toContain("hero=");
+    expect(res.out).toContain("hero=WANDA");
+    expect(res.out).not.toContain("branch=");
+    expect(res.out).not.toContain('last="');
+  });
+
+  it('renders "-" when a session has no hero', async () => {
+    const h = setup();
+    h.addSession("alpha", "busy");
+
+    const res = await h.run("sessions");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toContain("alpha");
+    expect(res.out).toContain("hero=-");
   });
 
   it("rejects a non-positive --recent value", async () => {

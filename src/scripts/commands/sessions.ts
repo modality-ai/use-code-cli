@@ -10,6 +10,7 @@ import {
   splitFilterTerms,
   type SessionFilter,
   type SessionInfo,
+  type TranscriptMeta,
 } from "../../lib/sessions";
 
 // Quoted, kebab-case keys: the CLI normalises camelCase fields to `--kebab-case`
@@ -78,18 +79,17 @@ function oneLine(text: string, max = 80): string {
   return single.length > max ? `${single.slice(0, max - 1)}…` : single;
 }
 
-/** The branch / hero / last-prompt line shown under a `--recent` row. */
-function summaryLine(meta: { hero?: string; branch?: string; lastPrompt?: string }): string {
+/** The branch / last-prompt line shown under a `--recent` row (hero is on the head line). */
+function summaryLine(meta: { branch?: string; lastPrompt?: string }): string {
   return [
     meta.branch ? `branch=${meta.branch}` : "",
-    meta.hero ? `hero=${meta.hero}` : "",
     meta.lastPrompt ? `last="${oneLine(meta.lastPrompt)}"` : "",
   ]
     .filter(Boolean)
     .join("  ");
 }
 
-function baseRow(s: SessionInfo): Row {
+function baseRow(s: SessionInfo, meta: TranscriptMeta = {}): Row {
   return {
     state: s.online ? "active" : "offline",
     pid: s.pid,
@@ -99,6 +99,7 @@ function baseRow(s: SessionInfo): Row {
     sessionId: s.sessionId,
     version: s.version ?? "",
     updatedAt: s.updatedAt ? new Date(s.updatedAt).toISOString() : "",
+    hero: meta.hero ?? null,
   };
 }
 
@@ -108,11 +109,22 @@ async function searchRows(list: SessionInfo[], term: string): Promise<Row[]> {
   for (let i = 0; i < list.length; i += SEARCH_CONCURRENCY) {
     const batch = list.slice(i, i + SEARCH_CONCURRENCY);
     const found = await Promise.all(
-      batch.map(async (s) => ({ s, match: await searchTranscript(s, term) })),
+      batch.map(async (s) => {
+        const [match, meta] = await Promise.all([
+          searchTranscript(s, term),
+          readTranscriptMeta(s),
+        ]);
+        return { s, meta, match };
+      }),
     );
-    for (const { s, match } of found) {
+    for (const { s, meta, match } of found) {
       if (match.matches === 0) continue;
-      rows.push({ ...baseRow(s), matches: match.matches, line: match.line, snippet: match.snippet });
+      rows.push({
+        ...baseRow(s, meta),
+        matches: match.matches,
+        line: match.line,
+        snippet: match.snippet,
+      });
     }
   }
   return rows;
@@ -143,25 +155,25 @@ async function sessions(args: SessionsArgs) {
       list.map(async (s) => {
         const meta = await readTranscriptMeta(s);
         return {
-          ...baseRow(s),
+          ...baseRow(s, meta),
           branch: meta.branch ?? null,
-          hero: meta.hero ?? null,
           lastPrompt: meta.lastPrompt ?? null,
         };
       }),
     );
   } else {
-    rows = list.map(baseRow);
+    rows = await Promise.all(
+      list.map(async (s) => baseRow(s, await readTranscriptMeta(s))),
+    );
   }
 
   const filters = describeSessionFilter(filter);
   const lines = rows.flatMap((r) => {
-    const head = `[${r.state}] ${r.name || r.sessionId}  pid=${r.pid}  ${r.status}  ${r.cwd}`;
+    const head = `[${r.state}] ${r.name || r.sessionId}  pid=${r.pid}  ${r.status}  hero=${r.hero ?? "-"}  ${r.cwd}`;
     const detail =
       args.search !== undefined
         ? `match: ${r.matches} hit${r.matches === 1 ? "" : "s"} · line ${r.line} · "${r.snippet}"`
         : summaryLine({
-            hero: r.hero ?? undefined,
             branch: r.branch ?? undefined,
             lastPrompt: r.lastPrompt ?? undefined,
           });
