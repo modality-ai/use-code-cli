@@ -5,7 +5,7 @@ import { createInterface } from "node:readline";
 import { open, readdir, readFile, stat } from "node:fs/promises";
 
 const SESSIONS_DIR = join(homedir(), ".claude", "sessions");
-const PROJECTS_DIR = join(homedir(), ".claude", "projects");
+export const PROJECTS_DIR = join(homedir(), ".claude", "projects");
 
 /** One live Claude Code session, as written to ~/.claude/sessions/<pid>.json. */
 export interface SessionFile {
@@ -93,6 +93,30 @@ export function isAlive(pid: number): boolean {
   }
 }
 
+/** How much of a transcript's head to read when only its cwd is needed. */
+const CWD_SCAN_BYTES = 65536;
+
+/**
+ * The workspace path recorded near the top of a transcript. Returns undefined
+ * when the file is unreadable or records no cwd.
+ */
+export async function readTranscriptCwd(path: string): Promise<string | undefined> {
+  try {
+    const fh = await open(path, "r");
+    try {
+      const buf = Buffer.alloc(CWD_SCAN_BYTES);
+      const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
+      const head = buf.toString("utf8", 0, bytesRead);
+      const cwd = /"cwd":"((?:[^"\\]|\\.)*)"/.exec(head)?.[1];
+      return cwd ? unescapeJsonString(cwd) : undefined;
+    } finally {
+      await fh.close();
+    }
+  } catch {
+    return undefined;
+  }
+}
+
 async function readSessionsLive(): Promise<SessionInfo[]> {
   let files: string[];
   try {
@@ -142,16 +166,11 @@ async function readOfflineSessions(known: Set<string>): Promise<SessionInfo[]> {
       const path = join(PROJECTS_DIR, project, file);
       try {
         const st = await stat(path);
-        const fh = await open(path, "r");
-        const buf = Buffer.alloc(65536);
-        const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
-        await fh.close();
-        const head = buf.toString("utf8", 0, bytesRead);
-        const cwd = /"cwd":"((?:[^"\\]|\\.)*)"/.exec(head)?.[1];
+        const cwd = await readTranscriptCwd(path);
         out.push({
           pid: 0,
           sessionId,
-          cwd: cwd ? JSON.parse(`"${cwd}"`) : project,
+          cwd: cwd ?? project,
           startedAt: st.birthtimeMs,
           updatedAt: st.mtimeMs,
           status: "offline",
