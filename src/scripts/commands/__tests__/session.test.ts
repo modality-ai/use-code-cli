@@ -116,6 +116,25 @@ describe("session", () => {
     expect(res.out).toContain('!use-code-cli talk use-design-05 "your message"');
   });
 
+  it("shows the raw transcript file path", async () => {
+    const h = setup();
+    const cwd = "/Volumes/GoldenSnake/git/use-design";
+    const sessionId = h.addSession("use-design-05", cwd);
+    h.addTranscript(cwd, sessionId, [deployLine("WANDA")]);
+    const expected = join(
+      h.home,
+      ".claude",
+      "projects",
+      cwd.replace(/[^a-zA-Z0-9]/g, "-"),
+      `${sessionId}.jsonl`,
+    );
+
+    const res = await h.run("session", "use-design-05");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toContain(expected);
+  });
+
   it("matches a unique name prefix", async () => {
     const h = setup();
     h.addSession("use-design-05");

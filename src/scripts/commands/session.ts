@@ -5,6 +5,7 @@ import {
   readSessions,
   readTranscriptMeta,
   sessionLabel as label,
+  transcriptPath,
   type SessionInfo,
 } from "../../lib/sessions";
 
@@ -92,6 +93,7 @@ async function session(args: SessionArgs) {
     return { success: false, message: `No session matches "${args.target}".` };
   }
   const meta = await readTranscriptMeta(s);
+  const rawFile = await transcriptPath(s);
   const name = label(s);
 
   const state = s.online ? `${s.status ?? "unknown"} · active` : "offline";
@@ -104,6 +106,7 @@ async function session(args: SessionArgs) {
     row("last prompt", meta.lastPrompt ? `"${oneLine(meta.lastPrompt, 100)}"` : undefined),
     row("pid", String(s.pid)),
     row("sessionId", s.sessionId),
+    row("transcript", rawFile),
     row("version", s.version),
     row("started", s.startedAt ? `${formatTime(s.startedAt)} (${ago(s.startedAt)})` : undefined),
     row("updated", s.updatedAt ? `${formatTime(s.updatedAt)} (${ago(s.updatedAt)})` : undefined),
@@ -122,6 +125,7 @@ async function session(args: SessionArgs) {
       status: s.status ?? null,
       pid: s.pid,
       sessionId: s.sessionId,
+      transcriptPath: rawFile ?? null,
       cwd: s.cwd,
       branch: meta.branch ?? null,
       hero: meta.hero ?? null,

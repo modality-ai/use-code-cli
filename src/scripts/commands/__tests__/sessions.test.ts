@@ -262,6 +262,29 @@ describe("sessions — --recent", () => {
     expect(res.out).toContain("branch=main");
   });
 
+  it("shows the latest hero even when its Deploy is outside the head and tail windows", async () => {
+    const h = setup();
+    const { sessionId, cwd } = h.addSession("use-design-05", "idle");
+    // Each filler line is ~1.5 MiB, so the SARAH redeploy lands in the middle of
+    // a file far larger than the head + tail windows combined.
+    const filler = {
+      type: "user",
+      message: { role: "user", content: [{ type: "text", text: "x".repeat(1536 * 1024) }] },
+    };
+    h.addTranscript(cwd, sessionId, [
+      deployLine("FRIDAY"),
+      filler,
+      deployLine("SARAH"),
+      filler,
+    ]);
+
+    const res = await h.run("sessions");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toContain("hero=SARAH");
+    expect(res.out).not.toContain("hero=FRIDAY");
+  });
+
   it('renders "-" when a session has no hero', async () => {
     const h = setup();
     h.addSession("alpha", "busy");

@@ -218,7 +218,7 @@ async function exists(path: string): Promise<boolean> {
  * Locate a session's transcript. The direct path is tried first; the directory
  * scan is the fallback so a changed encoding never hides the transcript.
  */
-async function transcriptPath(s: SessionInfo): Promise<string | undefined> {
+export async function transcriptPath(s: SessionInfo): Promise<string | undefined> {
   const direct = join(PROJECTS_DIR, encodeProjectDir(s.cwd), `${s.sessionId}.jsonl`);
   if (await exists(direct)) return direct;
 
@@ -247,17 +247,42 @@ async function readChunk(path: string, start: number, length: number): Promise<s
 }
 
 /**
- * How much of the transcript to scan. The hero is deployed at the start of a
- * session and git branch / last prompt are written throughout, so the head and
- * the tail together cover both ends without reading a multi-megabyte transcript
- * in full.
+ * How much of the transcript to scan for git branch / last prompt. Both are
+ * written throughout a session, so the head and the tail together cover them
+ * without reading a multi-megabyte transcript in full.
  */
 const SCAN_BYTES = 1024 * 1024;
+
+/**
+ * Longest span a Deploy match can cover. Consecutive hero chunks overlap by this
+ * much so a call straddling a chunk boundary is still seen whole.
+ */
+const HERO_OVERLAP_BYTES = 512;
+
+const DEPLOY_PATTERN =
+  /"name"\s*:\s*"mcp__Counter___Counter__Deploy"\s*,\s*"input"\s*:\s*\{\s*"callSign"\s*:\s*"([A-Za-z0-9_-]+)"/g;
 
 function lastMatch(re: RegExp, text: string): string | undefined {
   let found: string | undefined;
   for (const m of text.matchAll(re)) found = m[1];
   return found;
+}
+
+/**
+ * The hero can be redeployed at any point in a session, so the latest Deploy
+ * may sit far from both ends. Scan backwards from the end of the file and stop
+ * at the first chunk that holds one: that is the newest.
+ */
+async function findHero(path: string, size: number): Promise<string | undefined> {
+  let end = size;
+  while (end > 0) {
+    const start = Math.max(0, end - SCAN_BYTES);
+    const chunk = await readChunk(path, start, end - start + HERO_OVERLAP_BYTES);
+    const hero = lastMatch(DEPLOY_PATTERN, chunk);
+    if (hero) return hero;
+    end = start;
+  }
+  return undefined;
 }
 
 function unescapeJsonString(s: string): string {
@@ -288,10 +313,7 @@ export async function readTranscriptMeta(s: SessionInfo): Promise<TranscriptMeta
   const tail = tailStart > 0 ? await readChunk(path, tailStart, SCAN_BYTES) : "";
   const text = `${head}\n${tail}`;
 
-  const hero = lastMatch(
-    /"name"\s*:\s*"mcp__Counter___Counter__Deploy"\s*,\s*"input"\s*:\s*\{\s*"callSign"\s*:\s*"([A-Za-z0-9_-]+)"/g,
-    text,
-  );
+  const hero = await findHero(path, size);
   const branch = lastMatch(/"gitBranch"\s*:\s*"((?:[^"\\]|\\.)*)"/g, text);
   const lastPrompt = lastMatch(
     /"type"\s*:\s*"last-prompt"\s*,\s*"lastPrompt"\s*:\s*"((?:[^"\\]|\\.)*)"/g,
