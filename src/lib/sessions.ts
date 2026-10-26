@@ -79,7 +79,7 @@ export interface TranscriptMeta {
   hero?: string;
   /** Git branch the session's workspace was on. */
   branch?: string;
-  /** Last prompt the user typed into the session. */
+  /** Last prompt the session received: typed by the user, or sent by another session. */
   lastPrompt?: string;
 }
 
@@ -263,9 +263,51 @@ const DEPLOY_PATTERN =
   /"name"\s*:\s*"mcp__Counter___Counter__Deploy"\s*,\s*"input"\s*:\s*\{\s*"callSign"\s*:\s*"([A-Za-z0-9_-]+)"/g;
 
 function lastMatch(re: RegExp, text: string): string | undefined {
-  let found: string | undefined;
-  for (const m of text.matchAll(re)) found = m[1];
+  return lastMatchAt(re, text)?.value;
+}
+
+/** The last match of `re` in `text`: where it starts, plus its first capture. */
+function lastMatchAt(re: RegExp, text: string): { at: number; value: string } | undefined {
+  let found: { at: number; value: string } | undefined;
+  for (const m of text.matchAll(re)) found = { at: m.index, value: m[1] ?? "" };
   return found;
+}
+
+/** What the user typed, as Claude Code records it. */
+const LAST_PROMPT_PATTERN =
+  /"type"\s*:\s*"last-prompt"\s*,\s*"lastPrompt"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
+
+/**
+ * A message another Claude session delivered into this one. It arrives as a
+ * plain user message, so it counts as a prompt too. The capture starts after
+ * the boilerplate prefix, which is never shown.
+ */
+const PEER_PROMPT_PATTERN =
+  /"type"\s*:\s*"user"[^\n]*?"content"\s*:\s*"Another Claude session sent a message:\\n((?:[^"\\]|\\.)*)"/g;
+
+/** Claude Code's wrapper around a delivered peer message; its markup is not text. */
+const PEER_ENVELOPE_PATTERN = /<\/?cross-session-message[^>]*>/g;
+
+/** The entry a prompt the human typed or sent was recorded as. */
+const HUMAN_PROMPT_PATTERN = /"type"\s*:\s*"user"[^\n]*?"turnOrigin"\s*:\s*"human"/g;
+
+/**
+ * The newest prompt in `text`: the typed one, or a message another session sent
+ * in. Claude Code rewrites the `last-prompt` record every turn while keeping the
+ * old value, so the record's own position cannot tell whether a peer message
+ * came after the last typed prompt — the typed prompt's entry can. Transcripts
+ * old enough to lack that marker fall back to the record's position.
+ */
+function lastPromptIn(text: string): string | undefined {
+  const typed = lastMatchAt(LAST_PROMPT_PATTERN, text);
+  const peer = lastMatchAt(PEER_PROMPT_PATTERN, text);
+  if (!peer) return typed ? unescapeJsonString(typed.value) : undefined;
+
+  const typedAt = lastMatchAt(HUMAN_PROMPT_PATTERN, text)?.at ?? typed?.at ?? -1;
+  if (peer.at > typedAt) {
+    return unescapeJsonString(peer.value).replace(PEER_ENVELOPE_PATTERN, "").trim();
+  }
+  return typed ? unescapeJsonString(typed.value) : undefined;
 }
 
 /**
@@ -315,15 +357,12 @@ export async function readTranscriptMeta(s: SessionInfo): Promise<TranscriptMeta
 
   const hero = await findHero(path, size);
   const branch = lastMatch(/"gitBranch"\s*:\s*"((?:[^"\\]|\\.)*)"/g, text);
-  const lastPrompt = lastMatch(
-    /"type"\s*:\s*"last-prompt"\s*,\s*"lastPrompt"\s*:\s*"((?:[^"\\]|\\.)*)"/g,
-    text,
-  );
+  const lastPrompt = lastPromptIn(text);
 
   return {
     hero,
     branch: branch ? unescapeJsonString(branch) : undefined,
-    lastPrompt: lastPrompt ? unescapeJsonString(lastPrompt) : undefined,
+    lastPrompt,
   };
 }
 

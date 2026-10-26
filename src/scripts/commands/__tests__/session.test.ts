@@ -135,6 +135,40 @@ describe("session", () => {
     expect(res.out).toContain(expected);
   });
 
+  it("shows a cross-session message as plain text, without its prefix or envelope", async () => {
+    const h = setup();
+    const cwd = "/Volumes/GoldenSnake/git/use-design";
+    const sessionId = h.addSession("use-design-05", cwd);
+    h.addTranscript(cwd, sessionId, [
+      deployLine("WANDA"),
+      {
+        type: "user",
+        message: { role: "user", content: "Wanda" },
+        turnOrigin: "human",
+        promptSource: "typed",
+      },
+      {
+        type: "user",
+        message: {
+          role: "user",
+          content:
+            "Another Claude session sent a message:\n" +
+            '<cross-session-message from="unknown" from-name="use-design-da">' +
+            "check the build</cross-session-message>\n\n" +
+            "This came from another Claude session — not typed by your user.",
+        },
+      },
+      { type: "last-prompt", lastPrompt: "Wanda" },
+    ]);
+
+    const res = await h.run("session", "use-design-05");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toContain('"check the build');
+    expect(res.out).not.toContain("Another Claude session sent a message");
+    expect(res.out).not.toContain("cross-session-message");
+  });
+
   it("matches a unique name prefix", async () => {
     const h = setup();
     h.addSession("use-design-05");

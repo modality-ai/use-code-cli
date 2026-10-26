@@ -309,6 +309,104 @@ describe("sessions — --recent", () => {
   });
 });
 
+describe("sessions — last prompt", () => {
+  /** A prompt the human typed, as Claude Code records it. */
+  function typedLine(text: string) {
+    return {
+      type: "user",
+      message: { role: "user", content: text },
+      turnOrigin: "human",
+      promptSource: "typed",
+    };
+  }
+
+  /** A message from another Claude session, recorded as a plain user message. */
+  function peerLine(text: string) {
+    return {
+      type: "user",
+      message: {
+        role: "user",
+        content: `Another Claude session sent a message:\n${text}`,
+      },
+    };
+  }
+
+  it("counts a cross-session message sent after the typed prompt", async () => {
+    const h = setup();
+    const { sessionId, cwd } = h.addSession("use-design-05", "idle");
+    // Claude Code rewrites the last-prompt record with the old value at the end
+    // of every turn, so the record sits after the peer message and still says
+    // "typed earlier".
+    h.addTranscript(cwd, sessionId, [
+      typedLine("typed earlier"),
+      peerLine("please rerun the tests"),
+      { type: "last-prompt", lastPrompt: "typed earlier" },
+    ]);
+
+    const res = await h.run("sessions");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toContain('last="please rerun the tests"');
+    expect(res.out).not.toContain("Another Claude session sent a message");
+    expect(res.out).not.toContain("typed earlier");
+  });
+
+  it("strips Claude Code's cross-session envelope", async () => {
+    const h = setup();
+    const { sessionId, cwd } = h.addSession("use-design-05", "idle");
+    h.addTranscript(cwd, sessionId, [
+      typedLine("typed earlier"),
+      {
+        type: "user",
+        message: {
+          role: "user",
+          content:
+            "Another Claude session sent a message:\n" +
+            '<cross-session-message from="unknown" from-name="use-design-da">' +
+            "check the build</cross-session-message>",
+        },
+      },
+      { type: "last-prompt", lastPrompt: "typed earlier" },
+    ]);
+
+    const res = await h.run("sessions");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toContain('last="check the build"');
+    expect(res.out).not.toContain("cross-session-message");
+  });
+
+  it("keeps a typed prompt sent after the cross-session message", async () => {
+    const h = setup();
+    const { sessionId, cwd } = h.addSession("use-design-05", "idle");
+    h.addTranscript(cwd, sessionId, [
+      peerLine("from a peer"),
+      typedLine("typed later"),
+      { type: "last-prompt", lastPrompt: "typed later" },
+    ]);
+
+    const res = await h.run("sessions");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toContain('last="typed later"');
+    expect(res.out).not.toContain("from a peer");
+  });
+
+  it("falls back to the record order when the transcript has no turn marker", async () => {
+    const h = setup();
+    const { sessionId, cwd } = h.addSession("use-design-05", "idle");
+    h.addTranscript(cwd, sessionId, [
+      peerLine("from a peer"),
+      { type: "last-prompt", lastPrompt: "typed later" },
+    ]);
+
+    const res = await h.run("sessions");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toContain('last="typed later"');
+  });
+});
+
 describe("sessions — --search", () => {
   /** A user message line whose text a search can find. */
   function textLine(text: string) {
