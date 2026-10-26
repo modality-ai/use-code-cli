@@ -20,7 +20,7 @@ use-code-cli <command> [args]
 Deliver a message to another active Claude Code session.
 
 ```bash
-use-code-cli talk [target] "message" [--no-reply] [--in-reply-to <msg_id>]
+use-code-cli talk [target] "message" [--one-way] [--in-reply-to <msg_id>]
 ```
 
 `target` is a session name, pid, or sessionId; omit it when exactly one other
@@ -32,11 +32,11 @@ By default the message ends with a reply instruction naming the session that
 launched the CLI:
 
 ```
-When you're done, report back with use-code-cli talk <sender> "<your answer>" --no-reply
+When you're done, report back with use-code-cli talk <sender> "<your answer>" --one-way
 ```
 
 `<sender>` is the session that sent the request and `<your answer>` is the text
-to deliver. The `--no-reply` in that instruction is deliberate: the answer is
+to deliver. The `--one-way` in that instruction is deliberate: the answer is
 terminal, so the peer's reply carries no instruction of its own and two
 sessions cannot bounce messages back and forth forever. The sender name comes
 from the session running the command. If it cannot be determined, the
@@ -45,7 +45,7 @@ instruction is skipped and the command reports it.
 The instruction is on by default, but a session that recently *received* an
 automatic reply sends its next message without one, so loop safety does not
 depend on the agent obeying the prose. Pass `--reply` to force it back on, or
-`--no-reply` to force it off.
+`--one-way` to force it off.
 
 Every annotated message also carries an invisible marker with the reply hop and
 its own id:
@@ -56,7 +56,7 @@ its own id:
 
 A message that already carries the marker is an automatic reply and is never
 annotated again. A message that already contains a real reply instruction
-(`--no-reply` or `--in-reply-to`) is left untouched too, so the hint is never
+(`--one-way` or `--in-reply-to`) is left untouched too, so the hint is never
 appended twice. A bare mention of `use-code-cli talk` — for example a quoted
 log — does not count as an instruction.
 
@@ -104,5 +104,5 @@ An empty message — nothing after `---` and empty stdin, or a terminal on stdin
 
 #### Sending as written
 
-Pass `--no-reply` to send the message exactly as written.
+Pass `--one-way` to send the message exactly as written.
 

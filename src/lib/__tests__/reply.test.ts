@@ -12,7 +12,7 @@ import {
 describe("reply instruction", () => {
   it("appends a terminal instruction and a marker naming the sender", () => {
     expect(appendReplyInstruction("ping", "caller", { msgId: "msg-1" })).toBe(
-      "ping\n\nWhen you're done, report back with use-code-cli talk caller \"<your answer>\" --no-reply\n<!-- use-code-cli:auto-reply hop=1 id=msg-1 -->",
+      "ping\n\nWhen you're done, report back with use-code-cli talk caller \"<your answer>\" --one-way\n<!-- use-code-cli:auto-reply hop=1 id=msg-1 -->",
     );
   });
 
@@ -29,7 +29,7 @@ describe("reply instruction", () => {
   });
 
   it("does not duplicate an instruction the message already carries", () => {
-    const message = "done. use-code-cli talk someone --no-reply";
+    const message = "done. use-code-cli talk someone --one-way";
     expect(hasReplyInstruction(message)).toBe(true);
     expect(appendReplyInstruction(message, "caller")).toBe(message);
   });
@@ -62,7 +62,7 @@ describe("reply instruction", () => {
       { msgId: "new" },
     );
     expect(out).toBe(
-      "please run it\n\nWhen you're done, report back with use-code-cli talk caller \"<your answer>\" --no-reply\n<!-- use-code-cli:auto-reply hop=1 id=new -->",
+      "please run it\n\nWhen you're done, report back with use-code-cli talk caller \"<your answer>\" --one-way\n<!-- use-code-cli:auto-reply hop=1 id=new -->",
     );
   });
 });

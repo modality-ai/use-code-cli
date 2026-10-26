@@ -38,10 +38,14 @@ const TalkArgsSchema = z.object({
     .boolean()
     .optional()
     .describe(
-      "Append a reply instruction — e.g. \"When you're done, report back with use-code-cli talk <sender> \\\"<your answer>\\\" --no-reply\". On by default, but off when this session just received an automatic reply. --reply forces it on, --no-reply forces it off.",
+      "Append a reply instruction — e.g. \"When you're done, report back with use-code-cli talk <sender> \\\"<your answer>\\\" --one-way\". On by default, but off when this session just received an automatic reply. --reply forces it on.",
     ),
   // Quoted, kebab-case key: the CLI normalises camelCase fields to `--kebab-case`
   // flags, so a camelCase key here would never receive the flag's value.
+  "one-way": z
+    .boolean()
+    .optional()
+    .describe("Send the message exactly as written — no reply instruction appended."),
   "in-reply-to": z
     .string()
     .optional()
@@ -170,7 +174,7 @@ async function talk(args: TalkArgs) {
   // out without an instruction, so loop safety does not depend on the agent
   // reading the prose in the inbound message.
   let replyHint: ReplyHint;
-  if (args.reply === false) {
+  if (args["one-way"]) {
     replyHint = "disabled";
   } else if (args.reply !== true && sender && (await hasPendingInbound(sender.sessionId))) {
     replyHint = "auto-disabled";
@@ -266,15 +270,15 @@ export const talkCommand: CLICommand = {
   description: "Talk to an active Claude Code session (auto-picks the only one)",
   inputSchema: TalkArgsSchema,
   usage: [
-    'use-code-cli talk [target] "message" [--no-reply] [--in-reply-to <msg_id>]',
+    'use-code-cli talk [target] "message" [--one-way] [--in-reply-to <msg_id>]',
     'use-code-cli talk [target] [flags] --- message text (literal; stdin if empty)',
   ],
   positionalKeys: ["target", "message"],
   execute: talk,
   examples: [
     'use-code-cli talk "run the tests and report"',
-    'use-code-cli talk use-stock-3a --no-reply --- exactly this text, --no-reply and all',
+    'use-code-cli talk use-stock-3a --one-way --- exactly this text, --one-way and all',
     'use-code-cli talk use-stock-3a --- < message.txt',
-    'use-code-cli talk use-stock-3a "done" --in-reply-to 1f0c… --no-reply',
+    'use-code-cli talk use-stock-3a "done" --in-reply-to 1f0c… --one-way',
   ],
 };

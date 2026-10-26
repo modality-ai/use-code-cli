@@ -73,12 +73,12 @@ export function isAutoReply(message: string): boolean {
 /**
  * The sentence appended to an outgoing message by default.
  *
- * It carries `--no-reply` on purpose: the peer's answer is terminal, so the
+ * It carries `--one-way` on purpose: the peer's answer is terminal, so the
  * peer answering it produces no new instruction to answer. That single flag is
  * what keeps a two-session conversation from bouncing forever.
  */
 export function replyInstruction(senderName: string): string {
-  return `When you're done, report back with ${REPLY_COMMAND} ${senderName} "<your answer>" --no-reply`;
+  return `When you're done, report back with ${REPLY_COMMAND} ${senderName} "<your answer>" --one-way`;
 }
 
 /**
@@ -87,11 +87,11 @@ export function replyInstruction(senderName: string): string {
  *
  * The command alone is not enough: a message that merely quotes a log
  * mentioning `use-code-cli talk` still needs an instruction, otherwise the
- * peer never learns how to answer. Only an actual `--no-reply` or
+ * peer never learns how to answer. Only an actual `--one-way` or
  * `--in-reply-to` phrase marks a real instruction.
  */
 export function hasReplyInstruction(message: string): boolean {
-  return /use-code-cli\s+talk\b[^\n]*--(?:no-reply|in-reply-to)\b/.test(message);
+  return /use-code-cli\s+talk\b[^\n]*--(?:one-way|in-reply-to)\b/.test(message);
 }
 
 /** The marker line for an annotated message. */
@@ -103,7 +103,7 @@ export function replyMarker(hop: number, options: ReplyOptions = {}): string {
 }
 
 /**
- * Append the reply instruction unless `--no-reply` disabled it, the sender is
+ * Append the reply instruction unless `--one-way` disabled it, the sender is
  * unknown, the message already carries an instruction, or the message is
  * itself an automatic reply. Pure: safe to unit test.
  */

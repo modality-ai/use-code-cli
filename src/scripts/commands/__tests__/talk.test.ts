@@ -221,7 +221,7 @@ describe("talk", () => {
     expect(res.code).toBe(0);
     expect(res.received()).toContain("run the tests");
     expect(lastContent(res.received())).toContain(
-      "When you're done, report back with use-code-cli talk caller \"<your answer>\" --no-reply",
+      "When you're done, report back with use-code-cli talk caller \"<your answer>\" --one-way",
     );
   });
 
@@ -290,12 +290,12 @@ describe("talk", () => {
     expect(await waitFor(() => forced.received().includes("done again"))).toBe(true);
   });
 
-  it("sends the message untouched with --no-reply", async () => {
+  it("sends the message untouched with --one-way", async () => {
     const h = setup();
     h.addSession("caller", { pid: process.pid });
     h.addSession("worker");
 
-    const res = await h.run("talk", "worker", "FYI only", "--no-reply");
+    const res = await h.run("talk", "worker", "FYI only", "--one-way");
 
     expect(res.code).toBe(0);
     expect(res.received()).toContain("FYI only");
@@ -322,7 +322,7 @@ describe("talk", () => {
     const res = await h.run(
       "talk",
       "worker",
-      "run the tests. When you're done, report back with use-code-cli talk someone --no-reply",
+      "run the tests. When you're done, report back with use-code-cli talk someone --one-way",
     );
 
     expect(res.code).toBe(0);
@@ -421,11 +421,11 @@ describe("talk — --- message separator", () => {
     h.addSession("caller", { pid: process.pid });
     h.addSession("worker");
 
-    const res = await h.run("talk", "worker", "---", "keep", "--no-reply");
+    const res = await h.run("talk", "worker", "---", "keep", "--one-way");
     const content = lastContent(res.received());
 
-    expect(content).toContain("keep --no-reply");
-    // The literal --no-reply did not disable the instruction.
+    expect(content).toContain("keep --one-way");
+    // The literal --one-way did not disable the instruction.
     expect(content).toContain("report back with use-code-cli talk caller");
   });
 
@@ -434,7 +434,7 @@ describe("talk — --- message separator", () => {
     h.addSession("caller", { pid: process.pid });
     h.addSession("worker");
 
-    const res = await h.run("talk", "worker", "--no-reply", "---", "hi");
+    const res = await h.run("talk", "worker", "--one-way", "---", "hi");
 
     expect(res.code).toBe(0);
     expect(lastContent(res.received())).toContain("hi");

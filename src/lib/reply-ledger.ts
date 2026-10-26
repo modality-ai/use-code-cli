@@ -9,7 +9,7 @@ import { setTimeout as sleep } from "node:timers/promises";
  *  - replies: which msg_ids this machine already answered, so `--in-reply-to`
  *    is idempotent even when an agent retries or two relays race.
  *  - inbound: sessions that recently received an automatic reply, so their
- *    next `talk` defaults to `--no-reply` instead of trusting the agent to
+ *    next `talk` defaults to `--one-way` instead of trusting the agent to
  *    obey the prose.
  *
  * Both are read-modify-written, so every write takes the same lock.
