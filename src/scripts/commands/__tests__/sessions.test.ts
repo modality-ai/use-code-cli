@@ -249,7 +249,7 @@ describe("sessions — --recent", () => {
     expect(res.out).toContain('last="fix the sidebar and rerun tests"');
   });
 
-  it("shows each session's hero without --recent", async () => {
+  it("shows each session's hero and transcript summary without --recent", async () => {
     const h = setup();
     const { sessionId, cwd } = h.addSession("use-design-05", "idle");
     h.addTranscript(cwd, sessionId, [deployLine("WANDA")]);
@@ -259,8 +259,7 @@ describe("sessions — --recent", () => {
     expect(res.code).toBe(0);
     expect(res.out).toContain("use-design-05");
     expect(res.out).toContain("hero=WANDA");
-    expect(res.out).not.toContain("branch=");
-    expect(res.out).not.toContain('last="');
+    expect(res.out).toContain("branch=main");
   });
 
   it('renders "-" when a session has no hero', async () => {

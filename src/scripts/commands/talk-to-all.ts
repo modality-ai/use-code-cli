@@ -1,11 +1,10 @@
 import { z } from "zod";
 import type { CLICommand } from "modality-cli-kit";
-import { deliver, liveSessions } from "../../lib/peer";
+import { ancestorPids, deliver, liveSessions } from "../../lib/peer";
 import {
   describeSessionFilter,
+  filterStatusField,
   matchesSessionFilter,
-  SESSION_STATUSES,
-  splitFilterTerms,
   type SessionFilter,
 } from "../../lib/sessions";
 
@@ -24,14 +23,7 @@ const TalkToAllArgsSchema = z.object({
     .describe(
       "Only send to sessions whose name matches any of these comma-separated texts (case-insensitive)",
     ),
-  "filter-status": z
-    .string()
-    .refine(
-      (v) => splitFilterTerms(v).every((t) => SESSION_STATUSES.some((s) => s === t)),
-      `must be "busy", "idle", or a comma-separated list of them`,
-    )
-    .optional()
-    .describe("Only send to sessions in any of these statuses: busy, idle (comma-separated)"),
+  "filter-status": filterStatusField,
 });
 
 type TalkToAllArgs = z.infer<typeof TalkToAllArgsSchema>;
@@ -43,12 +35,9 @@ async function talkToAll(args: TalkToAllArgs) {
   };
 
   const all = await liveSessions();
-  // The calling Claude session is this process's ancestor; skip it unless --self.
-  const skip = new Set<number>();
-  if (!args.self) {
-    skip.add(process.pid);
-    skip.add(process.ppid);
-  }
+  // The calling Claude session is this process's ancestor — the walk covers the
+  // shell a `!` command runs through, which ppid alone would miss.
+  const skip = args.self ? new Set<number>() : ancestorPids();
   const targets = all.filter((s) => !skip.has(s.pid) && matchesSessionFilter(s, filter));
 
   if (targets.length === 0) {

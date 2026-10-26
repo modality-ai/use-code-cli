@@ -1,18 +1,10 @@
 import { z } from "zod";
 import type { CLICommand } from "modality-cli-kit";
+import { formatTime, plural } from "../../lib/format";
 import { readProjects } from "../../lib/projects";
 import { readSessions } from "../../lib/sessions";
 
 const ProjectsArgsSchema = z.object({});
-
-function formatTime(ms: number): string {
-  if (!ms) return "—";
-  return new Date(ms).toLocaleString("sv-SE").slice(0, 19);
-}
-
-function plural(count: number, word: string): string {
-  return `${count} ${word}${count === 1 ? "" : "s"}`;
-}
 
 async function projects() {
   const [list, live] = await Promise.all([readProjects(), readSessions(false)]);
@@ -29,7 +21,7 @@ async function projects() {
     ? rows
         .map(
           (p) =>
-            `${p.cwd}  ${plural(p.sessions, "session")}  ${p.active} active  updated=${formatTime(p.updatedAt)}`,
+            `${p.cwd}  ${plural(p.sessions, "session")}  ${p.active} active  updated=${formatTime(p.updatedAt) || "—"}`,
         )
         .join("\n")
     : "No projects found in ~/.claude/projects.";

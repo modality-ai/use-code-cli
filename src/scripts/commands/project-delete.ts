@@ -3,18 +3,22 @@ import { join, resolve } from "node:path";
 import { rm, stat } from "node:fs/promises";
 import { z } from "zod";
 import type { CLICommand } from "modality-cli-kit";
+import { plural } from "../../lib/format";
 import {
   forgetProjectConfig,
   type ForgetProjectResult,
 } from "../../lib/claude-config";
 import {
   describeProjects,
-  encodeProjectDir,
   findProject,
   readProjects,
   type ProjectInfo,
 } from "../../lib/projects";
-import { PROJECTS_DIR, readSessions } from "../../lib/sessions";
+import {
+  encodeProjectDir,
+  PROJECTS_DIR,
+  readSessions,
+} from "../../lib/sessions";
 
 const ProjectDeleteArgsSchema = z.object({
   target: z
@@ -46,10 +50,6 @@ const ProjectDeleteArgsSchema = z.object({
 });
 
 type ProjectDeleteArgs = z.infer<typeof ProjectDeleteArgsSchema>;
-
-function sessions(count: number): string {
-  return `${count} session${count === 1 ? "" : "s"}`;
-}
 
 /** The trust-config outcome, worded for a real run or a dry run. */
 function configNotes(
@@ -133,7 +133,7 @@ async function projectDelete(args: ProjectDeleteArgs) {
         );
     return {
       success: true,
-      message: `Would delete ${project.cwd} (${sessions(project.sessions)}).\n  ${path}${activeNote}\n${configNote}`,
+      message: `Would delete ${project.cwd} (${plural(project.sessions, "session")}).\n  ${path}${activeNote}\n${configNote}`,
       data: { ...data, deleted: false },
     };
   }
@@ -148,7 +148,7 @@ async function projectDelete(args: ProjectDeleteArgs) {
   if (!args.yes) {
     return {
       success: false,
-      message: `Refusing to delete ${project.cwd} (${sessions(project.sessions)}) without --yes.\nThis removes ${path} permanently and resets its trust config.\nRe-run with --yes to delete it.`,
+      message: `Refusing to delete ${project.cwd} (${plural(project.sessions, "session")}) without --yes.\nThis removes ${path} permanently and resets its trust config.\nRe-run with --yes to delete it.`,
     };
   }
 
@@ -174,7 +174,7 @@ async function projectDelete(args: ProjectDeleteArgs) {
   ];
   return {
     success: true,
-    message: `Deleted ${project.cwd} (${sessions(project.sessions)}).\n  ${path}\n${notes.join("\n")}`,
+    message: `Deleted ${project.cwd} (${plural(project.sessions, "session")}).\n  ${path}\n${notes.join("\n")}`,
     data: {
       ...data,
       deleted: true,

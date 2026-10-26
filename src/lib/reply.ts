@@ -103,7 +103,7 @@ export function replyMarker(hop: number, options: ReplyOptions = {}): string {
 }
 
 /**
- * Append the reply instruction unless `--one-way` disabled it, the sender is
+ * Append the reply instruction unless the sender is unknown, the message
  * unknown, the message already carries an instruction, or the message is
  * itself an automatic reply. Pure: safe to unit test.
  */

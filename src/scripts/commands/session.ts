@@ -1,8 +1,10 @@
 import { z } from "zod";
 import type { CLICommand } from "modality-cli-kit";
+import { formatTime, oneLine } from "../../lib/format";
 import {
   readSessions,
   readTranscriptMeta,
+  sessionLabel as label,
   type SessionInfo,
 } from "../../lib/sessions";
 
@@ -14,10 +16,6 @@ const SessionArgsSchema = z.object({
 });
 
 type SessionArgs = z.infer<typeof SessionArgsSchema>;
-
-function label(s: SessionInfo): string {
-  return s.name ?? s.sessionId;
-}
 
 /**
  * Exact name / sessionId / pid wins; otherwise a unique name prefix, so
@@ -34,11 +32,6 @@ function findSessions(sessions: SessionInfo[], target: string): SessionInfo[] {
   return sessions.filter((s) => s.name?.startsWith(target));
 }
 
-function formatTime(ms?: number): string {
-  if (!ms) return "";
-  return new Date(ms).toLocaleString("sv-SE").slice(0, 19);
-}
-
 function ago(ms?: number): string {
   if (!ms) return "";
   const secs = Math.max(0, Math.round((Date.now() - ms) / 1000));
@@ -52,11 +45,6 @@ function ago(ms?: number): string {
 
 function row(label: string, value: string | undefined): string {
   return `  ${label.padEnd(11)} ${value && value.trim() !== "" ? value : "—"}`;
-}
-
-function truncate(s: string, max: number): string {
-  const oneLine = s.replace(/\s+/g, " ").trim();
-  return oneLine.length > max ? `${oneLine.slice(0, max - 1)}…` : oneLine;
 }
 
 function howToTalk(name: string): string {
@@ -113,7 +101,7 @@ async function session(args: SessionArgs) {
     row("workspace", s.cwd),
     row("branch", meta.branch),
     row("hero", meta.hero),
-    row("last prompt", meta.lastPrompt ? `"${truncate(meta.lastPrompt, 100)}"` : undefined),
+    row("last prompt", meta.lastPrompt ? `"${oneLine(meta.lastPrompt, 100)}"` : undefined),
     row("pid", String(s.pid)),
     row("sessionId", s.sessionId),
     row("version", s.version),

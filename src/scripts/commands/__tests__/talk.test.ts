@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -339,68 +339,6 @@ describe("talk", () => {
     const res = await h.run("talk", "worker", "the log shows use-code-cli talk worker failed");
 
     expect(res.code).toBe(0);
-    expect(res.received()).toContain("report back with use-code-cli talk caller");
-  });
-});
-
-describe("talk — automatic-reply default", () => {
-  /** Pretend this session just received an automatic reply. */
-  function seedInbound(h: ReturnType<typeof setup>, sessionId: string) {
-    const dir = join(h.home, ".use-code-cli");
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(
-      join(dir, "talk-inbound.json"),
-      JSON.stringify([{ sessionId, at: Date.now() }]),
-    );
-  }
-
-  it("marks the receiving session when it delivers an annotated message", async () => {
-    const h = setup();
-    h.addSession("caller", { pid: process.pid });
-    h.addSession("worker");
-
-    await h.run("talk", "worker", "please run the tests");
-
-    const marks = JSON.parse(
-      readFileSync(join(h.home, ".use-code-cli", "talk-inbound.json"), "utf8"),
-    ) as { sessionId: string }[];
-    expect(marks.some((m) => m.sessionId.startsWith("session-"))).toBe(true);
-  });
-
-  it("suppresses the instruction by default after receiving an automatic reply", async () => {
-    const h = setup();
-    h.addSession("caller", { pid: process.pid });
-    h.addSession("worker");
-    seedInbound(h, `session-${process.pid}`);
-
-    const res = await h.run("talk", "worker", "done");
-
-    expect(res.code).toBe(0);
-    expect(res.received()).not.toContain("report back with");
-    expect(res.out).toContain("received an automatic reply");
-  });
-
-  it("--reply overrides the conservative default", async () => {
-    const h = setup();
-    h.addSession("caller", { pid: process.pid });
-    h.addSession("worker");
-    seedInbound(h, `session-${process.pid}`);
-
-    const res = await h.run("talk", "worker", "done", "--reply");
-
-    expect(res.code).toBe(0);
-    expect(res.received()).toContain("report back with use-code-cli talk caller");
-  });
-
-  it("clears the mark once the session answers", async () => {
-    const h = setup();
-    h.addSession("caller", { pid: process.pid });
-    h.addSession("worker");
-    seedInbound(h, `session-${process.pid}`);
-
-    await h.run("talk", "worker", "done");
-    const res = await h.run("talk", "worker", "next task");
-
     expect(res.received()).toContain("report back with use-code-cli talk caller");
   });
 });

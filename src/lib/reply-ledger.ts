@@ -4,26 +4,18 @@ import { mkdir, open, readFile, rename, stat, unlink, writeFile } from "node:fs/
 import { setTimeout as sleep } from "node:timers/promises";
 
 /**
- * Small per-user state files for loop safety:
+ * Small per-user state file for loop safety: which msg_ids this machine
+ * already answered, so `--in-reply-to` is idempotent even when an agent
+ * retries or two relays race.
  *
- *  - replies: which msg_ids this machine already answered, so `--in-reply-to`
- *    is idempotent even when an agent retries or two relays race.
- *  - inbound: sessions that recently received an automatic reply, so their
- *    next `talk` defaults to `--one-way` instead of trusting the agent to
- *    obey the prose.
- *
- * Both are read-modify-written, so every write takes the same lock.
+ * The file is read-modify-written, so every write takes the lock.
  */
 const STATE_DIR = join(homedir(), ".use-code-cli");
 const REPLY_FILE = join(STATE_DIR, "talk-replies.json");
-const INBOUND_FILE = join(STATE_DIR, "talk-inbound.json");
 const LOCK_FILE = join(STATE_DIR, "talk-state.lock");
 
-/** Bound the files so a broken caller cannot grow them without limit. */
+/** Bound the file so a broken caller cannot grow it without limit. */
 const MAX_ENTRIES = 200;
-
-/** An inbound mark older than this no longer suppresses the instruction. */
-const INBOUND_TTL_MS = 60 * 60 * 1000;
 
 const LOCK_TIMEOUT_MS = 2000;
 const LOCK_STALE_MS = 5000;
@@ -36,13 +28,6 @@ export interface ReplyRecord {
   targetSessionId: string;
   /** msg_id assigned to the answer. */
   msgId: string;
-  /** Milliseconds since the epoch. */
-  at: number;
-}
-
-export interface InboundMark {
-  /** sessionId that received an automatic reply. */
-  sessionId: string;
   /** Milliseconds since the epoch. */
   at: number;
 }
@@ -121,22 +106,9 @@ function isReplyRecord(value: unknown): value is ReplyRecord {
   );
 }
 
-function isInboundMark(value: unknown): value is InboundMark {
-  if (typeof value !== "object" || value === null) return false;
-  const m = value as Record<string, unknown>;
-  return typeof m.sessionId === "string" && typeof m.at === "number";
-}
-
 async function loadReplies(): Promise<ReplyRecord[]> {
   const parsed = await readJson(REPLY_FILE);
   return Array.isArray(parsed) ? parsed.filter(isReplyRecord) : [];
-}
-
-async function loadInbound(): Promise<InboundMark[]> {
-  const parsed = await readJson(INBOUND_FILE);
-  if (!Array.isArray(parsed)) return [];
-  const cutoff = Date.now() - INBOUND_TTL_MS;
-  return parsed.filter(isInboundMark).filter((m) => m.at >= cutoff);
 }
 
 /** The reply this session already sent to `inReplyTo`, if any. */
@@ -159,27 +131,5 @@ export async function recordReply(record: ReplyRecord): Promise<void> {
     );
     entries.push(record);
     await writeJson(REPLY_FILE, entries.slice(-MAX_ENTRIES));
-  });
-}
-
-/** True when this session recently received an automatic reply. */
-export async function hasPendingInbound(sessionId: string): Promise<boolean> {
-  return (await loadInbound()).some((m) => m.sessionId === sessionId);
-}
-
-/** Record that `sessionId` received a message carrying an auto-reply marker. */
-export async function markInbound(sessionId: string): Promise<void> {
-  await withLock(async () => {
-    const marks = (await loadInbound()).filter((m) => m.sessionId !== sessionId);
-    marks.push({ sessionId, at: Date.now() });
-    await writeJson(INBOUND_FILE, marks.slice(-MAX_ENTRIES));
-  });
-}
-
-/** This session answered, so it no longer needs the conservative default. */
-export async function clearInbound(sessionId: string): Promise<void> {
-  await withLock(async () => {
-    const marks = (await loadInbound()).filter((m) => m.sessionId !== sessionId);
-    await writeJson(INBOUND_FILE, marks);
   });
 }

@@ -42,10 +42,8 @@ sessions cannot bounce messages back and forth forever. The sender name comes
 from the session running the command. If it cannot be determined, the
 instruction is skipped and the command reports it.
 
-The instruction is on by default, but a session that recently *received* an
-automatic reply sends its next message without one, so loop safety does not
-depend on the agent obeying the prose. Pass `--reply` to force it back on, or
-`--one-way` to force it off.
+The instruction is on by default; pass `--one-way` to send the message without
+it, exactly as written.
 
 Every annotated message also carries an invisible marker with the reply hop and
 its own id:
@@ -101,8 +99,4 @@ the safest.
 
 An empty message — nothing after `---` and empty stdin, or a terminal on stdin
 — is an error.
-
-#### Sending as written
-
-Pass `--one-way` to send the message exactly as written.
 

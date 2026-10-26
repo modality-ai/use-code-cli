@@ -1,11 +1,9 @@
-import { homedir } from "node:os";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { createConnection } from "node:net";
-import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
-
-const SESSIONS_DIR = join(homedir(), ".claude", "sessions");
+import { readSessionsLive, SESSIONS_DIR } from "./sessions";
 
 export interface LiveSession {
   pid: number;
@@ -15,15 +13,6 @@ export interface LiveSession {
   status?: string;
   cwd: string;
   messagingSocketPath?: string;
-}
-
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === "EPERM";
-  }
 }
 
 /** Cap on the ancestor walk — the chain is short in practice. */
@@ -55,17 +44,9 @@ export function ancestorPids(): Set<number> {
   return pids;
 }
 
+/** Every live session — session files tagged online by `readSessionsLive`. */
 export async function liveSessions(): Promise<LiveSession[]> {
-  const out: LiveSession[] = [];
-  for (const f of (await readdir(SESSIONS_DIR)).filter((f) => f.endsWith(".json"))) {
-    try {
-      const s = JSON.parse(await readFile(join(SESSIONS_DIR, f), "utf8")) as LiveSession;
-      if (isAlive(s.pid)) out.push(s);
-    } catch {
-      // skip malformed
-    }
-  }
-  return out;
+  return (await readSessionsLive()).filter((s) => s.online);
 }
 
 /**

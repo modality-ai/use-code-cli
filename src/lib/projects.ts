@@ -57,11 +57,6 @@ export async function readProjects(): Promise<ProjectInfo[]> {
   return projects.sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-/** Claude Code's directory name for a workspace path. */
-export function encodeProjectDir(cwd: string): string {
-  return cwd.replace(/[^a-zA-Z0-9]/g, "-");
-}
-
 /** Exact path / dir / basename wins; otherwise a unique workspace-path suffix. */
 export function findProject(projects: ProjectInfo[], target: string): ProjectInfo[] {
   const exact = projects.filter(

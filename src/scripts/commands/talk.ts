@@ -12,15 +12,9 @@ import {
   appendReplyInstruction,
   hasReplyInstruction,
   isAutoReply,
-  parseReplyMeta,
 } from "../../lib/reply";
-import {
-  clearInbound,
-  findReply,
-  hasPendingInbound,
-  markInbound,
-  recordReply,
-} from "../../lib/reply-ledger";
+import { findReply, recordReply } from "../../lib/reply-ledger";
+import { sessionLabel as label } from "../../lib/sessions";
 
 const TalkArgsSchema = z.object({
   target: z
@@ -33,12 +27,6 @@ const TalkArgsSchema = z.object({
     .optional()
     .describe(
       "Message to deliver to the session's agent. For literal text use '--- <message>' or stdin: the shell still expands $VAR, backticks and ! in unquoted words.",
-    ),
-  reply: z
-    .boolean()
-    .optional()
-    .describe(
-      "Append a reply instruction — e.g. \"When you're done, report back with use-code-cli talk <sender> \\\"<your answer>\\\" --one-way\". On by default, but off when this session just received an automatic reply. --reply forces it on.",
     ),
   // Quoted, kebab-case key: the CLI normalises camelCase fields to `--kebab-case`
   // flags, so a camelCase key here would never receive the flag's value.
@@ -65,13 +53,8 @@ type ReplyHint =
   | "appended"
   | "already-present"
   | "auto-reply"
-  | "auto-disabled"
   | "disabled"
   | "skipped-no-sender";
-
-function label(s: LiveSession): string {
-  return s.name ?? s.sessionId;
-}
 
 function findTargets(sessions: LiveSession[], target: string): LiveSession[] {
   return sessions.filter(
@@ -169,15 +152,11 @@ async function talk(args: TalkArgs) {
   const sender = await currentSession(sessions);
   const senderName = sender ? label(sender) : undefined;
 
-  // Resolve the effective default. An explicit flag wins. Otherwise a session
-  // that just received an automatic reply stays conservative: its answer goes
-  // out without an instruction, so loop safety does not depend on the agent
-  // reading the prose in the inbound message.
+  // The instruction is always appended unless --one-way sends the message as
+  // written, the sender is unknown, or the message already carries one.
   let replyHint: ReplyHint;
   if (args["one-way"]) {
     replyHint = "disabled";
-  } else if (args.reply !== true && sender && (await hasPendingInbound(sender.sessionId))) {
-    replyHint = "auto-disabled";
   } else if (!senderName) {
     replyHint = "skipped-no-sender";
   } else if (hasReplyInstruction(message)) {
@@ -207,11 +186,6 @@ async function talk(args: TalkArgs) {
   if (replyHint === "auto-reply") {
     notes.push("message looks like an automatic reply — no reply instruction appended.");
   }
-  if (replyHint === "auto-disabled") {
-    notes.push(
-      "this session recently received an automatic reply — reply instruction suppressed by default. Pass --reply to force it.",
-    );
-  }
 
   if (inReplyTo) {
     try {
@@ -224,27 +198,6 @@ async function talk(args: TalkArgs) {
     } catch (err) {
       notes.push(
         `LEDGER NOT UPDATED (${(err as Error).message}): a duplicate answer to msg_id=${inReplyTo} will not be blocked.`,
-      );
-    }
-  }
-
-  // The target now holds a message with a loop marker; its next reply should be
-  // conservative. The sender answered, so its own mark can be cleared.
-  if (parseReplyMeta(body)) {
-    try {
-      await markInbound(session.sessionId);
-    } catch (err) {
-      notes.push(
-        `LOOP SAFETY DEGRADED (${(err as Error).message}): ${label(session)} was not marked as holding an automatic reply.`,
-      );
-    }
-  }
-  if (sender) {
-    try {
-      await clearInbound(sender.sessionId);
-    } catch (err) {
-      notes.push(
-        `LOOP SAFETY DEGRADED (${(err as Error).message}): this session's inbound mark was not cleared.`,
       );
     }
   }

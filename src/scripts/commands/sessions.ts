@@ -1,13 +1,13 @@
 import { z } from "zod";
 import { optionalValueFlag, type CLICommand } from "modality-cli-kit";
+import { oneLine } from "../../lib/format";
 import {
   describeSessionFilter,
+  filterStatusField,
   matchesSessionFilter,
   readSessions,
   readTranscriptMeta,
   searchTranscript,
-  SESSION_STATUSES,
-  splitFilterTerms,
   type SessionFilter,
   type SessionInfo,
   type TranscriptMeta,
@@ -27,14 +27,7 @@ const SessionsArgsSchema = z.object({
     .describe(
       "Only sessions whose name matches any of these comma-separated texts (case-insensitive)",
     ),
-  "filter-status": z
-    .string()
-    .refine(
-      (v) => splitFilterTerms(v).every((t) => SESSION_STATUSES.some((s) => s === t)),
-      `must be "busy", "idle", or a comma-separated list of them`,
-    )
-    .optional()
-    .describe("Only sessions in any of these statuses: busy, idle (comma-separated)"),
+  "filter-status": filterStatusField,
   recent: optionalValueFlag("10")
     .refine(
       (v) => v === undefined || v === "" || (/^\d+$/.test(v) && Number(v) > 0),
@@ -73,17 +66,11 @@ interface Row {
 /** How many transcripts to search at once — enough to hide I/O latency, few enough to spare fds. */
 const SEARCH_CONCURRENCY = 8;
 
-/** Collapse a transcript fact to one terminal-friendly line. */
-function oneLine(text: string, max = 80): string {
-  const single = text.replace(/\s+/g, " ").trim();
-  return single.length > max ? `${single.slice(0, max - 1)}…` : single;
-}
-
 /** The branch / last-prompt line shown under a `--recent` row (hero is on the head line). */
 function summaryLine(meta: { branch?: string; lastPrompt?: string }): string {
   return [
     meta.branch ? `branch=${meta.branch}` : "",
-    meta.lastPrompt ? `last="${oneLine(meta.lastPrompt)}"` : "",
+    meta.lastPrompt ? `last="${oneLine(meta.lastPrompt, 80)}"` : "",
   ]
     .filter(Boolean)
     .join("  ");
@@ -150,7 +137,7 @@ async function sessions(args: SessionsArgs) {
   let rows: Row[];
   if (args.search !== undefined) {
     rows = await searchRows(list, args.search);
-  } else if (limit !== undefined) {
+  } else {
     rows = await Promise.all(
       list.map(async (s) => {
         const meta = await readTranscriptMeta(s);
@@ -160,10 +147,6 @@ async function sessions(args: SessionsArgs) {
           lastPrompt: meta.lastPrompt ?? null,
         };
       }),
-    );
-  } else {
-    rows = await Promise.all(
-      list.map(async (s) => baseRow(s, await readTranscriptMeta(s))),
     );
   }
 

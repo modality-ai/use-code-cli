@@ -3,8 +3,9 @@ import { join } from "node:path";
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { open, readdir, readFile, stat } from "node:fs/promises";
+import { z } from "zod";
 
-const SESSIONS_DIR = join(homedir(), ".claude", "sessions");
+export const SESSIONS_DIR = join(homedir(), ".claude", "sessions");
 export const PROJECTS_DIR = join(homedir(), ".claude", "projects");
 
 /** One live Claude Code session, as written to ~/.claude/sessions/<pid>.json. */
@@ -35,6 +36,16 @@ export interface SessionFilter {
 
 /** The values `--filter-status` accepts. */
 export const SESSION_STATUSES = ["busy", "idle"] as const;
+
+/** The `--filter-status` flag schema shared by `sessions` and `talk-to-all`. */
+export const filterStatusField = z
+  .string()
+  .refine(
+    (v) => splitFilterTerms(v).every((t) => SESSION_STATUSES.some((s) => s === t)),
+    `must be "busy", "idle", or a comma-separated list of them`,
+  )
+  .optional()
+  .describe("Only sessions in any of these statuses: busy, idle (comma-separated)");
 
 /** Split a comma-separated flag value into trimmed, lowercase terms. */
 export function splitFilterTerms(value: string | undefined): string[] {
@@ -83,7 +94,12 @@ export interface TranscriptMeta {
   lastPrompt?: string;
 }
 
-export function isAlive(pid: number): boolean {
+/** The name a session goes by in output: its registered name, else its sessionId. */
+export function sessionLabel(s: { name?: string; sessionId: string }): string {
+  return s.name ?? s.sessionId;
+}
+
+function isAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
@@ -117,7 +133,8 @@ export async function readTranscriptCwd(path: string): Promise<string | undefine
   }
 }
 
-async function readSessionsLive(): Promise<SessionInfo[]> {
+/** Every session file, live or stale — `online` tells them apart. */
+export async function readSessionsLive(): Promise<SessionInfo[]> {
   let files: string[];
   try {
     files = await readdir(SESSIONS_DIR);
@@ -194,8 +211,8 @@ export async function readSessions(includeOffline: boolean): Promise<SessionInfo
   return sessions.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
 }
 
-/** How Claude Code names a project directory: every non-alphanumeric → "-". */
-function projectDirName(cwd: string): string {
+/** Claude Code's directory name for a workspace path: every non-alphanumeric → "-". */
+export function encodeProjectDir(cwd: string): string {
   return cwd.replace(/[^a-zA-Z0-9]/g, "-");
 }
 
@@ -213,7 +230,7 @@ async function exists(path: string): Promise<boolean> {
  * scan is the fallback so a changed encoding never hides the transcript.
  */
 async function transcriptPath(s: SessionInfo): Promise<string | undefined> {
-  const direct = join(PROJECTS_DIR, projectDirName(s.cwd), `${s.sessionId}.jsonl`);
+  const direct = join(PROJECTS_DIR, encodeProjectDir(s.cwd), `${s.sessionId}.jsonl`);
   if (await exists(direct)) return direct;
 
   let projects: string[];
