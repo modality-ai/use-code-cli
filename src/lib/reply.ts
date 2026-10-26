@@ -1,14 +1,8 @@
-/** The CLI invocation a peer can use to answer back. */
-export const REPLY_COMMAND = "use-code-cli talk";
-
-/**
- * How many automatic reply hops are allowed.
- *
- * One is enough: the annotated message already asks for an answer, and asking
- * the answer for another answer is what turns two cooperative sessions into an
- * infinite ping-pong. The counter stops at the first hop.
- */
-export const MAX_REPLY_HOP = 1;
+import {
+  MAX_REPLY_HOP,
+  REPLY_COMMAND,
+  REPLY_MARKER_TAG,
+} from "../config/constants";
 
 /**
  * Invisible metadata carried by every annotated message, so a receiver — or
@@ -17,7 +11,7 @@ export const MAX_REPLY_HOP = 1;
  *
  *   <!-- use-code-cli:auto-reply hop=1 id=<msg_id> re=<msg_id> -->
  */
-const MARKER_RE = /<!--\s*use-code-cli:auto-reply([^>]*)-->/g;
+const MARKER_RE = new RegExp(`<!--\\s*${REPLY_MARKER_TAG}([^>]*)-->`, "g");
 
 export interface ReplyMeta {
   /** Automatic reply hops that produced this message. */
@@ -78,7 +72,7 @@ export function isAutoReply(message: string): boolean {
  * what keeps a two-session conversation from bouncing forever.
  */
 export function replyInstruction(senderName: string): string {
-  return `When you're done, report back with ${REPLY_COMMAND} ${senderName} "<your answer>" --one-way`;
+  return `When you're done, report back with ${'`'}${REPLY_COMMAND} ${senderName} "<your answer>" --one-way${'`'}`;
 }
 
 /**
@@ -99,7 +93,7 @@ export function replyMarker(hop: number, options: ReplyOptions = {}): string {
   const attrs = [`hop=${hop}`];
   if (options.msgId) attrs.push(`id=${options.msgId}`);
   if (options.inReplyTo) attrs.push(`re=${options.inReplyTo}`);
-  return `<!-- use-code-cli:auto-reply ${attrs.join(" ")} -->`;
+  return `<!-- ${REPLY_MARKER_TAG} ${attrs.join(" ")} -->`;
 }
 
 /**

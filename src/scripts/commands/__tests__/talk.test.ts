@@ -221,7 +221,7 @@ describe("talk", () => {
     expect(res.code).toBe(0);
     expect(res.received()).toContain("run the tests");
     expect(lastContent(res.received())).toContain(
-      "When you're done, report back with use-code-cli talk caller \"<your answer>\" --one-way",
+      "When you're done, report back with `!use-code-cli talk caller \"<your answer>\" --one-way`",
     );
   });
 
@@ -339,7 +339,7 @@ describe("talk", () => {
     const res = await h.run("talk", "worker", "the log shows use-code-cli talk worker failed");
 
     expect(res.code).toBe(0);
-    expect(res.received()).toContain("report back with use-code-cli talk caller");
+    expect(res.received()).toContain("report back with `!use-code-cli talk caller");
   });
 });
 
@@ -364,7 +364,7 @@ describe("talk — --- message separator", () => {
 
     expect(content).toContain("keep --one-way");
     // The literal --one-way did not disable the instruction.
-    expect(content).toContain("report back with use-code-cli talk caller");
+    expect(content).toContain("report back with `!use-code-cli talk caller");
   });
 
   it("still honours flags before ---", async () => {
