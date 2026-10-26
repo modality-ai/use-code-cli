@@ -88,6 +88,21 @@ export function sessionLabel(s: { name?: string; sessionId: string }): string {
   return s.name ?? s.sessionId;
 }
 
+/**
+ * Sessions a target names. Exact name / sessionId / pid wins; otherwise a name
+ * prefix, so `session use-design` finds `use-design-05`.
+ */
+export function findSessions(sessions: SessionInfo[], target: string): SessionInfo[] {
+  const exact = sessions.filter(
+    (s) =>
+      s.name === target ||
+      s.sessionId === target ||
+      (s.pid !== 0 && String(s.pid) === target),
+  );
+  if (exact.length > 0) return exact;
+  return sessions.filter((s) => s.name?.startsWith(target));
+}
+
 function isAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -364,6 +379,102 @@ export async function readTranscriptMeta(s: SessionInfo): Promise<TranscriptMeta
     branch: branch ? unescapeJsonString(branch) : undefined,
     lastPrompt,
   };
+}
+
+/** A prompt a session received, as its transcript records it. */
+export interface SessionPrompt {
+  /** Who sent it: the human at the keyboard, or another Claude session. */
+  kind: "typed" | "peer";
+  /** 1-based transcript line number. */
+  line: number;
+  /** When the prompt arrived, in epoch milliseconds. */
+  timestamp?: number;
+  /** Prompt text, with the cross-session envelope removed. */
+  text: string;
+}
+
+/** The prefix Claude Code puts on a message another session delivered. */
+const PEER_PREFIX = "Another Claude session sent a message:\n";
+
+interface TranscriptUserEntry {
+  type?: string;
+  isSidechain?: boolean;
+  toolUseResult?: unknown;
+  timestamp?: string;
+  origin?: { kind?: string };
+  turnOrigin?: string;
+  message?: { content?: unknown };
+}
+
+/** The text blocks of a message's content; images and tool noise are dropped. */
+function contentText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((block) =>
+      block && typeof block === "object" && typeof (block as { text?: unknown }).text === "string"
+        ? (block as { text: string }).text
+        : "",
+    )
+    .filter(Boolean)
+    .join(" ");
+}
+
+/**
+ * The prompt one transcript line records, or undefined for everything else.
+ * Tool results and system-injected entries also have `type: "user"`, so the
+ * human/peer origin marker is what separates a real prompt from them.
+ */
+function promptFromLine(raw: string, line: number): SessionPrompt | undefined {
+  let entry: TranscriptUserEntry;
+  try {
+    entry = JSON.parse(raw) as TranscriptUserEntry;
+  } catch {
+    return undefined;
+  }
+  if (entry.type !== "user" || entry.isSidechain || entry.toolUseResult !== undefined) {
+    return undefined;
+  }
+
+  const kind = entry.origin?.kind ?? entry.turnOrigin;
+  if (kind !== "human" && kind !== "peer") return undefined;
+
+  const text = contentText(entry.message?.content);
+  if (!text) return undefined;
+  const cleaned = (
+    kind === "peer"
+      ? text.replace(PEER_PREFIX, "").replace(PEER_ENVELOPE_PATTERN, "")
+      : text
+  ).trim();
+  if (!cleaned) return undefined;
+
+  const timestamp = entry.timestamp ? Date.parse(entry.timestamp) : Number.NaN;
+  return {
+    kind: kind === "peer" ? "peer" : "typed",
+    line,
+    timestamp: Number.isNaN(timestamp) ? undefined : timestamp,
+    text: cleaned,
+  };
+}
+
+/** Every prompt a session's transcript records, oldest first. */
+export async function readPrompts(s: SessionInfo): Promise<SessionPrompt[]> {
+  const path = await transcriptPath(s);
+  if (!path) return [];
+
+  const lines = createInterface({
+    input: createReadStream(path, "utf8"),
+    crlfDelay: Infinity,
+  });
+
+  const prompts: SessionPrompt[] = [];
+  let lineNo = 0;
+  for await (const raw of lines) {
+    lineNo++;
+    const prompt = promptFromLine(raw, lineNo);
+    if (prompt) prompts.push(prompt);
+  }
+  return prompts;
 }
 
 /** Where a search term occurred in a transcript. */

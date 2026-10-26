@@ -15,6 +15,31 @@
 use-code-cli <command> [args]
 ```
 
+### `prompts`
+
+List the prompts sessions received, or search only prompts — assistant replies
+and tool output are never matched.
+
+```bash
+use-code-cli prompts [target] [search] [--search <text>] [--filter-name <names>] [--filter-status <statuses>] [--limit <n>]
+```
+
+`target` is a session name, pid, or sessionId (a unique name prefix also
+works); with it, only that session's prompts are read and the session filters
+are ignored. A second positional is the search term, so
+`use-code-cli prompts use-design-da deploy` and
+`use-code-cli prompts use-design-da --search deploy` are the same.
+
+Without `--search`, the newest 20 prompts across every known session (online
+and offline) are shown, newest first; `--limit` changes the count. `--search`
+matches typed prompts and cross-session messages case-insensitively and shows
+every match unless `--limit` is set. `--filter-name` / `--filter-status` narrow
+the sessions read, using the same syntax as `sessions`.
+
+Each line carries the session's name, the prompt kind (`typed` or `peer`), and
+the prompt text. With `--json`, the rows also include the transcript line
+number and full prompt text.
+
 ### `talk`
 
 Deliver a message to another active Claude Code session.

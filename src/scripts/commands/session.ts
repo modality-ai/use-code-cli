@@ -2,11 +2,11 @@ import { z } from "zod";
 import type { CLICommand } from "modality-cli-kit";
 import { formatTime, oneLine } from "../../lib/format";
 import {
+  findSessions,
   readSessions,
   readTranscriptMeta,
   sessionLabel as label,
   transcriptPath,
-  type SessionInfo,
 } from "../../lib/sessions";
 
 const SessionArgsSchema = z.object({
@@ -17,21 +17,6 @@ const SessionArgsSchema = z.object({
 });
 
 type SessionArgs = z.infer<typeof SessionArgsSchema>;
-
-/**
- * Exact name / sessionId / pid wins; otherwise a unique name prefix, so
- * `session use-design` finds `use-design-05`.
- */
-function findSessions(sessions: SessionInfo[], target: string): SessionInfo[] {
-  const exact = sessions.filter(
-    (s) =>
-      s.name === target ||
-      s.sessionId === target ||
-      (s.pid !== 0 && String(s.pid) === target),
-  );
-  if (exact.length > 0) return exact;
-  return sessions.filter((s) => s.name?.startsWith(target));
-}
 
 function ago(ms?: number): string {
   if (!ms) return "";

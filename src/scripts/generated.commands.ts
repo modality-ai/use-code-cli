@@ -4,10 +4,11 @@
 import type { CLICommand } from "modality-cli-kit";
 import { projectDeleteCommand } from "./commands/project-delete";
 import { projectsCommand } from "./commands/projects";
+import { promptsCommand } from "./commands/prompts";
 import { sessionCommand } from "./commands/session";
 import { sessionsCommand } from "./commands/sessions";
 import { talkPermitCommand } from "./commands/talk-permit";
 import { talkToAllCommand } from "./commands/talk-to-all";
 import { talkCommand } from "./commands/talk";
 
-export const commands: CLICommand[] = [projectDeleteCommand, projectsCommand, sessionCommand, sessionsCommand, talkPermitCommand, talkToAllCommand, talkCommand];
+export const commands: CLICommand[] = [projectDeleteCommand, projectsCommand, promptsCommand, sessionCommand, sessionsCommand, talkPermitCommand, talkToAllCommand, talkCommand];
