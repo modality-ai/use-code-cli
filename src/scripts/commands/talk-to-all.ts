@@ -1,9 +1,9 @@
 import { z } from "zod";
 import type { CLICommand } from "modality-cli-kit";
 import { ancestorPids, deliver, liveSessions } from "../../lib/peer";
+import { filterStatusField } from "../../lib/flags";
 import {
   describeSessionFilter,
-  filterStatusField,
   matchesSessionFilter,
   type SessionFilter,
 } from "../../lib/sessions";

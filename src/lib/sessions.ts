@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { open, readdir, readFile, stat } from "node:fs/promises";
-import { z } from "zod";
 
 export const SESSIONS_DIR = join(homedir(), ".claude", "sessions");
 export const PROJECTS_DIR = join(homedir(), ".claude", "projects");
@@ -36,16 +35,6 @@ export interface SessionFilter {
 
 /** The values `--filter-status` accepts. */
 export const SESSION_STATUSES = ["busy", "idle"] as const;
-
-/** The `--filter-status` flag schema shared by `sessions` and `talk-to-all`. */
-export const filterStatusField = z
-  .string()
-  .refine(
-    (v) => splitFilterTerms(v).every((t) => SESSION_STATUSES.some((s) => s === t)),
-    `must be "busy", "idle", or a comma-separated list of them`,
-  )
-  .optional()
-  .describe("Only sessions in any of these statuses: busy, idle (comma-separated)");
 
 /** Split a comma-separated flag value into trimmed, lowercase terms. */
 export function splitFilterTerms(value: string | undefined): string[] {

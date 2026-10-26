@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { optionalValueFlag, type CLICommand } from "modality-cli-kit";
 import { oneLine } from "../../lib/format";
+import { filterStatusField } from "../../lib/flags";
 import {
   describeSessionFilter,
-  filterStatusField,
   matchesSessionFilter,
   readSessions,
   readTranscriptMeta,
