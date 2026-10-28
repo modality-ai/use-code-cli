@@ -269,6 +269,61 @@ describe("prompts", () => {
     const rows = parsed.data ?? [];
     expect(rows.some((r) => r.text === "json prompt" && r.kind === "typed")).toBe(true);
   });
+
+  it("list rows carry the transcript line number", async () => {
+    const h = setup();
+    const { sessionId, cwd } = h.addSession("alpha", "idle");
+    h.addTranscript(cwd, sessionId, [assistantLine("noise"), humanLine("second line prompt")]);
+
+    const res = await h.run("prompts", "--search", "second line");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toContain("L2");
+  });
+
+  it("--show prints one prompt whole, without truncation", async () => {
+    const h = setup();
+    const { sessionId, cwd } = h.addSession("alpha", "idle");
+    const long = `keep ${"x".repeat(200)} end`;
+    h.addTranscript(cwd, sessionId, [humanLine("short one"), humanLine(long)]);
+
+    const res = await h.run("prompts", "--show", "2");
+
+    expect(res.code).toBe(0);
+    expect(res.out.trim()).toBe(long);
+    expect(res.out).not.toContain("short one");
+  });
+
+  it("--show accepts the L-prefixed reference the list prints", async () => {
+    const h = setup();
+    const { sessionId, cwd } = h.addSession("alpha", "idle");
+    h.addTranscript(cwd, sessionId, [humanLine("first"), humanLine("second")]);
+
+    const res = await h.run("prompts", "--show", "L2");
+
+    expect(res.code).toBe(0);
+    expect(res.out.trim()).toBe("second");
+  });
+
+  it("--show reports a line holding no prompt", async () => {
+    const h = setup();
+    const { sessionId, cwd } = h.addSession("alpha", "idle");
+    h.addTranscript(cwd, sessionId, [humanLine("only prompt")]);
+
+    const res = await h.run("prompts", "--show", "9");
+
+    expect(res.code).toBe(1);
+    expect(res.err).toContain("No prompt at line 9");
+  });
+
+  it("rejects a non-numeric --show value", async () => {
+    const h = setup();
+
+    const res = await h.run("prompts", "--show", "abc");
+
+    expect(res.code).toBe(1);
+    expect(res.err).toContain("must be a prompt line number");
+  });
 });
 
 describe("prompts — target", () => {
