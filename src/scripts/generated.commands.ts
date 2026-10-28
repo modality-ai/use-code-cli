@@ -2,6 +2,7 @@
 // Regenerate with generateCommandsIndex(); the commands directory is the
 // single source of truth.
 import type { CLICommand } from "modality-cli-kit";
+import { memoryCommand } from "./commands/memory";
 import { projectDeleteCommand } from "./commands/project-delete";
 import { projectsCommand } from "./commands/projects";
 import { promptsCommand } from "./commands/prompts";
@@ -11,4 +12,4 @@ import { talkPermitCommand } from "./commands/talk-permit";
 import { talkToAllCommand } from "./commands/talk-to-all";
 import { talkCommand } from "./commands/talk";
 
-export const commands: CLICommand[] = [projectDeleteCommand, projectsCommand, promptsCommand, sessionCommand, sessionsCommand, talkPermitCommand, talkToAllCommand, talkCommand];
+export const commands: CLICommand[] = [memoryCommand, projectDeleteCommand, projectsCommand, promptsCommand, sessionCommand, sessionsCommand, talkPermitCommand, talkToAllCommand, talkCommand];

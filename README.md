@@ -40,6 +40,41 @@ Each line carries the session's name, the prompt kind (`typed` or `peer`), and
 the prompt text. With `--json`, the rows also include the transcript line
 number and full prompt text.
 
+### `memory`
+
+List Claude Code's persistent agent memory files, or search their content.
+
+```bash
+use-code-cli memory [search] [--files] [--limit <n>]
+```
+
+Without `--search`, the newest 20 memory files are listed, newest first, each
+with its project workspace and a one-line summary (the frontmatter
+`description`, else the first line of the body). `--limit` changes the count.
+The search term can also be positional, so `use-code-cli memory deploy` and
+`use-code-cli memory --search deploy` are the same.
+
+`--search` matches a file's whole content case-insensitively and shows every
+match unless `--limit` is set, reporting the occurrence count, the line number
+of the first hit, and that line. Files are read from
+`~/.claude/projects/<project>/memory/` (recursively) across every known
+project; nothing outside those memory directories is searched.
+
+`--files` prints every file as a single path per line, with the home prefix
+shortened to `~` — no timestamp, project, or summary line. It ignores the
+default 20-file limit, and an explicit `--limit` caps the list without printing
+a "hidden" footer, so the output stays one path per line. Pair it with a search
+to list only the files that match:
+
+```bash
+use-code-cli memory --files | xargs -n1 less
+use-code-cli memory deploy --files
+```
+
+Each heading line of the normal listing carries the file's timestamp, the
+project workspace, and its path inside the memory directory. With `--json`,
+rows also include the encoded project directory and the absolute file path.
+
 ### `talk`
 
 Deliver a message to another active Claude Code session.
