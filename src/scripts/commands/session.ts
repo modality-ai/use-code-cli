@@ -1,12 +1,14 @@
 import { z } from "zod";
 import type { CLICommand } from "modality-cli-kit";
-import { formatTime, oneLine } from "../../lib/format";
+import { formatTime, oneLine, plural } from "../../lib/format";
 import {
   findSessions,
+  readCronJobs,
   readSessions,
   readTranscriptMeta,
   sessionLabel as label,
   transcriptPath,
+  type SessionCron,
 } from "../../lib/sessions";
 
 const SessionArgsSchema = z.object({
@@ -33,19 +35,28 @@ function row(label: string, value: string | undefined): string {
   return `  ${label.padEnd(11)} ${value && value.trim() !== "" ? value : "—"}`;
 }
 
+/**
+ * The cron block: a summary row, then one entry per job. A job's human
+ * schedule is only shown when it adds something the expression does not.
+ */
+function cronLines(crons: SessionCron[], online: boolean): string[] {
+  if (crons.length === 0) return [row("cron", "none")];
+
+  const note = online ? "session-only" : "last known · session-only jobs ended";
+  const lines = [row("cron", `${plural(crons.length, "job")} · ${note}`)];
+  for (const c of crons) {
+    const schedule =
+      c.schedule && c.schedule !== c.cron
+        ? `cron="${c.cron}"  schedule="${c.schedule}"`
+        : `cron="${c.cron}"`;
+    lines.push(`    ${c.id}  ${schedule}`);
+    lines.push(`      "${oneLine(c.prompt, 100)}"`);
+  }
+  return lines;
+}
+
 function howToTalk(name: string): string {
-  return [
-    "Talk to this session from Claude Code:",
-    `  !use-code-cli talk ${name} "your message"`,
-    "",
-    "From a shell:",
-    `  use-code-cli talk ${name} "your message"`,
-    "",
-    "The message arrives in that session's agent as a cross-session user message;",
-    "its answer is produced in that session. Inbound policy is set with",
-    "`use-code-cli talk-permit` (accept | hold | refuse), and `use-code-cli sessions`",
-    "lists every active session.",
-  ].join("\n");
+  return ["💡 Talk to this session:", `  use-code-cli talk ${name} "your message"`].join("\n");
 }
 
 async function session(args: SessionArgs) {
@@ -79,6 +90,7 @@ async function session(args: SessionArgs) {
   }
   const meta = await readTranscriptMeta(s);
   const rawFile = await transcriptPath(s);
+  const crons = await readCronJobs(s);
   const name = label(s);
 
   const state = s.online ? `${s.status ?? "unknown"} · active` : "offline";
@@ -95,6 +107,7 @@ async function session(args: SessionArgs) {
     row("version", s.version),
     row("started", s.startedAt ? `${formatTime(s.startedAt)} (${ago(s.startedAt)})` : undefined),
     row("updated", s.updatedAt ? `${formatTime(s.updatedAt)} (${ago(s.updatedAt)})` : undefined),
+    ...cronLines(crons, s.online),
     "",
     s.online
       ? howToTalk(name)
@@ -118,18 +131,30 @@ async function session(args: SessionArgs) {
       version: s.version ?? null,
       startedAt: s.startedAt ? new Date(s.startedAt).toISOString() : null,
       updatedAt: s.updatedAt ? new Date(s.updatedAt).toISOString() : null,
+      // A command an agent can run verbatim; offline sessions cannot be talked
+      // to until they start again, so the text output withholds it too.
+      talk: s.online
+        ? { target: name, command: `use-code-cli talk ${name} "your message"` }
+        : null,
+      crons: crons.map((c) => ({
+        id: c.id,
+        cron: c.cron,
+        schedule: c.schedule ?? null,
+        recurring: c.recurring,
+        prompt: c.prompt,
+        createdAt: c.createdAt ? new Date(c.createdAt).toISOString() : null,
+      })),
     },
   };
 }
 
 export const sessionCommand: CLICommand = {
   name: "session",
-  description: "Show one session's workspace, hero, and how to talk to it",
+  description: "Show one session's workspace, hero, cron jobs, and how to talk to it",
   inputSchema: SessionArgsSchema,
   positionalKeys: ["target"],
   execute: session,
   examples: [
-    "use-code-cli session use-design-05",
     "use-code-cli session 49606 --json",
   ],
 };

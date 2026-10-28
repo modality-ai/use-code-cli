@@ -15,6 +15,24 @@
 use-code-cli <command> [args]
 ```
 
+### `session`
+
+Show one session's workspace, hero, git branch, transcript, and cron jobs.
+
+```bash
+use-code-cli session <target>
+```
+
+`target` is a session name, pid, or sessionId (a unique name prefix also
+works). The cron block is recovered from the transcript, since Claude Code
+keeps cron jobs in memory only: every job a `CronCreate` result assigned an id
+to, minus every job a `CronDelete` confirmed. A job that already fired or
+passed its 7-day expiry can still be listed. For an offline session the block
+shows the last known jobs, which died with that session. With `--json`, the
+rows include a `talk` command an agent can run verbatim (`null` when the
+session is offline) and a `crons` array with each job's id, cron expression,
+human schedule, prompt, and creation time.
+
 ### `prompts`
 
 List the prompts sessions received, or search only prompts — assistant replies

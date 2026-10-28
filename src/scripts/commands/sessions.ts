@@ -28,6 +28,12 @@ const SessionsArgsSchema = z.object({
       "Only sessions whose name matches any of these comma-separated texts (case-insensitive)",
     ),
   "filter-status": filterStatusField,
+  "filter-hero": z
+    .string()
+    .optional()
+    .describe(
+      "Only sessions whose hero matches any of these comma-separated names (case-insensitive)",
+    ),
   recent: optionalValueFlag("10")
     .refine(
       (v) => v === undefined || v === "" || (/^\d+$/.test(v) && Number(v) > 0),
@@ -91,7 +97,11 @@ function baseRow(s: SessionInfo, meta: TranscriptMeta = {}): Row {
 }
 
 /** Search the whole candidate list, keeping only sessions that contain the term. */
-async function searchRows(list: SessionInfo[], term: string): Promise<Row[]> {
+async function searchRows(
+  list: SessionInfo[],
+  term: string,
+  metas: Map<SessionInfo, TranscriptMeta>,
+): Promise<Row[]> {
   const rows: Row[] = [];
   for (let i = 0; i < list.length; i += SEARCH_CONCURRENCY) {
     const batch = list.slice(i, i + SEARCH_CONCURRENCY);
@@ -99,7 +109,7 @@ async function searchRows(list: SessionInfo[], term: string): Promise<Row[]> {
       batch.map(async (s) => {
         const [match, meta] = await Promise.all([
           searchTranscript(s, term),
-          readTranscriptMeta(s),
+          metas.get(s) ?? readTranscriptMeta(s),
         ]);
         return { s, meta, match };
       }),
@@ -118,10 +128,13 @@ async function searchRows(list: SessionInfo[], term: string): Promise<Row[]> {
 }
 
 async function sessions(args: SessionsArgs) {
-  const filter: SessionFilter = {
+  // Name and status are in the session file; hero is only in the transcript, so
+  // it is checked in its own pass once each candidate's meta is read.
+  const fieldFilter: SessionFilter = {
     filterName: args["filter-name"],
     filterStatus: args["filter-status"],
   };
+  const filter: SessionFilter = { ...fieldFilter, filterHero: args["filter-hero"] };
   // Bare --recent arrives as "10"; absent and --no-recent mean no limit.
   const limit = args.recent ? Number(args.recent) : undefined;
   // Searching reads transcripts, so it applies to every known session, not just live ones.
@@ -129,18 +142,33 @@ async function sessions(args: SessionsArgs) {
 
   const all = await readSessions(includeOffline);
   const matching = (includeOffline ? all : all.filter((s) => s.online)).filter((s) =>
-    matchesSessionFilter(s, filter),
+    matchesSessionFilter(s, fieldFilter),
   );
-  const list = limit === undefined ? matching : matching.slice(0, limit);
-  const hidden = matching.length - list.length;
+
+  // Hero is only in the transcript, so narrowing on it reads each candidate's
+  // meta up front — before --recent trims the list. Keep the metas for rendering.
+  const metas = new Map<SessionInfo, TranscriptMeta>();
+  let candidates = matching;
+  if (filter.filterHero !== undefined) {
+    const read = await Promise.all(
+      matching.map(async (s) => ({ s, meta: await readTranscriptMeta(s) })),
+    );
+    for (const { s, meta } of read) metas.set(s, meta);
+    candidates = read
+      .filter(({ s, meta }) => matchesSessionFilter({ ...s, hero: meta.hero }, filter))
+      .map(({ s }) => s);
+  }
+
+  const list = limit === undefined ? candidates : candidates.slice(0, limit);
+  const hidden = candidates.length - list.length;
 
   let rows: Row[];
   if (args.search !== undefined) {
-    rows = await searchRows(list, args.search);
+    rows = await searchRows(list, args.search, metas);
   } else {
     rows = await Promise.all(
       list.map(async (s) => {
-        const meta = await readTranscriptMeta(s);
+        const meta = metas.get(s) ?? (await readTranscriptMeta(s));
         return {
           ...baseRow(s, meta),
           branch: meta.branch ?? null,
@@ -152,7 +180,7 @@ async function sessions(args: SessionsArgs) {
 
   const filters = describeSessionFilter(filter);
   const lines = rows.flatMap((r) => {
-    const head = `[${r.state}] ${r.name || r.sessionId}  pid=${r.pid}  ${r.status}  hero=${r.hero ?? "-"}  ${r.cwd}`;
+    const head = `[${r.state}] ${r.name || r.sessionId}  hero=${r.hero ?? "-"}  ${r.status}  pid=${r.pid}  ${r.cwd}`;
     const detail =
       args.search !== undefined
         ? `match: ${r.matches} hit${r.matches === 1 ? "" : "s"} · line ${r.line} · "${r.snippet}"`
@@ -190,6 +218,8 @@ export const sessionsCommand: CLICommand = {
     "use-code-cli sessions --all --recent",
     "use-code-cli sessions --all --recent 30",
     "use-code-cli sessions --filter-status busy",
+    "use-code-cli sessions --filter-hero JAMES",
+    "use-code-cli sessions --filter-hero JAMES,WANDA",
     "use-code-cli sessions --filter-name use-design,use-stock",
     'use-code-cli sessions --search "use-code-cli talk"',
   ],

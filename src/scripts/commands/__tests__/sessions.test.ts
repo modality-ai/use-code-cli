@@ -159,6 +159,66 @@ describe("sessions", () => {
     expect(res.out).toContain("beta");
   });
 
+  it("--filter-hero keeps only sessions with that hero", async () => {
+    const h = setup();
+    const design = h.addSession("use-design-05", "idle");
+    const stock = h.addSession("use-stock-01", "idle");
+    h.addSession("bare", "idle");
+    h.addTranscript(design.cwd, design.sessionId, [deployLine("WANDA")]);
+    h.addTranscript(stock.cwd, stock.sessionId, [deployLine("PEPPER")]);
+
+    const res = await h.run("sessions", "--filter-hero", "wanda");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toContain("use-design-05");
+    expect(res.out).not.toContain("use-stock-01");
+    expect(res.out).not.toContain("bare");
+  });
+
+  it("--filter-hero accepts a comma-separated list", async () => {
+    const h = setup();
+    const design = h.addSession("use-design-05", "idle");
+    const stock = h.addSession("use-stock-01", "idle");
+    const island = h.addSession("use-island-ce", "idle");
+    h.addTranscript(design.cwd, design.sessionId, [deployLine("WANDA")]);
+    h.addTranscript(stock.cwd, stock.sessionId, [deployLine("PEPPER")]);
+    h.addTranscript(island.cwd, island.sessionId, [deployLine("JAMES")]);
+
+    const res = await h.run("sessions", "--filter-hero", "WANDA, james");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toContain("use-design-05");
+    expect(res.out).toContain("use-island-ce");
+    expect(res.out).not.toContain("use-stock-01");
+  });
+
+  it("--filter-hero narrows before --recent trims the list", async () => {
+    const h = setup();
+    const now = Date.now();
+    // The newer PEPPER session would fill --recent 1 if hero filtered after it.
+    const wanda = h.addSession("wanda-old", "idle", now - 60_000);
+    const pepper = h.addSession("pepper-new", "idle", now);
+    h.addTranscript(wanda.cwd, wanda.sessionId, [deployLine("WANDA")]);
+    h.addTranscript(pepper.cwd, pepper.sessionId, [deployLine("PEPPER")]);
+
+    const res = await h.run("sessions", "--filter-hero", "WANDA", "--recent", "1");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toContain("wanda-old");
+    expect(res.out).not.toContain("pepper-new");
+    expect(res.out).not.toContain("older session");
+  });
+
+  it("names --filter-hero when nothing matches", async () => {
+    const h = setup();
+    h.addSession("alpha", "busy");
+
+    const res = await h.run("sessions", "--filter-hero", "WANDA");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toContain("No active sessions matching --filter-hero=WANDA");
+  });
+
   it("combines both filters", async () => {
     const h = setup();
     h.addSession("use-design-05", "busy");
@@ -259,6 +319,8 @@ describe("sessions — --recent", () => {
     expect(res.code).toBe(0);
     expect(res.out).toContain("use-design-05");
     expect(res.out).toContain("hero=WANDA");
+    // hero is listed before pid on the head line.
+    expect(res.out.indexOf("hero=")).toBeLessThan(res.out.indexOf("pid="));
     expect(res.out).toContain("branch=main");
   });
 

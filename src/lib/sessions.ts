@@ -27,10 +27,11 @@ export interface SessionInfo extends SessionFile {
   online: boolean;
 }
 
-/** What `--filter-name` / `--filter-status` narrow a session list to. */
+/** What `--filter-name` / `--filter-status` / `--filter-hero` narrow a session list to. */
 export interface SessionFilter {
   filterName?: string;
   filterStatus?: string;
+  filterHero?: string;
 }
 
 /** The values `--filter-status` accepts. */
@@ -45,11 +46,12 @@ export function splitFilterTerms(value: string | undefined): string[] {
 }
 
 /**
- * True when a session passes the name/status filters; an absent or empty filter
- * passes. Both filters take a comma-separated list and match any of its terms.
+ * True when a session passes the name/status/hero filters; an absent or empty
+ * filter passes. Each filter takes a comma-separated list and matches any of
+ * its terms. Hero lives in the transcript, so callers supply it once read.
  */
 export function matchesSessionFilter(
-  s: { name?: string; status?: string },
+  s: { name?: string; status?: string; hero?: string | null },
   filter: SessionFilter,
 ): boolean {
   const nameTerms = splitFilterTerms(filter.filterName);
@@ -62,6 +64,12 @@ export function matchesSessionFilter(
   if (statusTerms.length > 0 && !statusTerms.includes((s.status ?? "").toLowerCase())) {
     return false;
   }
+
+  const heroTerms = splitFilterTerms(filter.filterHero);
+  if (heroTerms.length > 0) {
+    const hero = (s.hero ?? "").toLowerCase();
+    if (!heroTerms.some((term) => hero.includes(term))) return false;
+  }
   return true;
 }
 
@@ -70,6 +78,7 @@ export function describeSessionFilter(filter: SessionFilter): string {
   const parts: string[] = [];
   if (filter.filterName !== undefined) parts.push(`--filter-name=${filter.filterName}`);
   if (filter.filterStatus !== undefined) parts.push(`--filter-status=${filter.filterStatus}`);
+  if (filter.filterHero !== undefined) parts.push(`--filter-hero=${filter.filterHero}`);
   return parts.length > 0 ? ` matching ${parts.join(" ")}` : "";
 }
 
@@ -455,6 +464,120 @@ function promptFromLine(raw: string, line: number): SessionPrompt | undefined {
     timestamp: Number.isNaN(timestamp) ? undefined : timestamp,
     text: cleaned,
   };
+}
+
+/** One cron job a session scheduled, recovered from its transcript. */
+export interface SessionCron {
+  /** Job id Claude Code assigned, as CronCreate's result reported it. */
+  id: string;
+  /** Cron expression the job was created with, e.g. "2-59/5 * * * *". */
+  cron: string;
+  /** Human schedule from the result, e.g. "Every 5 minutes". */
+  schedule?: string;
+  recurring: boolean;
+  /** The prompt the job runs each tick. */
+  prompt: string;
+  /** When the job was created, in epoch milliseconds. */
+  createdAt?: number;
+  /** 1-based transcript line of the CronCreate call. */
+  line: number;
+}
+
+interface CronToolBlock {
+  type?: string;
+  id?: string;
+  name?: string;
+  tool_use_id?: string;
+  content?: unknown;
+  input?: { cron?: unknown; prompt?: unknown; recurring?: unknown };
+}
+
+/** The scheduled job a CronCreate result describes, with its human schedule. */
+const SCHEDULED_PATTERN =
+  /Scheduled\s+(?:recurring\s+|one-shot\s+|one-time\s+|single\s+)?job\s+([A-Za-z0-9_-]+)(?:\s*\(([^)]*)\))?/;
+
+/** The job a CronDelete result confirms it cancelled. */
+const CANCELLED_PATTERN = /Cancelled\s+job\s+([A-Za-z0-9_-]+)/;
+
+/**
+ * Cron jobs a session's transcript still has scheduled: every CronCreate whose
+ * result assigned an id, minus every job a CronDelete confirmed it cancelled.
+ * Claude Code keeps cron jobs in memory only, so the transcript is the only
+ * durable record — after the session exits, the list is what it last held.
+ */
+export async function readCronJobs(s: SessionInfo): Promise<SessionCron[]> {
+  const path = await transcriptPath(s);
+  if (!path) return [];
+
+  const lines = createInterface({
+    input: createReadStream(path, "utf8"),
+    crlfDelay: Infinity,
+  });
+
+  /** CronCreate calls waiting for the result that carries the job id. */
+  const pending = new Map<
+    string,
+    { cron: string; prompt: string; recurring: boolean; createdAt?: number; line: number }
+  >();
+  const active = new Map<string, SessionCron>();
+  let lineNo = 0;
+
+  for await (const raw of lines) {
+    lineNo++;
+    let entry: { timestamp?: string; message?: { content?: unknown } };
+    try {
+      entry = JSON.parse(raw) as typeof entry;
+    } catch {
+      continue;
+    }
+    const content = entry.message?.content;
+    if (!Array.isArray(content)) continue;
+    const at = entry.timestamp ? Date.parse(entry.timestamp) : Number.NaN;
+
+    for (const block of content as CronToolBlock[]) {
+      if (!block || typeof block !== "object") continue;
+
+      if (block.type === "tool_use" && block.name === "CronCreate") {
+        const input = block.input ?? {};
+        if (typeof block.id !== "string") continue;
+        if (typeof input.cron !== "string" || typeof input.prompt !== "string") continue;
+        pending.set(block.id, {
+          cron: input.cron,
+          prompt: input.prompt,
+          recurring: input.recurring !== false,
+          createdAt: Number.isNaN(at) ? undefined : at,
+          line: lineNo,
+        });
+        continue;
+      }
+
+      if (block.type !== "tool_result") continue;
+      const text = contentText(block.content);
+
+      const cancelled = CANCELLED_PATTERN.exec(text)?.[1];
+      if (cancelled) {
+        active.delete(cancelled);
+        continue;
+      }
+
+      const scheduled = SCHEDULED_PATTERN.exec(text);
+      const jobId = scheduled?.[1];
+      const created = block.tool_use_id ? pending.get(block.tool_use_id) : undefined;
+      if (!jobId || !created || !block.tool_use_id) continue;
+      active.set(jobId, {
+        id: jobId,
+        cron: created.cron,
+        schedule: scheduled[2] || undefined,
+        recurring: created.recurring,
+        prompt: created.prompt,
+        createdAt: created.createdAt,
+        line: created.line,
+      });
+      pending.delete(block.tool_use_id);
+    }
+  }
+
+  return [...active.values()];
 }
 
 /** Every prompt a session's transcript records, oldest first. */
