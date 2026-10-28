@@ -1,6 +1,6 @@
 ---
 name: "*use-code-cli"
-description: "TODO: description"
+description: "Supervise other Claude Code sessions from a /loop tick: read state, detect progress, nudge, escalate, and stop."
 ---
 
 ```yaml
@@ -8,35 +8,92 @@ method:
   name: "*use-code-cli"
   icon: 🛠️
   category: cli
-  introduce: "TODO: description"
+  introduce: "Drive use-code-cli from a /loop tick to supervise agent sessions: read state, detect progress, nudge, escalate, and stop."
   usage:
     method: "*use-code-cli [task]"
     parameters:
       task:
-        description: Natural-language task to turn into a use-code-cli command.
+        description: Natural-language task to turn into use-code-cli commands (often a supervision tick).
         type: string
         required: false
     examples:
-      - "*use-code-cli run foo against my-target → build the command and run it"
+      - "*use-code-cli watch three agents → build the tick commands and run one tick"
+      - "*use-code-cli who is stuck → list sessions, classify busy/idle, and report blockers"
   agent_compatibility:
     - "✅ JAMES (Full Stack Developer) - CLI orchestration"
+    - "✅ SARAH (Product Owner) - multi-agent supervision and escalation"
 
 methodology:
-  purpose: >-
-    Translate the user's task into a use-code-cli command, run it, and report the result.
+  purpose: "Turn a /loop tick into disciplined supervision of other Claude Code sessions by reading their state, diffing their work, and acting only on a real condition."
   expected_output:
-    - The command that was run, in a bash-fenced code block
-    - The command output in full, including exit status and any stderr
-    - A plain-language interpretation of the result
+    - "The exact use-code-cli commands run this tick, in a fenced block, with flags spelled out."
+    - "Per-session state read from sessions: name, hero, status (busy or idle), and last prompt."
+    - "Objective evidence of progress since the previous tick, such as git status or key file mtimes."
+    - "Every nudge sent, with its msg_id, or an explicit statement that no nudge was warranted."
+    - "The stop condition met this tick, or a one-line reason the loop should keep running."
 
-integration_protocols:
-  run:
-    command: "use-code-cli foo <target>"
-    alias: "use-code-cli f <target>"
-    help: "use-code-cli --help"
+usage_modes:
+  decide-without-asking:
+    purpose: "Settle operational questions inside an existing mandate instead of returning them to the owner, so a product-owner agent keeps work moving between check-ins."
+    when_to_trigger:
+      - "A defect, wording gap, or sequencing choice appears while executing an approved task."
+      - "The owner has said to keep assigning work, or has asked for fewer questions."
+    execution_flow:
+      - "Classify the open question: documentation wording, defect registration, fix approach, priority, or evidence gathering."
+      - "Vector: if the choice is reversible and stays inside the approved scope, decide it and record the decision with its evidence."
+      - "Pick the option that keeps existing design intent and touches the fewest files; prefer a doc correction over a layout change."
+      - "Write the decision where the team reads it — the backlog or progress file — before dispatching the follow-up work."
+      - "Dispatch the next action to the agent who owns the lane, with acceptance criteria and the measuring method."
+      - "Report the decision, its evidence, the next action, and what would reverse it; ask only if the choice is irreversible."
+    fallback:
+      - "If two options are equally safe and the owner's preference is unknown, choose the reversible one and say it can be reverted."
+      - "If the action would spend money, change product scope, publish externally, or rewrite history, surface it to the owner instead."
+    usage_example:
+      - "*use-code-cli keep going after the QA report → decide the open defects, record them, and dispatch the next verification"
+
+  supervise-agents:
+    purpose: "Run one supervision tick inside a /loop: read sessions, classify each target, nudge or escalate, then decide whether to stop."
+    when_to_trigger:
+      - "The owner asks to watch, tick, poll, or supervise other agent sessions on an interval."
+      - "A delegated task needs a supervisor that nudges idle agents without re-assigning the work."
+    execution_flow:
+      - "Read state with use-code-cli sessions --json, keeping name, hero, status, cwd and lastPrompt."
+      - "Diff against the previous tick: git status in each cwd, plus mtimes of that work's key files."
+      - "Classify each target: busy with new files means leave it alone; busy with none means nudge once."
+      - "For idle with no new files, increment that session's idle counter and apply the escalation ladder."
+      - "Nudge with use-code-cli talk <session> --- <message>; add --one-way when no reply is wanted."
+      - "Escalate to the owner after three consecutive idle ticks; never hand the work to another agent."
+      - "Stop the loop when the work is finished: end /loop, or delete the cron entry it created."
+    fallback:
+      - "If talk fails to deliver, report the exact error and keep the previous idle count."
+      - "If a session is missing entirely, say so plainly instead of treating it as idle."
+    usage_example:
+      - "/loop 5m read use-code-cli sessions, diff each cwd, and nudge idle agents with no new files"
 
 tactical_notes:
+  action_checklists:
+    tick:
+      - "Read sessions --json, keeping name, hero, status, cwd and lastPrompt for each target."
+      - "Diff against the previous tick with git status and the key files' mtimes."
+      - "Classify busy or idle, then nudge, wait, or escalate accordingly."
+      - "Check the stop condition before ending the tick."
+    escalation:
+      - "First idle tick: nudge with the missing deliverable named explicitly."
+      - "Second idle tick: ask what blocks it and supply the missing input, approval or spec."
+      - "Third idle tick: report the blocker and the handling to the owner, keeping the same agent."
+    stop:
+      - "End /loop or delete its cron entry once the deliverable passes its acceptance checks."
+      - "Stop when the owner cancels, or when the same blocker stands for three consecutive ticks."
+    decide:
+      - "Decide reversible, in-scope questions alone and record the decision with its evidence."
+      - "Ask only when the action is irreversible, costs money, changes product scope, or publishes externally."
+      - "Never end a turn with a question when an existing rule already covers the case."
   mission_critical:
-    - "Run use-code-cli --help to confirm available commands before building one"
-    - "Check the command output for success before reporting the result"
+    - "A tick that changes nothing should say so in one line; long status prose burns the owner's attention."
+    - "Nudge only on a real condition; repeating the same message because the state did not change is noise."
+    - "Before calling an agent idle, check its transcript for API or auth errors; silence is not always laziness."
+    - "Never run /loop inside a supervised session; recursive ticks multiply costs without adding information."
+    - "Keep ticks at 60s or more, prefer 270s to stay in the prompt cache, and use 1200s+ when nothing is moving."
+    - "End the loop as soon as the work is done; an idle loop spends tokens to report that nothing happened."
+    - "A question to the owner costs a round trip; when the rules already answer it, decide and state the rollback."
 ```
