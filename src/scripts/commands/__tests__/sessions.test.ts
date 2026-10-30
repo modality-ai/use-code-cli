@@ -313,6 +313,47 @@ describe("sessions", () => {
   });
 });
 
+describe("sessions — offline filters", () => {
+  it("--filter-name falls back to the workspace folder", async () => {
+    const h = setup();
+    h.addTranscript("/repo/use-design", "dead-design", [
+      { type: "user", message: { content: "finished" } },
+    ]);
+    h.addTranscript("/repo/use-stock", "dead-stock", [
+      { type: "user", message: { content: "finished" } },
+    ]);
+
+    const res = await h.run("sessions", "--all", "--filter-name", "use-design");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toContain("dead-design");
+    expect(res.out).not.toContain("dead-stock");
+  });
+
+  it("--filter-folder matches the folder a session cd'd into", async () => {
+    const h = setup();
+    // The move sits past the head window, so only the transcript tail shows it.
+    const filler = {
+      type: "user",
+      message: { role: "user", content: [{ type: "text", text: "x".repeat(80 * 1024) }] },
+    };
+    h.addTranscript("/repo/use-design", "moved-session", [
+      { type: "user", message: { content: "start" } },
+      filler,
+      { type: "user", cwd: "/repo/use-design/app", message: { content: "later" } },
+    ]);
+
+    const byEnd = await h.run("sessions", "--all", "--filter-folder", "app");
+    expect(byEnd.code).toBe(0);
+    expect(byEnd.out).toContain("moved-session");
+
+    // The launch folder still matches too.
+    const byStart = await h.run("sessions", "--all", "--filter-folder", "use-design");
+    expect(byStart.code).toBe(0);
+    expect(byStart.out).toContain("moved-session");
+  });
+});
+
 describe("sessions — --recent", () => {
   it("--recent N keeps only the newest N sessions", async () => {
     const h = setup();

@@ -25,6 +25,11 @@ export interface SessionFile {
 
 export interface SessionInfo extends SessionFile {
   online: boolean;
+  /**
+   * Folder the session ended in, when a transcript shows it `cd`'d away from
+   * where it launched. Offline sessions only; `--filter-folder` matches both.
+   */
+  latestCwd?: string;
 }
 
 /** What `--filter-name` / `--filter-status` / `--filter-hero` / `--filter-folder` narrow a session list to. */
@@ -52,12 +57,20 @@ export function splitFilterTerms(value: string | undefined): string[] {
  * of its terms. Hero lives in the transcript, so callers supply it once read.
  */
 export function matchesSessionFilter(
-  s: { name?: string; status?: string; hero?: string | null; cwd?: string },
+  s: {
+    name?: string;
+    status?: string;
+    hero?: string | null;
+    cwd?: string;
+    latestCwd?: string;
+  },
   filter: SessionFilter,
 ): boolean {
   const nameTerms = splitFilterTerms(filter.filterName);
   if (nameTerms.length > 0) {
-    const name = (s.name ?? "").toLowerCase();
+    // Claude Code deletes the pid file that carried an offline session's name,
+    // so fall back to its workspace folder — the label the name was derived from.
+    const name = (s.name ?? basename(s.cwd ?? "")).toLowerCase();
     if (!nameTerms.some((term) => name.includes(term))) return false;
   }
 
@@ -75,9 +88,14 @@ export function matchesSessionFilter(
   const folderTerms = splitFilterTerms(filter.filterFolder);
   if (folderTerms.length > 0) {
     // A keyword names the workspace folder itself, so only its basename is
-    // matched — a parent directory in the path never counts.
-    const folder = basename(s.cwd ?? "").toLowerCase();
-    if (!folderTerms.some((term) => folder.includes(term))) return false;
+    // matched — a parent directory in the path never counts. A session that
+    // moved during its life counts under both the launch and the final folder.
+    const folders = [s.cwd, s.latestCwd]
+      .filter((path): path is string => path !== undefined)
+      .map((path) => basename(path).toLowerCase());
+    if (!folderTerms.some((term) => folders.some((folder) => folder.includes(term)))) {
+      return false;
+    }
   }
   return true;
 }
@@ -132,28 +150,43 @@ function isAlive(pid: number): boolean {
   }
 }
 
-/** How much of a transcript's head to read when only its cwd is needed. */
+/** How much of a transcript's head and tail to read when only a cwd is needed. */
 const CWD_SCAN_BYTES = 65536;
+
+const CWD_PATTERN = /"cwd":"((?:[^"\\]|\\.)*)"/g;
+
+/** The workspace path recorded last in `text`, unescaped. */
+function lastCwdIn(text: string): string | undefined {
+  const cwd = lastMatch(CWD_PATTERN, text);
+  return cwd === undefined ? undefined : unescapeJsonString(cwd);
+}
+
+/**
+ * The workspace paths a transcript records: the last cwd in its first 64 KiB,
+ * and the last cwd in its last 64 KiB. A session that `cd`s elsewhere keeps
+ * writing the new path, so the tail is what `--filter-folder` needs to still
+ * find the folder a session moved to.
+ */
+export async function readTranscriptCwds(
+  path: string,
+): Promise<{ start?: string; end?: string }> {
+  try {
+    const { size } = await stat(path);
+    const start = lastCwdIn(await readChunk(path, 0, Math.min(CWD_SCAN_BYTES, size)));
+    if (size <= CWD_SCAN_BYTES) return { start, end: start };
+    const tail = await readChunk(path, size - CWD_SCAN_BYTES, CWD_SCAN_BYTES);
+    return { start, end: lastCwdIn(tail) };
+  } catch {
+    return {};
+  }
+}
 
 /**
  * The workspace path recorded near the top of a transcript. Returns undefined
  * when the file is unreadable or records no cwd.
  */
 export async function readTranscriptCwd(path: string): Promise<string | undefined> {
-  try {
-    const fh = await open(path, "r");
-    try {
-      const buf = Buffer.alloc(CWD_SCAN_BYTES);
-      const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
-      const head = buf.toString("utf8", 0, bytesRead);
-      const cwd = /"cwd":"((?:[^"\\]|\\.)*)"/.exec(head)?.[1];
-      return cwd ? unescapeJsonString(cwd) : undefined;
-    } finally {
-      await fh.close();
-    }
-  } catch {
-    return undefined;
-  }
+  return (await readTranscriptCwds(path)).start;
 }
 
 /** Every session file, live or stale — `online` tells them apart. */
@@ -206,11 +239,12 @@ async function readOfflineSessions(known: Set<string>): Promise<SessionInfo[]> {
       const path = join(PROJECTS_DIR, project, file);
       try {
         const st = await stat(path);
-        const cwd = await readTranscriptCwd(path);
+        const { start, end } = await readTranscriptCwds(path);
         out.push({
           pid: 0,
           sessionId,
-          cwd: cwd ?? project,
+          cwd: start ?? project,
+          latestCwd: end,
           startedAt: st.birthtimeMs,
           updatedAt: st.mtimeMs,
           status: "offline",

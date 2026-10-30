@@ -25,7 +25,7 @@ const SessionsArgsSchema = z.object({
     .string()
     .optional()
     .describe(
-      "Only sessions whose name matches any of these comma-separated texts (case-insensitive)",
+      "Only sessions whose name — or workspace folder, for offline sessions — matches any of these comma-separated texts (case-insensitive)",
     ),
   "filter-status": filterStatusField,
   "filter-hero": z
@@ -38,7 +38,7 @@ const SessionsArgsSchema = z.object({
     .string()
     .optional()
     .describe(
-      "Only sessions whose workspace folder name matches any of these comma-separated keywords (case-insensitive)",
+      "Only sessions whose workspace folder name — where it launched or where it ended — matches any of these comma-separated keywords (case-insensitive)",
     ),
   recent: optionalValueFlag("10")
     .refine(
