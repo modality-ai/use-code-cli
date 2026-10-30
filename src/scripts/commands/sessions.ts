@@ -34,6 +34,12 @@ const SessionsArgsSchema = z.object({
     .describe(
       "Only sessions whose hero matches any of these comma-separated names (case-insensitive)",
     ),
+  "filter-folder": z
+    .string()
+    .optional()
+    .describe(
+      "Only sessions whose workspace folder name matches any of these comma-separated keywords (case-insensitive)",
+    ),
   recent: optionalValueFlag("10")
     .refine(
       (v) => v === undefined || v === "" || (/^\d+$/.test(v) && Number(v) > 0),
@@ -76,7 +82,7 @@ const SEARCH_CONCURRENCY = 8;
 function summaryLine(meta: { branch?: string; lastPrompt?: string }): string {
   return [
     meta.branch ? `branch=${meta.branch}` : "",
-    meta.lastPrompt ? `last="${oneLine(meta.lastPrompt, 80)}"` : "",
+    meta.lastPrompt ? `last="${oneLine(meta.lastPrompt, 140)}"` : "",
   ]
     .filter(Boolean)
     .join("  ");
@@ -128,11 +134,13 @@ async function searchRows(
 }
 
 async function sessions(args: SessionsArgs) {
-  // Name and status are in the session file; hero is only in the transcript, so
-  // it is checked in its own pass once each candidate's meta is read.
+  // Name, status, and workspace folder are in the session file; hero is only in
+  // the transcript, so it is checked in its own pass once each candidate's meta
+  // is read.
   const fieldFilter: SessionFilter = {
     filterName: args["filter-name"],
     filterStatus: args["filter-status"],
+    filterFolder: args["filter-folder"],
   };
   const filter: SessionFilter = { ...fieldFilter, filterHero: args["filter-hero"] };
   // Bare --recent arrives as "10"; absent and --no-recent mean no limit.
@@ -221,6 +229,8 @@ export const sessionsCommand: CLICommand = {
     "use-code-cli sessions --filter-hero JAMES",
     "use-code-cli sessions --filter-hero JAMES,WANDA",
     "use-code-cli sessions --filter-name use-design,use-stock",
+    "use-code-cli sessions --filter-folder use-code-cli",
+    "use-code-cli sessions --filter-folder design,stock",
     'use-code-cli sessions --search "use-code-cli talk"',
   ],
 };

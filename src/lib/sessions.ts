@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { open, readdir, readFile, stat } from "node:fs/promises";
@@ -27,11 +27,12 @@ export interface SessionInfo extends SessionFile {
   online: boolean;
 }
 
-/** What `--filter-name` / `--filter-status` / `--filter-hero` narrow a session list to. */
+/** What `--filter-name` / `--filter-status` / `--filter-hero` / `--filter-folder` narrow a session list to. */
 export interface SessionFilter {
   filterName?: string;
   filterStatus?: string;
   filterHero?: string;
+  filterFolder?: string;
 }
 
 /** The values `--filter-status` accepts. */
@@ -46,12 +47,12 @@ export function splitFilterTerms(value: string | undefined): string[] {
 }
 
 /**
- * True when a session passes the name/status/hero filters; an absent or empty
- * filter passes. Each filter takes a comma-separated list and matches any of
- * its terms. Hero lives in the transcript, so callers supply it once read.
+ * True when a session passes the name/status/hero/folder filters; an absent or
+ * empty filter passes. Each filter takes a comma-separated list and matches any
+ * of its terms. Hero lives in the transcript, so callers supply it once read.
  */
 export function matchesSessionFilter(
-  s: { name?: string; status?: string; hero?: string | null },
+  s: { name?: string; status?: string; hero?: string | null; cwd?: string },
   filter: SessionFilter,
 ): boolean {
   const nameTerms = splitFilterTerms(filter.filterName);
@@ -70,6 +71,14 @@ export function matchesSessionFilter(
     const hero = (s.hero ?? "").toLowerCase();
     if (!heroTerms.some((term) => hero.includes(term))) return false;
   }
+
+  const folderTerms = splitFilterTerms(filter.filterFolder);
+  if (folderTerms.length > 0) {
+    // A keyword names the workspace folder itself, so only its basename is
+    // matched — a parent directory in the path never counts.
+    const folder = basename(s.cwd ?? "").toLowerCase();
+    if (!folderTerms.some((term) => folder.includes(term))) return false;
+  }
   return true;
 }
 
@@ -79,6 +88,7 @@ export function describeSessionFilter(filter: SessionFilter): string {
   if (filter.filterName !== undefined) parts.push(`--filter-name=${filter.filterName}`);
   if (filter.filterStatus !== undefined) parts.push(`--filter-status=${filter.filterStatus}`);
   if (filter.filterHero !== undefined) parts.push(`--filter-hero=${filter.filterHero}`);
+  if (filter.filterFolder !== undefined) parts.push(`--filter-folder=${filter.filterFolder}`);
   return parts.length > 0 ? ` matching ${parts.join(" ")}` : "";
 }
 

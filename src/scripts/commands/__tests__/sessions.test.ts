@@ -26,11 +26,15 @@ function setup() {
   });
 
   /** Register a live session, backed by a `sleep` so it counts as online. */
-  function addSession(name: string, status: string, updatedAt = Date.now()) {
+  function addSession(
+    name: string,
+    status: string,
+    updatedAt = Date.now(),
+    cwd = `/w/${name}`,
+  ) {
     const proc = Bun.spawn(["sleep", "30"]);
     sleeps.push(proc);
     const sessionId = `session-${proc.pid}`;
-    const cwd = `/w/${name}`;
     writeFileSync(
       join(sessionsDir, `${proc.pid}.json`),
       JSON.stringify({
@@ -219,6 +223,55 @@ describe("sessions", () => {
     expect(res.out).toContain("No active sessions matching --filter-hero=WANDA");
   });
 
+  it("--filter-folder keeps only sessions in that workspace folder", async () => {
+    const h = setup();
+    h.addSession("alpha", "idle", Date.now(), "/repo/use-code-cli");
+    h.addSession("beta", "idle", Date.now(), "/repo/use-design");
+
+    const res = await h.run("sessions", "--filter-folder", "USE-CODE");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toContain("alpha");
+    expect(res.out).not.toContain("beta");
+  });
+
+  it("--filter-folder matches a keyword against the folder name only", async () => {
+    const h = setup();
+    h.addSession("organism", "idle", Date.now(), "/repo/react-atomic-organism");
+    h.addSession("nested", "idle", Date.now(), "/organism/app");
+
+    const res = await h.run("sessions", "--filter-folder", "organism");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toContain("react-atomic-organism");
+    // A parent directory in the path is not the session's folder.
+    expect(res.out).not.toContain("/organism/app");
+  });
+
+  it("--filter-folder accepts a comma-separated list", async () => {
+    const h = setup();
+    h.addSession("alpha", "idle", Date.now(), "/repo/use-code-cli");
+    h.addSession("beta", "idle", Date.now(), "/repo/use-design");
+    h.addSession("gamma", "idle", Date.now(), "/repo/use-stock");
+
+    const res = await h.run("sessions", "--filter-folder", "use-code, stock");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toContain("alpha");
+    expect(res.out).toContain("gamma");
+    expect(res.out).not.toContain("beta");
+  });
+
+  it("names --filter-folder when nothing matches", async () => {
+    const h = setup();
+    h.addSession("alpha", "busy", Date.now(), "/repo/use-code-cli");
+
+    const res = await h.run("sessions", "--filter-folder", "nowhere");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toContain("No active sessions matching --filter-folder=nowhere");
+  });
+
   it("combines both filters", async () => {
     const h = setup();
     h.addSession("use-design-05", "busy");
@@ -307,6 +360,20 @@ describe("sessions — --recent", () => {
     expect(res.out).toContain("branch=main");
     expect(res.out).toContain("hero=WANDA");
     expect(res.out).toContain('last="fix the sidebar and rerun tests"');
+  });
+
+  it("shows more of a long last prompt than the old 80-character clip", async () => {
+    const h = setup();
+    const { sessionId, cwd } = h.addSession("use-design-05", "idle");
+    const prompt =
+      "please check the sidebar layout, every responsive breakpoint, and the dark mode contrast before shipping";
+    h.addTranscript(cwd, sessionId, [{ type: "last-prompt", lastPrompt: prompt }]);
+
+    const res = await h.run("sessions");
+
+    expect(res.code).toBe(0);
+    expect(prompt.length).toBeGreaterThan(80);
+    expect(res.out).toContain(`last="${prompt}"`);
   });
 
   it("shows each session's hero and transcript summary without --recent", async () => {
