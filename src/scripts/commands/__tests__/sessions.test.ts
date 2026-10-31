@@ -398,9 +398,9 @@ describe("sessions — --recent", () => {
     const res = await h.run("sessions", "--recent", "1");
 
     expect(res.code).toBe(0);
-    expect(res.out).toContain("branch=main");
-    expect(res.out).toContain("hero=WANDA");
-    expect(res.out).toContain('last="fix the sidebar and rerun tests"');
+    expect(res.out).toContain("main");
+    expect(res.out).toContain("WANDA");
+    expect(res.out).toContain('last: "fix the sidebar and rerun tests"');
   });
 
   it("shows more of a long last prompt than the old 80-character clip", async () => {
@@ -414,7 +414,7 @@ describe("sessions — --recent", () => {
 
     expect(res.code).toBe(0);
     expect(prompt.length).toBeGreaterThan(80);
-    expect(res.out).toContain(`last="${prompt}"`);
+    expect(res.out).toContain(`last: "${prompt}"`);
   });
 
   it("shows each session's hero and transcript summary without --recent", async () => {
@@ -426,10 +426,10 @@ describe("sessions — --recent", () => {
 
     expect(res.code).toBe(0);
     expect(res.out).toContain("use-design-05");
-    expect(res.out).toContain("hero=WANDA");
-    // hero is listed before pid on the head line.
-    expect(res.out.indexOf("hero=")).toBeLessThan(res.out.indexOf("pid="));
-    expect(res.out).toContain("branch=main");
+    expect(res.out).toContain("WANDA");
+    // hero column is listed before pid column on the table header.
+    expect(res.out.indexOf("hero")).toBeLessThan(res.out.indexOf("pid"));
+    expect(res.out).toContain("main");
   });
 
   it("shows the latest hero even when its Deploy is outside the head and tail windows", async () => {
@@ -451,8 +451,8 @@ describe("sessions — --recent", () => {
     const res = await h.run("sessions");
 
     expect(res.code).toBe(0);
-    expect(res.out).toContain("hero=SARAH");
-    expect(res.out).not.toContain("hero=FRIDAY");
+    expect(res.out).toContain("SARAH");
+    expect(res.out).not.toContain("FRIDAY");
   });
 
   it('renders "-" when a session has no hero', async () => {
@@ -463,7 +463,7 @@ describe("sessions — --recent", () => {
 
     expect(res.code).toBe(0);
     expect(res.out).toContain("alpha");
-    expect(res.out).toContain("hero=-");
+    expect(res.out).toContain(" - ");
   });
 
   it("rejects a non-positive --recent value", async () => {
@@ -516,7 +516,7 @@ describe("sessions — last prompt", () => {
     const res = await h.run("sessions");
 
     expect(res.code).toBe(0);
-    expect(res.out).toContain('last="please rerun the tests"');
+    expect(res.out).toContain('last: "please rerun the tests"');
     expect(res.out).not.toContain("Another Claude session sent a message");
     expect(res.out).not.toContain("typed earlier");
   });
@@ -542,7 +542,7 @@ describe("sessions — last prompt", () => {
     const res = await h.run("sessions");
 
     expect(res.code).toBe(0);
-    expect(res.out).toContain('last="check the build"');
+    expect(res.out).toContain('last: "check the build"');
     expect(res.out).not.toContain("cross-session-message");
   });
 
@@ -558,7 +558,7 @@ describe("sessions — last prompt", () => {
     const res = await h.run("sessions");
 
     expect(res.code).toBe(0);
-    expect(res.out).toContain('last="typed later"');
+    expect(res.out).toContain('last: "typed later"');
     expect(res.out).not.toContain("from a peer");
   });
 
@@ -573,7 +573,7 @@ describe("sessions — last prompt", () => {
     const res = await h.run("sessions");
 
     expect(res.code).toBe(0);
-    expect(res.out).toContain('last="typed later"');
+    expect(res.out).toContain('last: "typed later"');
   });
 });
 

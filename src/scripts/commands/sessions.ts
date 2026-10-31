@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { optionalValueFlag, type CLICommand } from "modality-cli-kit";
+import { optionalValueFlag, renderTable, type CLICommand } from "modality-cli-kit";
 import { oneLine } from "../../lib/format";
 import { filterStatusField } from "../../lib/flags";
 import {
@@ -186,29 +186,57 @@ async function sessions(args: SessionsArgs) {
     );
   }
 
-  const filters = describeSessionFilter(filter);
-  const lines = rows.flatMap((r) => {
-    const head = `[${r.state}] ${r.name || r.sessionId}  hero=${r.hero ?? "-"}  ${r.status}  pid=${r.pid}  ${r.cwd}`;
-    const detail =
+  if (rows.length > 0) {
+    const headers =
       args.search !== undefined
-        ? `match: ${r.matches} hit${r.matches === 1 ? "" : "s"} · line ${r.line} · "${r.snippet}"`
-        : summaryLine({
-            branch: r.branch ?? undefined,
-            lastPrompt: r.lastPrompt ?? undefined,
-          });
-    return detail ? [head, `          ${detail}`] : [head];
-  });
+        ? ["state", "name", "hero", "status", "pid", "matches", "line"]
+        : ["state", "name", "hero", "status", "pid", "branch"];
+    const tableRows = rows.map((r) => {
+      const hero = r.hero ?? "-";
+      const pid = String(r.pid);
+      if (args.search !== undefined) {
+        return [r.state, r.name || r.sessionId, hero, r.status, pid, String(r.matches ?? 0), String(r.line ?? 0)];
+      }
+      return [r.state, r.name || r.sessionId, hero, r.status, pid, r.branch ?? ""];
+    });
+    renderTable(headers, tableRows);
+
+    const largeLines: string[] = [];
+    if (args.search !== undefined) {
+      for (const r of rows) {
+        largeLines.push(`${r.name || r.sessionId}:`);
+        largeLines.push(`  match: ${r.matches} hit${r.matches === 1 ? "" : "s"} · line ${r.line} · "${r.snippet}"`);
+        largeLines.push(`  cwd:  ${r.cwd}`);
+        largeLines.push("");
+      }
+    } else {
+      for (const r of rows) {
+        largeLines.push(`${r.name || r.sessionId}:`);
+        if (r.lastPrompt) {
+          largeLines.push(`  last: "${oneLine(r.lastPrompt, 1000)}"`);
+        }
+        largeLines.push(`  cwd:  ${r.cwd}`);
+        largeLines.push("");
+      }
+    }
+    if (largeLines.length > 0) {
+      console.log();
+      for (const l of largeLines) console.log(l);
+    }
+  }
   if (hidden > 0) {
-    lines.push(`… ${hidden} older session${hidden === 1 ? "" : "s"} hidden; raise --recent to see more.`);
+    console.log(`\u2026 ${hidden} older session${hidden === 1 ? "" : "s"} hidden; raise --recent to see more.`);
   }
 
-  const message = lines.length
-    ? lines.join("\n")
-    : args.search !== undefined
-      ? `No sessions contain "${args.search}"${filters} (searched ${list.length}).`
-      : args.all
-        ? `No sessions found${filters}.`
-        : `No active sessions${filters}. Use --all to include offline sessions.`;
+  const filters = describeSessionFilter(filter);
+  const message =
+    rows.length === 0
+      ? args.search !== undefined
+        ? `No sessions contain "${args.search}"${filters} (searched ${list.length}).`
+        : args.all
+          ? `No sessions found${filters}.`
+          : `No active sessions${filters}. Use --all to include offline sessions.`
+      : undefined;
 
   return { success: true, message, data: rows };
 }
