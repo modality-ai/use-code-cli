@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -365,5 +365,82 @@ describe("session", () => {
         createdAt: "2026-10-28T00:00:00.000Z",
       },
     ]);
+  });
+
+  it("renames a live session and resolves it by the new name", async () => {
+    const h = setup();
+    const cwd = "/Volumes/GoldenSnake/git/use-design";
+    const sessionId = h.addSession("use-design-05", cwd);
+
+    const res = await h.run("session", "use-design-05", "--rename", "fix-auth");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toContain("Renamed session");
+    expect(res.out).toContain("fix-auth");
+    const names = JSON.parse(
+      readFileSync(join(h.home, ".claude", "sessions", "names.json"), "utf8"),
+    ) as Record<string, string>;
+    expect(names[sessionId]).toBe("fix-auth");
+
+    const after = await h.run("session", "fix-auth");
+    expect(after.code).toBe(0);
+    expect(after.out).toContain(cwd);
+    expect(after.out).toContain("user (--rename)");
+  });
+
+  it("refuses to rename a session to a name another session holds", async () => {
+    const h = setup();
+    h.addSession("use-design-05");
+    h.addSession("use-design-06");
+
+    const res = await h.run("session", "use-design-05", "--rename", "use-design-06");
+
+    expect(res.code).toBe(1);
+    expect(res.err).toContain("already taken");
+  });
+
+  it("renames and resolves an offline session by its sessionId", async () => {
+    const h = setup();
+    const cwd = "/Volumes/GoldenSnake/git/use-stock";
+    const sessionId = h.addTranscript(cwd, "dead-session", [deployLine("PEPPER")]);
+
+    const res = await h.run("session", "dead-session", "--rename", "fix-stock");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toContain("fix-stock");
+
+    const after = await h.run("session", "fix-stock");
+    expect(after.code).toBe(0);
+    expect(after.out).toContain("offline");
+    expect(after.out).toContain("PEPPER");
+  });
+
+  it("moves an offline session's transcript into a new project directory with --cwd", async () => {
+    const h = setup();
+    const cwd = "/Volumes/GoldenSnake/git/use-stock";
+    const newCwd = "/Volumes/GoldenSnake/git/use-island";
+    h.addTranscript(cwd, "dead-session", [deployLine("PEPPER")]);
+
+    const res = await h.run("session", "dead-session", "--cwd", newCwd);
+
+    expect(res.code).toBe(0);
+    expect(res.out).toContain("Moved transcript");
+    const oldPath = join(h.home, ".claude", "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-"), "dead-session.jsonl");
+    const newPath = join(h.home, ".claude", "projects", newCwd.replace(/[^a-zA-Z0-9]/g, "-"), "dead-session.jsonl");
+    const { existsSync } = await import("node:fs");
+    expect(existsSync(oldPath)).toBe(false);
+    expect(existsSync(newPath)).toBe(true);
+    expect(res.out).toContain(newCwd);
+  });
+
+  it("reports no transcript when --cwd targets a session with none", async () => {
+    const h = setup();
+    const sessionId = h.addSession("use-design-05", "/Volumes/GoldenSnake/git/use-design");
+
+    const res = await h.run("session", "use-design-05", "--cwd", "/Volumes/GoldenSnake/git/use-island");
+
+    // live session has no transcript file in this harness, so nothing to move
+    expect(res.code).toBe(0);
+    expect(res.out).toContain("No transcript found");
   });
 });

@@ -33,6 +33,20 @@ rows include a `talk` command an agent can run verbatim (`null` when the
 session is offline) and a `crons` array with each job's id, cron expression,
 human schedule, prompt, and creation time.
 
+### Renaming
+
+`use-code-cli session <target> --rename <name>` pins a name on the session.
+The name is written to `~/.claude/sessions/names.json` keyed by the session id, so
+it survives the session ending and wins over Claude Code's derived name —
+renaming an offline session keeps it addressable afterwards. The rename is also
+mirrored into the session's transcript, so `claude --resume <name>` resolves it
+(run it from the session's project directory; in the picker, press Ctrl+A to
+search all projects).
+
+`use-code-cli session <target> --cwd <dir>` moves the session's transcript into
+the project directory for `<dir>`, so `claude --resume` (by name or id) works
+when run from that directory. Combine with `--rename` to do both at once.
+
 ### `prompts`
 
 List the prompts sessions received, or search only prompts — assistant replies

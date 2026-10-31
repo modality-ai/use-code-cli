@@ -1,8 +1,8 @@
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
-import { open, readdir, readFile, stat } from "node:fs/promises";
+import { appendFile, mkdir, open, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 
 export const SESSIONS_DIR = join(homedir(), ".claude", "sessions");
 export const PROJECTS_DIR = join(homedir(), ".claude", "projects");
@@ -42,6 +42,137 @@ export interface SessionFilter {
 
 /** The values `--filter-status` accepts. */
 export const SESSION_STATUSES = ["busy", "idle"] as const;
+
+/** ~/.claude/sessions/names.json — the names the user set, keyed by sessionId. */
+export const NAMES_FILE = join(SESSIONS_DIR, "names.json");
+
+/** A user-set session name, keyed by the session it belongs to. */
+export type SessionNameRegistry = Record<string, string>;
+
+/**
+ * The names the user set on sessions, from ~/.claude/sessions/names.json —
+ * Claude Code deletes its pid file (which carries the derived name) on exit,
+ * so the registry is the only durable store of a custom name.
+ */
+export async function readSessionNames(): Promise<SessionNameRegistry> {
+  try {
+    const parsed = JSON.parse(await readFile(NAMES_FILE, "utf8")) as Record<string, unknown>;
+    const names: SessionNameRegistry = {};
+    for (const [sessionId, name] of Object.entries(parsed)) {
+      if (typeof name === "string") names[sessionId] = name;
+    }
+    return names;
+  } catch {
+    // Missing or unreadable registry — fall back to the derived names.
+    return {};
+  }
+}
+
+/**
+ * Pin a session's name: one entry in the registry, keyed by sessionId, so it
+ * survives Claude Code's pid-file lifecycle and wins over the derived name.
+ */
+export async function setSessionName(sessionId: string, name: string): Promise<void> {
+  const names = await readSessionNames();
+  names[sessionId] = name;
+  await mkdir(SESSIONS_DIR, { recursive: true });
+  await writeFile(NAMES_FILE, `${JSON.stringify(names, null, 2)}\n`, "utf8");
+}
+
+/**
+ * Append a custom title to a session's transcript so Claude Code's
+ * `--resume <name>` resolves the session by its user-set name. Claude Code
+ * itself writes these lines when a session is named with `-n`; mirroring
+ * them keeps CLI renames visible to Claude Code.
+ */
+export async function appendSessionTitle(s: SessionInfo, name: string): Promise<void> {
+  const path = await transcriptPath(s);
+  if (!path) return;
+  const lines = [
+    JSON.stringify({ type: "custom-title", customTitle: name, sessionId: s.sessionId }),
+    JSON.stringify({ type: "agent-name", agentName: name, sessionId: s.sessionId }),
+  ].join("\n") + "\n";
+  try {
+    await appendFile(path, lines, "utf8");
+  } catch {
+    // Best-effort: the registry is the primary store; a transcript write
+    // failure shouldn't fail the rename (e.g. read-only or missing file).
+  }
+}
+
+/**
+ * The project directory where Claude Code can find this session's transcript
+ * by running `claude --resume <name>` from it. Derived from the transcript's
+ * own location (not s.cwd, which may differ after the session cd'd elsewhere).
+ */
+export async function transcriptProjectCwd(s: SessionInfo): Promise<string | undefined> {
+  const path = await transcriptPath(s);
+  if (!path) return s.cwd;
+  const projectDir = basename(dirname(path));
+  // Scan the transcript for a cwd whose encoding matches the project dir.
+  let text: string;
+  try {
+    const fh = await open(path, "r");
+    try {
+      const buf = Buffer.alloc(65536);
+      const { bytesRead } = await fh.read(buf, 0, 65536, 0);
+      text = buf.toString("utf8", 0, bytesRead);
+    } finally {
+      await fh.close();
+    }
+  } catch {
+    return s.cwd;
+  }
+  const re = /"cwd":"((?:[^"\\]|\\.)*)"/g;
+  const seen = new Set<string>();
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const raw = m[1];
+    if (raw === undefined) continue;
+    const cwd = unescapeJsonString(raw);
+    if (seen.has(cwd)) continue;
+    seen.add(cwd);
+    if (encodeProjectDir(cwd) === projectDir) return cwd;
+  }
+  return s.cwd;
+}
+/**
+ * Move a session's transcript into the project directory for `newCwd` so
+ * Claude Code discovers it when run from that directory. Returns the new
+ * transcript path, or undefined if there was no transcript to move.
+ */
+export async function moveTranscript(s: SessionInfo, newCwd: string): Promise<string | undefined> {
+  const src = await transcriptPath(s);
+  if (!src) return undefined;
+  const destDir = join(PROJECTS_DIR, encodeProjectDir(newCwd));
+  const dest = join(destDir, `${s.sessionId}.jsonl`);
+  if (src === dest) return dest;
+  await mkdir(destDir, { recursive: true });
+  try {
+    await rename(src, dest);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "EXDEV") throw err;
+    const { copyFile, unlink } = await import("node:fs/promises");
+    await copyFile(src, dest);
+    await unlink(src);
+  }
+  return dest;
+}
+
+export function applySessionNames<T extends { sessionId: string; name?: string; nameSource?: string }>(
+  sessions: T[],
+  names: SessionNameRegistry,
+): T[] {
+  for (const s of sessions) {
+    const custom = names[s.sessionId];
+    if (custom !== undefined) {
+      s.name = custom;
+      s.nameSource = "user";
+    }
+  }
+  return sessions;
+}
 
 /** Split a comma-separated flag value into trimmed, lowercase terms. */
 export function splitFilterTerms(value: string | undefined): string[] {
@@ -199,7 +330,7 @@ export async function readSessionsLive(): Promise<SessionInfo[]> {
   }
 
   const sessions: SessionInfo[] = [];
-  for (const file of files.filter((f) => f.endsWith(".json"))) {
+  for (const file of files.filter((f) => f.endsWith(".json") && f !== basename(NAMES_FILE))) {
     try {
       const data = JSON.parse(
         await readFile(join(SESSIONS_DIR, file), "utf8"),
@@ -265,6 +396,7 @@ export async function readSessions(includeOffline: boolean): Promise<SessionInfo
     const known = new Set(sessions.map((s) => s.sessionId));
     sessions.push(...(await readOfflineSessions(known)));
   }
+  applySessionNames(sessions, await readSessionNames());
   return sessions.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
 }
 

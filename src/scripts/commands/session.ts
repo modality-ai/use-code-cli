@@ -2,13 +2,19 @@ import { z } from "zod";
 import type { CLICommand } from "modality-cli-kit";
 import { formatTime, oneLine, plural } from "../../lib/format";
 import {
+  appendSessionTitle,
   findSessions,
+  moveTranscript,
+  NAMES_FILE,
   readCronJobs,
   readSessions,
   readTranscriptMeta,
   sessionLabel as label,
+  setSessionName,
   transcriptPath,
+  transcriptProjectCwd,
   type SessionCron,
+  type SessionInfo,
 } from "../../lib/sessions";
 
 const SessionArgsSchema = z.object({
@@ -16,6 +22,18 @@ const SessionArgsSchema = z.object({
     .string()
     .min(1)
     .describe("Session name, pid, or sessionId (a unique name prefix also works)"),
+  rename: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      "Rename the target session to this name — pinned durably, wins over the derived name",
+    ),
+  cwd: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Move the session's transcript into the project directory for this cwd"),
 });
 
 type SessionArgs = z.infer<typeof SessionArgsSchema>;
@@ -59,6 +77,54 @@ function howToTalk(name: string): string {
   return ["💡 Talk to this session:", `  use-code-cli talk ${name} "your message"`].join("\n");
 }
 
+/** Rename one resolved session, refusing a name another session already holds. */
+async function performSessionUpdate(s: SessionInfo, newName: string | undefined, newCwd: string | undefined) {
+  const lines: string[] = [];
+
+  if (newName !== undefined) {
+    const taken = (await readSessions(true)).find(
+      (o) => o.sessionId !== s.sessionId && (o.name ?? "") === newName,
+    );
+    if (taken) {
+      return {
+        success: false,
+        message: `"${newName}" is already taken by session ${taken.sessionId}. Pick another name.`,
+      };
+    }
+    const from = label(s);
+    await setSessionName(s.sessionId, newName);
+    await appendSessionTitle(s, newName);
+    const renamed =
+      from === newName
+        ? `Session is already named "${newName}" — pinned as its permanent name.`
+        : `Renamed session "${from}" → "${newName}"`;
+    lines.push(renamed);
+    lines.push(`Pinned via ${NAMES_FILE}; it survives session exit and wins over the derived name.`);
+  }
+
+  if (newCwd !== undefined) {
+    const moved = await moveTranscript(s, newCwd);
+    if (moved) {
+      lines.push(`Moved transcript → ${moved}`);
+    } else {
+      lines.push(`No transcript found for this session; nothing to move.`);
+    }
+  }
+
+  const resumeDir = newCwd !== undefined ? newCwd : await transcriptProjectCwd(s);
+  const resumeName = newName ?? label(s);
+  lines.push(`Resume in Claude Code: cd ${resumeDir} && claude --resume ${resumeName}`);
+  lines.push(
+    ` (Claude Code searches the current project by default; from another directory, run the cd above, or press Ctrl+A in the picker to search all projects.)`,
+  );
+
+  return {
+    success: true,
+    message: lines.join("\n"),
+    data: { sessionId: s.sessionId, from: label(s), to: newName, cwd: newCwd },
+  };
+}
+
 async function session(args: SessionArgs) {
   const live = await readSessions(false);
   let matches = findSessions(live, args.target);
@@ -88,6 +154,9 @@ async function session(args: SessionArgs) {
   if (!s) {
     return { success: false, message: `No session matches "${args.target}".` };
   }
+  if (args.rename !== undefined || args.cwd !== undefined) {
+    return performSessionUpdate(s, args.rename, args.cwd);
+  }
   const meta = await readTranscriptMeta(s);
   const rawFile = await transcriptPath(s);
   const crons = await readCronJobs(s);
@@ -97,6 +166,7 @@ async function session(args: SessionArgs) {
   const lines = [
     name,
     row("state", state),
+    ...(s.nameSource === "user" ? [row("name source", "user (--rename)")] : []),
     row("workspace", s.cwd),
     row("branch", meta.branch),
     row("hero", meta.hero),
@@ -156,5 +226,7 @@ export const sessionCommand: CLICommand = {
   execute: session,
   examples: [
     "use-code-cli session 49606 --json",
+    "use-code-cli session use-design-05 --rename fix-auth",
+    "use-code-cli session po-use-island --cwd /Volumes/GoldenSnake/git/use-island",
   ],
 };
