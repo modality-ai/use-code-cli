@@ -34,11 +34,9 @@ const SessionsArgsSchema = z.object({
     .describe(
       "Only sessions whose hero matches any of these comma-separated names (case-insensitive)",
     ),
-  "filter-folder": z
-    .string()
-    .optional()
+  "filter-project": optionalValueFlag(process.cwd())
     .describe(
-      "Only sessions whose workspace folder name — where it launched or where it ended — matches any of these comma-separated keywords (case-insensitive)",
+      "Only sessions whose workspace folder name — where it launched or where it ended — matches any of these comma-separated keywords (case-insensitive). Passed bare, defaults to the current working directory.",
     ),
   recent: optionalValueFlag("10")
     .refine(
@@ -140,7 +138,7 @@ async function sessions(args: SessionsArgs) {
   const fieldFilter: SessionFilter = {
     filterName: args["filter-name"],
     filterStatus: args["filter-status"],
-    filterFolder: args["filter-folder"],
+    filterProject: args["filter-project"],
   };
   const filter: SessionFilter = { ...fieldFilter, filterHero: args["filter-hero"] };
   // Bare --recent arrives as "10"; absent and --no-recent mean no limit.
@@ -257,8 +255,8 @@ export const sessionsCommand: CLICommand = {
     "use-code-cli sessions --filter-hero JAMES",
     "use-code-cli sessions --filter-hero JAMES,WANDA",
     "use-code-cli sessions --filter-name use-design,use-stock",
-    "use-code-cli sessions --filter-folder use-code-cli",
-    "use-code-cli sessions --filter-folder design,stock",
+    "use-code-cli sessions --filter-project use-code-cli",
+    "use-code-cli sessions --filter-project design,stock",
     'use-code-cli sessions --search "use-code-cli talk"',
   ],
 };

@@ -27,17 +27,17 @@ export interface SessionInfo extends SessionFile {
   online: boolean;
   /**
    * Folder the session ended in, when a transcript shows it `cd`'d away from
-   * where it launched. Offline sessions only; `--filter-folder` matches both.
+   * where it launched. Offline sessions only; `--filter-project` matches both.
    */
   latestCwd?: string;
 }
 
-/** What `--filter-name` / `--filter-status` / `--filter-hero` / `--filter-folder` narrow a session list to. */
+/** What `--filter-name` / `--filter-status` / `--filter-hero` / `--filter-project` narrow a session list to. */
 export interface SessionFilter {
   filterName?: string;
   filterStatus?: string;
   filterHero?: string;
-  filterFolder?: string;
+  filterProject?: string;
 }
 
 /** The values `--filter-status` accepts. */
@@ -216,7 +216,11 @@ export function matchesSessionFilter(
     if (!heroTerms.some((term) => hero.includes(term))) return false;
   }
 
-  const folderTerms = splitFilterTerms(filter.filterFolder);
+  const folderTerms = splitFilterTerms(filter.filterProject).map((term) => {
+    // Allow full paths (e.g. a bare --filter-project resolved to cwd): match
+    // on their basename so a project directory filters like a folder keyword.
+    return term.includes("/") || term.includes("\\") ? basename(term) : term;
+  });
   if (folderTerms.length > 0) {
     // A keyword names the workspace folder itself, so only its basename is
     // matched — a parent directory in the path never counts. A session that
@@ -237,7 +241,7 @@ export function describeSessionFilter(filter: SessionFilter): string {
   if (filter.filterName !== undefined) parts.push(`--filter-name=${filter.filterName}`);
   if (filter.filterStatus !== undefined) parts.push(`--filter-status=${filter.filterStatus}`);
   if (filter.filterHero !== undefined) parts.push(`--filter-hero=${filter.filterHero}`);
-  if (filter.filterFolder !== undefined) parts.push(`--filter-folder=${filter.filterFolder}`);
+  if (filter.filterProject !== undefined) parts.push(`--filter-project=${filter.filterProject}`);
   return parts.length > 0 ? ` matching ${parts.join(" ")}` : "";
 }
 
@@ -295,7 +299,7 @@ function lastCwdIn(text: string): string | undefined {
 /**
  * The workspace paths a transcript records: the last cwd in its first 64 KiB,
  * and the last cwd in its last 64 KiB. A session that `cd`s elsewhere keeps
- * writing the new path, so the tail is what `--filter-folder` needs to still
+ * writing the new path, so the tail is what `--filter-project` needs to still
  * find the folder a session moved to.
  */
 export async function readTranscriptCwds(

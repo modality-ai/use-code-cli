@@ -223,24 +223,24 @@ describe("sessions", () => {
     expect(res.out).toContain("No active sessions matching --filter-hero=WANDA");
   });
 
-  it("--filter-folder keeps only sessions in that workspace folder", async () => {
+  it("--filter-project keeps only sessions in that workspace folder", async () => {
     const h = setup();
     h.addSession("alpha", "idle", Date.now(), "/repo/use-code-cli");
     h.addSession("beta", "idle", Date.now(), "/repo/use-design");
 
-    const res = await h.run("sessions", "--filter-folder", "USE-CODE");
+    const res = await h.run("sessions", "--filter-project", "USE-CODE");
 
     expect(res.code).toBe(0);
     expect(res.out).toContain("alpha");
     expect(res.out).not.toContain("beta");
   });
 
-  it("--filter-folder matches a keyword against the folder name only", async () => {
+  it("--filter-project matches a keyword against the folder name only", async () => {
     const h = setup();
     h.addSession("organism", "idle", Date.now(), "/repo/react-atomic-organism");
     h.addSession("nested", "idle", Date.now(), "/organism/app");
 
-    const res = await h.run("sessions", "--filter-folder", "organism");
+    const res = await h.run("sessions", "--filter-project", "organism");
 
     expect(res.code).toBe(0);
     expect(res.out).toContain("react-atomic-organism");
@@ -248,13 +248,13 @@ describe("sessions", () => {
     expect(res.out).not.toContain("/organism/app");
   });
 
-  it("--filter-folder accepts a comma-separated list", async () => {
+  it("--filter-project accepts a comma-separated list", async () => {
     const h = setup();
     h.addSession("alpha", "idle", Date.now(), "/repo/use-code-cli");
     h.addSession("beta", "idle", Date.now(), "/repo/use-design");
     h.addSession("gamma", "idle", Date.now(), "/repo/use-stock");
 
-    const res = await h.run("sessions", "--filter-folder", "use-code, stock");
+    const res = await h.run("sessions", "--filter-project", "use-code, stock");
 
     expect(res.code).toBe(0);
     expect(res.out).toContain("alpha");
@@ -262,14 +262,14 @@ describe("sessions", () => {
     expect(res.out).not.toContain("beta");
   });
 
-  it("names --filter-folder when nothing matches", async () => {
+  it("names --filter-project when nothing matches", async () => {
     const h = setup();
     h.addSession("alpha", "busy", Date.now(), "/repo/use-code-cli");
 
-    const res = await h.run("sessions", "--filter-folder", "nowhere");
+    const res = await h.run("sessions", "--filter-project", "nowhere");
 
     expect(res.code).toBe(0);
-    expect(res.out).toContain("No active sessions matching --filter-folder=nowhere");
+    expect(res.out).toContain("No active sessions matching --filter-project=nowhere");
   });
 
   it("combines both filters", async () => {
@@ -330,7 +330,7 @@ describe("sessions — offline filters", () => {
     expect(res.out).not.toContain("dead-stock");
   });
 
-  it("--filter-folder matches the folder a session cd'd into", async () => {
+  it("--filter-project matches the folder a session cd'd into", async () => {
     const h = setup();
     // The move sits past the head window, so only the transcript tail shows it.
     const filler = {
@@ -343,12 +343,12 @@ describe("sessions — offline filters", () => {
       { type: "user", cwd: "/repo/use-design/app", message: { content: "later" } },
     ]);
 
-    const byEnd = await h.run("sessions", "--all", "--filter-folder", "app");
+    const byEnd = await h.run("sessions", "--all", "--filter-project", "app");
     expect(byEnd.code).toBe(0);
     expect(byEnd.out).toContain("moved-session");
 
     // The launch folder still matches too.
-    const byStart = await h.run("sessions", "--all", "--filter-folder", "use-design");
+    const byStart = await h.run("sessions", "--all", "--filter-project", "use-design");
     expect(byStart.code).toBe(0);
     expect(byStart.out).toContain("moved-session");
   });

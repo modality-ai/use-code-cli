@@ -57,7 +57,8 @@ usage_modes:
       - "The owner asks to watch, tick, poll, or supervise other agent sessions on an interval."
       - "A delegated task needs a supervisor that nudges idle agents without re-assigning the work."
     execution_flow:
-      - "Read state with use-code-cli sessions --json — name, hero, status, cwd and lastPrompt — adding --filter-status, --filter-hero, --filter-name or --filter-folder when only some sessions matter."
+      - "Read state with use-code-cli sessions --json — name, hero, status, cwd and lastPrompt — adding --filter-status, --filter-hero, --filter-name or --filter-project when only some sessions matter."
+      - "Note: to find team members in the same project, always use `use-code-cli sessions --filter-project` (bare defaults to the current working directory)."
       - "Diff against the previous tick: git status in each cwd, plus mtimes of that work's key files."
       - "For one target, use-code-cli session <name> --json returns its transcript path, branch, cron jobs and a ready-to-run talk command."
       - "Classify each target: busy with new files means leave it alone; busy with none means nudge once."
