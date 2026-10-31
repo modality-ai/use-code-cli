@@ -15,15 +15,15 @@
   "license": "ISC",
   "git.addAICoAuthor": "off",
   "dependencies": {
-    "modality-cli-kit": "*",
-    "modality-mcp-kit": "*",
-    "zod": "*"
+    "modality-cli-kit": "^0.16.1",
+    "modality-mcp-kit": "^2.1.0",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@modality-counter/core": "*",
-    "modality-bun-kit": "*",
-    "react": "*",
-    "react-dom": "*"
+    "@modality-counter/core": "^2.8.0",
+    "modality-bun-kit": "^1.4.4",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
   },
   "exports": {
     "types": "./types/index.d.ts",
