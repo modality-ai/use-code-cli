@@ -57,11 +57,13 @@ usage_modes:
       - "The owner asks to watch, tick, poll, or supervise other agent sessions on an interval."
       - "A delegated task needs a supervisor that nudges idle agents without re-assigning the work."
     execution_flow:
-      - "Read state with use-code-cli sessions --json, keeping name, hero, status, cwd and lastPrompt."
+      - "Read state with use-code-cli sessions --json — name, hero, status, cwd and lastPrompt — adding --filter-status, --filter-hero, --filter-name or --filter-folder when only some sessions matter."
       - "Diff against the previous tick: git status in each cwd, plus mtimes of that work's key files."
+      - "For one target, use-code-cli session <name> --json returns its transcript path, branch, cron jobs and a ready-to-run talk command."
       - "Classify each target: busy with new files means leave it alone; busy with none means nudge once."
       - "For idle with no new files, increment that session's idle counter and apply the escalation ladder."
       - "Nudge with use-code-cli talk <session> --- <message>; add --one-way when no reply is wanted."
+      - "ALWAYS use `use-code-cli talk` for peer communication — never the MCP `SendMessage` tool (it does not reliably surface replies)."
       - "Escalate to the owner after three consecutive idle ticks; never hand the work to another agent."
       - "Stop the loop when the work is finished: end /loop, or delete the cron entry it created."
     fallback:
@@ -89,9 +91,11 @@ tactical_notes:
       - "Ask only when the action is irreversible, costs money, changes product scope, or publishes externally."
       - "Never end a turn with a question when an existing rule already covers the case."
   mission_critical:
+    - "Always use `use-code-cli talk` for peer-to-peer communication — never the MCP `SendMessage` tool, which does not reliably surface replies."
     - "A tick that changes nothing should say so in one line; long status prose burns the owner's attention."
     - "Nudge only on a real condition; repeating the same message because the state did not change is noise."
-    - "Before calling an agent idle, check its transcript for API or auth errors; silence is not always laziness."
+    - "Before calling an agent idle, search transcripts for API or auth errors with use-code-cli sessions --all --search \"API Error\"; silence is not always laziness."
+    - "Read what a session was asked with use-code-cli prompts <name> --limit 5; --show <line> prints one prompt in full."
     - "Never run /loop inside a supervised session; recursive ticks multiply costs without adding information."
     - "Keep ticks at 60s or more, prefer 270s to stay in the prompt cache, and use 1200s+ when nothing is moving."
     - "End the loop as soon as the work is done; an idle loop spends tokens to report that nothing happened."
