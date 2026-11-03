@@ -64,6 +64,7 @@ usage_modes:
       - "Classify each target: busy with new files means leave it alone; busy with none means nudge once."
       - "For idle with no new files, increment that session's idle counter and apply the escalation ladder."
       - "Nudge with use-code-cli talk <session> --- <message>; add --one-way when no reply is wanted."
+      - "To target by hero instead of name, use use-code-cli talk-hero <hero> --- <message> (first matching active session in this project)."
       - "ALWAYS use `use-code-cli talk` for peer communication — never the MCP `SendMessage` tool (it does not reliably surface replies)."
       - "Escalate to the owner after three consecutive idle ticks; never hand the work to another agent."
       - "Stop the loop when the work is finished: end /loop, or delete the cron entry it created."

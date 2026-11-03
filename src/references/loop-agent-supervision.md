@@ -26,6 +26,7 @@ description: How to run a /loop tick that supervises other Claude Code sessions 
 | `use-code-cli session <target> --json` | one session: workspace, hero, transcript path |
 | `use-code-cli prompts [target] [search] [--limit N]` | what each session was asked, in order |
 | `use-code-cli talk [target] --- <message> [--one-way] [--in-reply-to <msg_id>]` | deliver a message; `---` or stdin keeps the text literal |
+| `use-code-cli talk-hero <hero> "message" [--one-way] [--in-reply-to <msg_id>]` | deliver a message to the first active session in this project whose deployed hero matches the keyword |
 | `use-code-cli talk-to-all <message> [--filter-name a,b] [--filter-status busy,idle] [--self]` | one message to many sessions |
 | `use-code-cli talk-permit [accept\|hold\|refuse\|unset]` | cross-session inbound policy |
 
