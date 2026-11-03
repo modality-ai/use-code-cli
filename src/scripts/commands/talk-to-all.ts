@@ -5,6 +5,7 @@ import { filterStatusField } from "../../lib/flags";
 import {
   describeSessionFilter,
   matchesSessionFilter,
+  readTranscriptMeta,
   type SessionFilter,
 } from "../../lib/sessions";
 
@@ -24,6 +25,12 @@ const TalkToAllArgsSchema = z.object({
       "Only send to sessions whose name matches any of these comma-separated texts (case-insensitive)",
     ),
   "filter-status": filterStatusField,
+  "filter-hero": z
+    .string()
+    .optional()
+    .describe(
+      "Only send to sessions whose deployed hero matches any of these comma-separated names (case-insensitive)",
+    ),
 });
 
 type TalkToAllArgs = z.infer<typeof TalkToAllArgsSchema>;
@@ -32,9 +39,19 @@ async function talkToAll(args: TalkToAllArgs) {
   const filter: SessionFilter = {
     filterName: args["filter-name"],
     filterStatus: args["filter-status"],
+    filterHero: args["filter-hero"],
   };
 
   const all = await liveSessions();
+  // Hero lives in the transcript, not the live session file, so read each
+  // candidate's meta when filtering by hero.
+  if (filter.filterHero !== undefined) {
+    const metas = await Promise.all(
+      all.map(async (s) => ({ s, meta: await readTranscriptMeta(s as any) })),
+    );
+    for (const { s, meta } of metas) (s as any).hero = meta.hero ?? null;
+  }
+
   // The calling Claude session is this process's ancestor — the walk covers the
   // shell a `!` command runs through, which ppid alone would miss.
   const skip = args.self ? new Set<number>() : ancestorPids();
@@ -82,5 +99,6 @@ export const talkToAllCommand: CLICommand = {
     'use-code-cli talk-to-all "hello" --self',
     'use-code-cli talk-to-all "stand up" --filter-status idle',
     'use-code-cli talk-to-all "status?" --filter-name use-design,use-stock',
+    'use-code-cli talk-to-all "status?" --filter-hero JAMES,WANDA',
   ],
 };
