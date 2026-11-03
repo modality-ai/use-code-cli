@@ -279,7 +279,7 @@ describe("memory — files", () => {
     expect(res.code).toBe(0);
     const lines = res.out.trimEnd().split("\n");
     expect(lines.length).toBe(1);
-    expect(lines[0]).toContain("two.md");
+    expect(lines[0]).toContain("one.md");
     expect(res.out).not.toContain("hidden");
   });
 });

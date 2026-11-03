@@ -1,5 +1,6 @@
 /** The command this preprocessor applies to. */
 export const TALK_COMMAND_NAME = "talk";
+export const TALK_HERO_COMMAND_NAME = "talk-hero";
 
 /** The token that ends the CLI arguments and starts the literal message. */
 export const MESSAGE_SEPARATOR = "---";
@@ -29,7 +30,7 @@ async function readStdinMessage(): Promise<string | undefined> {
  * heredocs and file redirects bypass shell parsing altogether.
  */
 export async function preprocessTalkArgv(argv: string[]): Promise<PreprocessedArgv> {
-  if (argv[0] !== TALK_COMMAND_NAME) return { argv };
+  if (argv[0] !== TALK_COMMAND_NAME && argv[0] !== TALK_HERO_COMMAND_NAME) return { argv };
 
   const at = argv.indexOf(MESSAGE_SEPARATOR, 1);
   if (at === -1) return { argv };

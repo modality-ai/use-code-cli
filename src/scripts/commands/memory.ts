@@ -79,6 +79,8 @@ async function memory(args: MemoryArgs) {
       const match = await searchMemoryFile(f, term);
       if (match.matches > 0) matched.push({ f, ...match });
     }
+    // --files lists paths, so sort them by name for a stable, scannable listing.
+    if (args.files) matched.sort((a, b) => a.f.path.localeCompare(b.f.path));
     total = matched.length;
     rows = matched.slice(0, limit).map(({ f, matches, line, snippet }) => ({
       ...baseRow(f),
@@ -88,7 +90,11 @@ async function memory(args: MemoryArgs) {
     }));
   } else {
     total = all.length;
-    const shown = all.slice(0, limit);
+    // --files lists paths, so sort them by name (instead of newest first).
+    const ordered = args.files
+      ? [...all].sort((a, b) => a.path.localeCompare(b.path))
+      : all;
+    const shown = ordered.slice(0, limit);
     // --files never prints a summary, so skip reading each file's body.
     rows = args.files
       ? shown.map(baseRow)

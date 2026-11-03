@@ -93,10 +93,10 @@ of the first hit, and that line. Files are read from
 project; nothing outside those memory directories is searched.
 
 `--files` prints every file as a single path per line, with the home prefix
-shortened to `~` — no timestamp, project, or summary line. It ignores the
-default 20-file limit, and an explicit `--limit` caps the list without printing
-a "hidden" footer, so the output stays one path per line. Pair it with a search
-to list only the files that match:
+shortened to `~` — no timestamp, project, or summary line. Paths are sorted by
+name. It ignores the default 20-file limit, and an explicit `--limit` caps the
+list without printing a "hidden" footer, so the output stays one path per line.
+Pair it with a search to list only the files that match:
 
 ```bash
 use-code-cli memory --files | xargs -n1 less
