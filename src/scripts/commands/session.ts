@@ -7,6 +7,8 @@ import {
   moveTranscript,
   NAMES_FILE,
   readCronJobs,
+  readMonitors,
+  type SessionMonitor,
   readSessions,
   readTranscriptMeta,
   sessionLabel as label,
@@ -69,6 +71,17 @@ function cronLines(crons: SessionCron[], online: boolean): string[] {
         : `cron="${c.cron}"`;
     lines.push(`    ${c.id}  ${schedule}`);
     lines.push(`      "${oneLine(c.prompt, 100)}"`);
+  }
+  return lines;
+}
+
+function monitorLines(monitors: SessionMonitor[], online: boolean): string[] {
+  if (monitors.length === 0) return [row("monitor", "none")];
+
+  const note = online ? "session-only" : "last known · session-only monitors ended";
+  const lines = [row("monitor", `${monitors.length} running · ${note}`)];
+  for (const m of monitors) {
+    lines.push(`    ${m.id}  ${m.description ?? ""}`.trimEnd());
   }
   return lines;
 }
@@ -160,6 +173,7 @@ async function session(args: SessionArgs) {
   const meta = await readTranscriptMeta(s);
   const rawFile = await transcriptPath(s);
   const crons = await readCronJobs(s);
+  const monitors = await readMonitors(s);
   const name = label(s);
 
   const state = s.online ? `${s.status ?? "unknown"} · active` : "offline";
@@ -178,6 +192,7 @@ async function session(args: SessionArgs) {
     row("started", s.startedAt ? `${formatTime(s.startedAt)} (${ago(s.startedAt)})` : undefined),
     row("updated", s.updatedAt ? `${formatTime(s.updatedAt)} (${ago(s.updatedAt)})` : undefined),
     ...cronLines(crons, s.online),
+    ...monitorLines(monitors, s.online),
     "",
     s.online
       ? howToTalk(name)
@@ -213,6 +228,12 @@ async function session(args: SessionArgs) {
         recurring: c.recurring,
         prompt: c.prompt,
         createdAt: c.createdAt ? new Date(c.createdAt).toISOString() : null,
+      })),
+      monitors: monitors.map((m) => ({
+        id: m.id,
+        description: m.description ?? null,
+        timeoutMs: m.timeoutMs ?? null,
+        createdAt: m.createdAt ? new Date(m.createdAt).toISOString() : null,
       })),
     },
   };

@@ -761,6 +761,102 @@ export async function readCronJobs(s: SessionInfo): Promise<SessionCron[]> {
 }
 
 /** Every prompt a session's transcript records, oldest first. */
+/** One background monitor a session started, recovered from its transcript. */
+export interface SessionMonitor {
+  /** Task id Claude Code assigned, as the Monitor result reported it. */
+  id: string;
+  /** Human-readable description of the watch. */
+  description?: string;
+  /** Milliseconds the watch stays alive unless its source ends first. */
+  timeoutMs?: number;
+  /** When the watch was started, in epoch milliseconds. */
+  createdAt?: number;
+  /** 1-based transcript line of the Monitor call. */
+  line: number;
+}
+
+/**
+ * Background monitors a session's transcript still has running: every Monitor
+ * whose result assigned a task id, minus every task a TaskStop confirmed it
+ * cancelled. Like cron jobs, monitors live only in the session's memory.
+ */
+export async function readMonitors(s: SessionInfo): Promise<SessionMonitor[]> {
+  const path = await transcriptPath(s);
+  if (!path) return [];
+
+  const lines = createInterface({
+    input: createReadStream(path, "utf8"),
+    crlfDelay: Infinity,
+  });
+
+  const pending = new Map<
+    string,
+    { description?: string; timeoutMs?: number; createdAt?: number; line: number }
+  >();
+  const active = new Map<string, SessionMonitor>();
+  let lineNo = 0;
+
+  for await (const raw of lines) {
+    lineNo++;
+    let entry: { timestamp?: string; message?: { content?: unknown } };
+    try {
+      entry = JSON.parse(raw) as typeof entry;
+    } catch {
+      continue;
+    }
+    const content = entry.message?.content;
+    if (!Array.isArray(content)) continue;
+    const at = entry.timestamp ? Date.parse(entry.timestamp) : Number.NaN;
+
+    for (const block of content as Array<Record<string, unknown>>) {
+      if (!block || typeof block !== "object") continue;
+
+      if (block.type === "tool_use" && block.name === "Monitor") {
+        const input = (block.input ?? {}) as Record<string, unknown>;
+        if (typeof block.id !== "string") continue;
+        pending.set(block.id, {
+          description: typeof input.description === "string" ? input.description : undefined,
+          timeoutMs: typeof input.timeout_ms === "number" ? input.timeout_ms : undefined,
+          createdAt: Number.isNaN(at) ? undefined : at,
+          line: lineNo,
+        });
+        continue;
+      }
+
+      if (block.type !== "tool_result") continue;
+      const text = contentText(block.content as never);
+
+      const started = /Monitor started \(task ([A-Za-z0-9_-]+)/.exec(text);
+      if (started) {
+        const taskId = started[1];
+        const created = block.tool_use_id ? pending.get(String(block.tool_use_id)) : undefined;
+        if (taskId && created && block.tool_use_id) {
+          active.set(taskId, {
+            id: taskId,
+            description: created.description,
+            timeoutMs: created.timeoutMs,
+            createdAt: created.createdAt,
+            line: created.line,
+          });
+          pending.delete(String(block.tool_use_id));
+        }
+        continue;
+      }
+
+      const stopped = /Successfully stopped task:\s*([A-Za-z0-9_-]+)/.exec(text);
+      if (stopped?.[1]) {
+        active.delete(stopped[1]);
+      }
+      const missing = /No task found with ID:\s*([A-Za-z0-9_-]+)/.exec(text);
+      if (missing?.[1]) {
+        active.delete(missing[1]);
+      }
+    }
+  }
+
+  return [...active.values()];
+}
+
 export async function readPrompts(s: SessionInfo): Promise<SessionPrompt[]> {
   const path = await transcriptPath(s);
   if (!path) return [];

@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -152,6 +159,93 @@ function cronDeleteLines(toolUseId: string, jobId: string): Record<string, unkno
             type: "tool_result",
             tool_use_id: toolUseId,
             content: `Cancelled job ${jobId}.`,
+          },
+        ],
+      },
+    },
+  ];
+}
+
+/** A Monitor call and the result that assigns the background task id. */
+function monitorStartLines(
+  toolUseId: string,
+  taskId: string,
+  input: { description?: string; timeout_ms?: number } = {},
+): Record<string, unknown>[] {
+  const at = "2026-10-28T12:00:00.000Z";
+  return [
+    {
+      type: "assistant",
+      timestamp: at,
+      message: {
+        role: "assistant",
+        content: [{ type: "tool_use", id: toolUseId, name: "Monitor", input }],
+      },
+    },
+    {
+      type: "user",
+      timestamp: at,
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: toolUseId,
+            content:
+              `Monitor started (task ${taskId}). It stays alive until its source ` +
+              "ends or it times out.",
+          },
+        ],
+      },
+    },
+  ];
+}
+
+/** A TaskStop call and the result confirming it cancelled the monitor. */
+function monitorStopLines(toolUseId: string, taskId: string): Record<string, unknown>[] {
+  return [
+    {
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [{ type: "tool_use", id: toolUseId, name: "TaskStop", input: { taskId } }],
+      },
+    },
+    {
+      type: "user",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: toolUseId,
+            content: `Successfully stopped task: ${taskId}.`,
+          },
+        ],
+      },
+    },
+  ];
+}
+
+/** A TaskStop call whose target already ended on its own. */
+function monitorMissingLines(toolUseId: string, taskId: string): Record<string, unknown>[] {
+  return [
+    {
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [{ type: "tool_use", id: toolUseId, name: "TaskStop", input: { taskId } }],
+      },
+    },
+    {
+      type: "user",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: toolUseId,
+            content: `No task found with ID: ${taskId}.`,
           },
         ],
       },
@@ -365,6 +459,195 @@ describe("session", () => {
         createdAt: "2026-10-28T00:00:00.000Z",
       },
     ]);
+  });
+
+  it("lists the monitors the session has running", async () => {
+    const h = setup();
+    const cwd = "/Volumes/GoldenSnake/git/use-design";
+    const sessionId = h.addSession("use-design-05", cwd);
+    h.addTranscript(cwd, sessionId, [
+      deployLine("WANDA"),
+      ...monitorStartLines("mon-1", "bc21a9f0", {
+        description: "watch for Wanda's reply",
+        timeout_ms: 300_000,
+      }),
+    ]);
+
+    const res = await h.run("session", "use-design-05");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toMatch(/monitor\s+1 running · session-only/);
+    expect(res.out).toContain("bc21a9f0");
+    expect(res.out).toContain("watch for Wanda's reply");
+  });
+
+  it("shows monitor none when a session has no monitors", async () => {
+    const h = setup();
+    const cwd = "/Volumes/GoldenSnake/git/use-design";
+    const sessionId = h.addSession("use-design-05", cwd);
+    h.addTranscript(cwd, sessionId, [deployLine("WANDA")]);
+
+    const res = await h.run("session", "use-design-05");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toMatch(/monitor\s+none/);
+    expect(res.out).not.toMatch(/monitor\s+1 running/);
+  });
+
+  it("drops a monitor once TaskStop cancels it", async () => {
+    const h = setup();
+    const cwd = "/Volumes/GoldenSnake/git/use-design";
+    const sessionId = h.addSession("use-design-05", cwd);
+    h.addTranscript(cwd, sessionId, [
+      ...monitorStartLines("mon-1", "bc21a9f0", { description: "watch the build" }),
+      ...monitorStopLines("mon-2", "bc21a9f0"),
+    ]);
+
+    const res = await h.run("session", "use-design-05");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toMatch(/monitor\s+none/);
+    expect(res.out).not.toContain("bc21a9f0");
+  });
+
+  it("drops a monitor whose task is already gone (No task found with ID)", async () => {
+    const h = setup();
+    const cwd = "/Volumes/GoldenSnake/git/use-design";
+    const sessionId = h.addSession("use-design-05", cwd);
+    h.addTranscript(cwd, sessionId, [
+      ...monitorStartLines("mon-1", "bc21a9f0", { description: "watch the build" }),
+      ...monitorMissingLines("mon-2", "bc21a9f0"),
+    ]);
+
+    const res = await h.run("session", "use-design-05");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toMatch(/monitor\s+none/);
+    expect(res.out).not.toContain("bc21a9f0");
+  });
+
+  it("ignores a Monitor call whose result never assigned a task", async () => {
+    const h = setup();
+    const cwd = "/Volumes/GoldenSnake/git/use-design";
+    const sessionId = h.addSession("use-design-05", cwd);
+    h.addTranscript(cwd, sessionId, [
+      {
+        type: "assistant",
+        timestamp: "2026-10-28T12:00:00.000Z",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "tool_use", id: "mon-1", name: "Monitor", input: { description: "watch" } },
+          ],
+        },
+      },
+    ]);
+
+    const res = await h.run("session", "use-design-05");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toMatch(/monitor\s+none/);
+  });
+
+  it("notes monitors as last known for an offline session", async () => {
+    const h = setup();
+    const cwd = "/Volumes/GoldenSnake/git/use-stock";
+    h.addTranscript(cwd, "dead-session", [
+      ...monitorStartLines("mon-1", "e07dc9b2", { description: "poll the deploy" }),
+    ]);
+
+    const res = await h.run("session", "dead-session");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toContain("last known · session-only monitors ended");
+    expect(res.out).toContain("e07dc9b2");
+  });
+
+  it("--json exposes the monitor rows", async () => {
+    const h = setup();
+    const cwd = "/Volumes/GoldenSnake/git/use-design";
+    const sessionId = h.addSession("use-design-05", cwd);
+    h.addTranscript(cwd, sessionId, [
+      ...monitorStartLines("mon-1", "bc21a9f0", {
+        description: "watch for Wanda's reply",
+        timeout_ms: 300_000,
+      }),
+    ]);
+
+    const res = await h.run("session", "use-design-05", "--json");
+
+    expect(res.code).toBe(0);
+    const parsed = JSON.parse(res.out) as { data?: { monitors?: unknown[] } };
+    expect(parsed.data?.monitors).toEqual([
+      {
+        id: "bc21a9f0",
+        description: "watch for Wanda's reply",
+        timeoutMs: 300_000,
+        createdAt: "2026-10-28T12:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("--json nulls out the optional monitor fields it never learned", async () => {
+    const h = setup();
+    const cwd = "/Volumes/GoldenSnake/git/use-design";
+    const sessionId = h.addSession("use-design-05", cwd);
+    h.addTranscript(cwd, sessionId, [
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "tool_use", id: "mon-1", name: "Monitor", input: {} },
+          ],
+        },
+      },
+      {
+        type: "user",
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "mon-1",
+              content: "Monitor started (task bc21a9f0). It stays alive until its source ends.",
+            },
+          ],
+        },
+      },
+    ]);
+
+    const res = await h.run("session", "use-design-05", "--json");
+
+    expect(res.code).toBe(0);
+    const parsed = JSON.parse(res.out) as { data?: { monitors?: unknown[] } };
+    expect(parsed.data?.monitors).toEqual([
+      {
+        id: "bc21a9f0",
+        description: null,
+        timeoutMs: null,
+        createdAt: null,
+      },
+    ]);
+  });
+
+  it("skips transcript lines that are not valid JSON", async () => {
+    const h = setup();
+    const cwd = "/Volumes/GoldenSnake/git/use-design";
+    const sessionId = h.addSession("use-design-05", cwd);
+    h.addTranscript(cwd, sessionId, [
+      ...monitorStartLines("mon-1", "bc21a9f0", { description: "watch the build" }),
+    ]);
+    appendFileSync(
+      join(h.home, ".claude", "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-"), `${sessionId}.jsonl`),
+      "\nnot json at all\n",
+    );
+
+    const res = await h.run("session", "use-design-05");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toMatch(/monitor\s+1 running · session-only/);
+    expect(res.out).toContain("bc21a9f0");
   });
 
   it("renames a live session and resolves it by the new name", async () => {
