@@ -680,28 +680,22 @@ const SCHEDULED_PATTERN =
 const CANCELLED_PATTERN = /Cancelled\s+job\s+([A-Za-z0-9_-]+)/;
 
 /**
- * Cron jobs a session's transcript still has scheduled: every CronCreate whose
- * result assigned an id, minus every job a CronDelete confirmed it cancelled.
- * Claude Code keeps cron jobs in memory only, so the transcript is the only
- * durable record — after the session exits, the list is what it last held.
+ * The content blocks each transcript line records, with the line's parse time
+ * and 1-based position. Lines that fail to parse or carry no content blocks
+ * are skipped, but still counted, so `line` keeps indexing the real transcript.
  */
-export async function readCronJobs(s: SessionInfo): Promise<SessionCron[]> {
+async function* readTranscriptBlocks<TBlock>(
+  s: SessionInfo,
+): AsyncGenerator<{ at: number; line: number; blocks: TBlock[] }> {
   const path = await transcriptPath(s);
-  if (!path) return [];
+  if (!path) return;
 
   const lines = createInterface({
     input: createReadStream(path, "utf8"),
     crlfDelay: Infinity,
   });
 
-  /** CronCreate calls waiting for the result that carries the job id. */
-  const pending = new Map<
-    string,
-    { cron: string; prompt: string; recurring: boolean; createdAt?: number; line: number }
-  >();
-  const active = new Map<string, SessionCron>();
   let lineNo = 0;
-
   for await (const raw of lines) {
     lineNo++;
     let entry: { timestamp?: string; message?: { content?: unknown } };
@@ -713,8 +707,26 @@ export async function readCronJobs(s: SessionInfo): Promise<SessionCron[]> {
     const content = entry.message?.content;
     if (!Array.isArray(content)) continue;
     const at = entry.timestamp ? Date.parse(entry.timestamp) : Number.NaN;
+    yield { at, line: lineNo, blocks: content as TBlock[] };
+  }
+}
 
-    for (const block of content as CronToolBlock[]) {
+/**
+ * Cron jobs a session's transcript still has scheduled: every CronCreate whose
+ * result assigned an id, minus every job a CronDelete confirmed it cancelled.
+ * Claude Code keeps cron jobs in memory only, so the transcript is the only
+ * durable record — after the session exits, the list is what it last held.
+ */
+export async function readCronJobs(s: SessionInfo): Promise<SessionCron[]> {
+  /** CronCreate calls waiting for the result that carries the job id. */
+  const pending = new Map<
+    string,
+    { cron: string; prompt: string; recurring: boolean; createdAt?: number; line: number }
+  >();
+  const active = new Map<string, SessionCron>();
+
+  for await (const { at, line, blocks } of readTranscriptBlocks<CronToolBlock>(s)) {
+    for (const block of blocks) {
       if (!block || typeof block !== "object") continue;
 
       if (block.type === "tool_use" && block.name === "CronCreate") {
@@ -726,7 +738,7 @@ export async function readCronJobs(s: SessionInfo): Promise<SessionCron[]> {
           prompt: input.prompt,
           recurring: input.recurring !== false,
           createdAt: Number.isNaN(at) ? undefined : at,
-          line: lineNo,
+          line,
         });
         continue;
       }
@@ -760,7 +772,24 @@ export async function readCronJobs(s: SessionInfo): Promise<SessionCron[]> {
   return [...active.values()];
 }
 
-/** Every prompt a session's transcript records, oldest first. */
+interface MonitorToolBlock {
+  type?: string;
+  id?: string;
+  name?: string;
+  tool_use_id?: string;
+  content?: unknown;
+  input?: { description?: unknown; timeout_ms?: unknown };
+}
+
+/** The task a Monitor result assigns when it starts watching. */
+const STARTED_PATTERN = /Monitor started \(task ([A-Za-z0-9_-]+)/;
+
+/** The task a TaskStop result confirms it cancelled. */
+const STOPPED_PATTERN = /Successfully stopped task:\s*([A-Za-z0-9_-]+)/;
+
+/** The TaskStop result showing the task already ended on its own. */
+const MISSING_PATTERN = /No task found with ID:\s*([A-Za-z0-9_-]+)/;
+
 /** One background monitor a session started, recovered from its transcript. */
 export interface SessionMonitor {
   /** Task id Claude Code assigned, as the Monitor result reported it. */
@@ -778,58 +807,40 @@ export interface SessionMonitor {
 /**
  * Background monitors a session's transcript still has running: every Monitor
  * whose result assigned a task id, minus every task a TaskStop confirmed it
- * cancelled. Like cron jobs, monitors live only in the session's memory.
+ * cancelled or found already gone. Like cron jobs, monitors live only in the
+ * session's memory.
  */
 export async function readMonitors(s: SessionInfo): Promise<SessionMonitor[]> {
-  const path = await transcriptPath(s);
-  if (!path) return [];
-
-  const lines = createInterface({
-    input: createReadStream(path, "utf8"),
-    crlfDelay: Infinity,
-  });
-
+  /** Monitor calls waiting for the result that carries the task id. */
   const pending = new Map<
     string,
     { description?: string; timeoutMs?: number; createdAt?: number; line: number }
   >();
   const active = new Map<string, SessionMonitor>();
-  let lineNo = 0;
 
-  for await (const raw of lines) {
-    lineNo++;
-    let entry: { timestamp?: string; message?: { content?: unknown } };
-    try {
-      entry = JSON.parse(raw) as typeof entry;
-    } catch {
-      continue;
-    }
-    const content = entry.message?.content;
-    if (!Array.isArray(content)) continue;
-    const at = entry.timestamp ? Date.parse(entry.timestamp) : Number.NaN;
-
-    for (const block of content as Array<Record<string, unknown>>) {
+  for await (const { at, line, blocks } of readTranscriptBlocks<MonitorToolBlock>(s)) {
+    for (const block of blocks) {
       if (!block || typeof block !== "object") continue;
 
       if (block.type === "tool_use" && block.name === "Monitor") {
-        const input = (block.input ?? {}) as Record<string, unknown>;
+        const input = block.input ?? {};
         if (typeof block.id !== "string") continue;
         pending.set(block.id, {
           description: typeof input.description === "string" ? input.description : undefined,
           timeoutMs: typeof input.timeout_ms === "number" ? input.timeout_ms : undefined,
           createdAt: Number.isNaN(at) ? undefined : at,
-          line: lineNo,
+          line,
         });
         continue;
       }
 
       if (block.type !== "tool_result") continue;
-      const text = contentText(block.content as never);
+      const text = contentText(block.content);
 
-      const started = /Monitor started \(task ([A-Za-z0-9_-]+)/.exec(text);
+      const started = STARTED_PATTERN.exec(text);
       if (started) {
         const taskId = started[1];
-        const created = block.tool_use_id ? pending.get(String(block.tool_use_id)) : undefined;
+        const created = block.tool_use_id ? pending.get(block.tool_use_id) : undefined;
         if (taskId && created && block.tool_use_id) {
           active.set(taskId, {
             id: taskId,
@@ -838,18 +849,20 @@ export async function readMonitors(s: SessionInfo): Promise<SessionMonitor[]> {
             createdAt: created.createdAt,
             line: created.line,
           });
-          pending.delete(String(block.tool_use_id));
+          pending.delete(block.tool_use_id);
         }
         continue;
       }
 
-      const stopped = /Successfully stopped task:\s*([A-Za-z0-9_-]+)/.exec(text);
-      if (stopped?.[1]) {
-        active.delete(stopped[1]);
+      const stopped = STOPPED_PATTERN.exec(text)?.[1];
+      if (stopped) {
+        active.delete(stopped);
+        continue;
       }
-      const missing = /No task found with ID:\s*([A-Za-z0-9_-]+)/.exec(text);
-      if (missing?.[1]) {
-        active.delete(missing[1]);
+
+      const missing = MISSING_PATTERN.exec(text)?.[1];
+      if (missing) {
+        active.delete(missing);
       }
     }
   }
@@ -857,6 +870,7 @@ export async function readMonitors(s: SessionInfo): Promise<SessionMonitor[]> {
   return [...active.values()];
 }
 
+/** Every prompt a session's transcript records, oldest first. */
 export async function readPrompts(s: SessionInfo): Promise<SessionPrompt[]> {
   const path = await transcriptPath(s);
   if (!path) return [];
