@@ -1,21 +1,21 @@
 ---
-name: Loop-driven agent supervision
-description: How to run a /loop tick that supervises other Claude Code sessions with use-code-cli — load when the user asks to watch, poll, nudge, or escalate agents on a cadence.
+name: Monitor-driven agent supervision
+description: How to run a Monitor that supervises other Claude Code sessions with use-code-cli — load when the user asks to watch, poll, nudge, or escalate agents on a cadence.
 ---
 
-# /loop × use-code-cli
+# Monitor × use-code-cli
 
-`/loop` re-runs a prompt on a cadence. `use-code-cli` reads and writes other Claude Code sessions. Together they form a supervisor that checks work, nudges, escalates, and stops — without a human polling.
+`Monitor` runs a shell command on a cadence and streams each output line as an event. `use-code-cli` reads and writes other Claude Code sessions. Together they form a supervisor that checks work, nudges, escalates, and stops — without a human polling.
 
 ## 1. Choose the cadence
 
 | Form | Behaviour | When |
 |---|---|---|
-| `/loop 5m <prompt>` | fixed interval | you know how fast the work moves |
-| `/loop <prompt>` | self-paced (dynamic) | the tick itself decides when to look again |
+| `Monitor` with `sleep 300` | fixed interval | you know how fast the work moves |
+| `Monitor` with self-paced sleep | self-paced (dynamic) | the script decides when to look again |
 
 - 60s is the floor. 270s keeps the prompt cache warm. Use 1200s+ when nothing changes quickly; avoid 300s — it pays the cache miss without buying a long wait.
-- Never nest: supervised sessions must not run `/loop` themselves.
+- Never nest: supervised sessions must not run a `Monitor` themselves.
 - Write the tick prompt so a fresh tick can act alone: what to read, how to decide, when to stop.
 
 ## 2. Command surface
@@ -54,10 +54,38 @@ use-code-cli talk <session> --- "<message>"              # literal; stdin for lo
 use-code-cli talk <session> --- "<message>" --one-way   # no reply expected
 
 # 5. stop check
-#    work done → end /loop or delete its cron entry
+#    work done → stop the Monitor (TaskStop)
 ```
 
 Keep the idle counter outside the prompt (a small JSON file under `/tmp`, keyed by session name). A tick that forgets the count can never escalate.
+
+## 0. Monitor Discipline (read before arming anything)
+
+Before arming ANY Monitor, run `use-code-cli session <self> --json` and check the `monitor` field.
+If any monitor is already running, STOP it first (`TaskStop` or `use-code-cli monitor <id> --stop`) before arming a new one.
+Never arm a second monitor while one is active — this is the #1 source of token waste and noise.
+One monitor. One purpose. Always.
+
+## 3.5 Monitor script example
+
+A single Monitor that traces session status and nudges idle agents (only ONE monitor should run for this purpose):
+
+```bash
+# monitor-sessions.sh — run via Monitor tool with description + timeout_ms
+# Single purpose: trace session status. Uses python3 (no jq).
+while true; do
+  use-code-cli sessions --json | python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+for s in d.get("data",[]):
+    print(s.get("name"), s.get("hero"), s.get("status"))
+'
+  sleep 270
+done
+```
+
+Invoke: `Monitor({ description: "watch session status", timeout_ms: 590000, command: "bash monitor-sessions.sh" })`.
+Stop with `TaskStop({ task_id })` or `use-code-cli monitor <id> --stop`.
 
 ## 4. Read progress cheaply
 
@@ -86,6 +114,6 @@ Never re-assign the work to another session, and never ask a peer to perform som
 
 ## 6. Stop conditions
 
-A supervision loop ends when the deliverable exists and its acceptance checks pass, the owner cancels it, or it has reported the same blocker for three ticks and is waiting on a human.
+A supervision monitor ends when the deliverable exists and its acceptance checks pass, the owner cancels it, or it has reported the same blocker for three ticks and is waiting on a human.
 
-Stop by ending `/loop` (dynamic mode: `ScheduleWakeup` with `stop: true`) or deleting the cron job. A loop with nothing to say still costs a full turn — report "no change" in one line instead of re-running the whole test suite.
+Stop by calling `TaskStop({ task_id })` or `use-code-cli monitor <id> --stop`. A monitor with nothing to say still costs a full turn — report "no change" in one line instead of re-running the whole test suite.

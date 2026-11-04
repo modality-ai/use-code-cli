@@ -1,6 +1,6 @@
 ---
 name: "*use-code-cli"
-description: "Supervise other Claude Code sessions from a /loop tick: read state, detect progress, nudge, escalate, and stop."
+description: "Supervise other Claude Code sessions from a Monitor tick: read state, detect progress, nudge, escalate, and stop."
 ---
 
 ```yaml
@@ -8,7 +8,7 @@ method:
   name: "*use-code-cli"
   icon: 🛠️
   category: cli
-  introduce: "Drive use-code-cli from a /loop tick to supervise agent sessions: read state, detect progress, nudge, escalate, and stop."
+  introduce: "Drive use-code-cli from a Monitor tick to supervise agent sessions: read state, detect progress, nudge, escalate, and stop."
   usage:
     method: "*use-code-cli [task]"
     parameters:
@@ -24,7 +24,7 @@ method:
     - "✅ SARAH (Product Owner) - multi-agent supervision and escalation"
 
 methodology:
-  purpose: "Turn a /loop tick into disciplined supervision of other Claude Code sessions by reading their state, diffing their work, and acting only on a real condition."
+  purpose: "Turn a Monitor tick into disciplined supervision of other Claude Code sessions by reading their state, diffing their work, and acting only on a real condition."
   expected_output:
     - "The exact use-code-cli commands run this tick, in a fenced block, with flags spelled out."
     - "Per-session state read from sessions: name, hero, status (busy or idle), and last prompt."
@@ -52,15 +52,16 @@ usage_modes:
       - "*use-code-cli keep going after the QA report → decide the open defects, record them, and dispatch the next verification"
 
   supervise-agents:
-    purpose: "Run one supervision tick inside a /loop: read sessions, classify each target, nudge or escalate, then decide whether to stop."
+    purpose: "Run one supervision tick via a Monitor: read sessions, classify each target, nudge or escalate, then decide whether to stop."
     when_to_trigger:
       - "The owner asks to watch, tick, poll, or supervise other agent sessions on an interval."
       - "A delegated task needs a supervisor that nudges idle agents without re-assigning the work."
     execution_flow:
       - "Read state with use-code-cli sessions --json — name, hero, status, cwd and lastPrompt — adding --filter-status, --filter-hero, --filter-name or --filter-project when only some sessions matter."
+      - "Check background watches with use-code-cli monitors --json (or monitors <name>) — confirm each is still running and stop stale ones with monitors <id> --stop."
       - "Note: to find team members in the same project, always use `use-code-cli sessions --filter-project` (bare defaults to the current working directory)."
       - "Diff against the previous tick: git status in each cwd, plus mtimes of that work's key files."
-      - "For one target, use-code-cli session <name> --json returns its transcript path, branch, cron jobs and a ready-to-run talk command."
+      - "For one target, use-code-cli session <name> --json returns its transcript path, branch, cron jobs, monitors and a ready-to-run talk command."
       - "Classify each target: busy with new files means leave it alone; busy with none means nudge once."
       - "For idle with no new files, increment that session's idle counter and apply the escalation ladder."
       - "Nudge with use-code-cli talk <session> --- <message>; prefer the default (no --one-way) so the peer replies quickly. Add --one-way only when no reply is wanted."
@@ -68,17 +69,19 @@ usage_modes:
       - "To target by hero instead of name, use use-code-cli talk-hero <hero> --- <message> (first matching active session in this project)."
       - "ALWAYS use `use-code-cli talk` for peer communication — never the MCP `SendMessage` tool (it does not reliably surface replies)."
       - "Escalate to the owner after three consecutive idle ticks; never hand the work to another agent."
-      - "Stop the loop when the work is finished: end /loop, or delete the cron entry it created."
+      - "Stop the monitor when the work is finished: TaskStop the monitor task, or let it time out."
     fallback:
       - "If talk fails to deliver, report the exact error and keep the previous idle count."
       - "If a session is missing entirely, say so plainly instead of treating it as idle."
     usage_example:
-      - "/loop 5m read use-code-cli sessions, diff each cwd, and nudge idle agents with no new files"
+      - "Monitor: use-code-cli sessions --json every 5m; diff each cwd and nudge idle agents with no new files"
 
 tactical_notes:
   action_checklists:
     tick:
       - "Read sessions --json, keeping name, hero, status, cwd and lastPrompt for each target."
+      - "Read monitors --json to confirm each background watch is alive; stop stale ones."
+      - "Monitor Discipline: Before arming ANY Monitor, check `use-code-cli session <self> --json` → `monitor` field. If a monitor is already running, STOP it first. Never arm a second. One monitor. One purpose."
       - "Diff against the previous tick with git status and the key files' mtimes."
       - "Classify busy or idle, then nudge, wait, or escalate accordingly."
       - "Check the stop condition before ending the tick."
@@ -87,21 +90,24 @@ tactical_notes:
       - "Second idle tick: ask what blocks it and supply the missing input, approval or spec."
       - "Third idle tick: report the blocker and the handling to the owner, keeping the same agent."
     stop:
-      - "End /loop or delete its cron entry once the deliverable passes its acceptance checks."
-      - "Stop when the owner cancels, or when the same blocker stands for three consecutive ticks."
+      - "Stop the Monitor (TaskStop) once the deliverable passes its acceptance checks."
+      - "Stop the monitor when the owner cancels, or when the same blocker stands for three consecutive ticks."
     decide:
       - "Decide reversible, in-scope questions alone and record the decision with its evidence."
       - "Ask only when the action is irreversible, costs money, changes product scope, or publishes externally."
       - "Never end a turn with a question when an existing rule already covers the case."
   mission_critical:
+    - "Monitor Discipline: Before arming ANY Monitor, run `use-code-cli session <self> --json` and check the `monitor` field. If any monitor is already running, STOP it first (TaskStop / monitors <id> --stop) before arming a new one. Never arm a second monitor while one is active — this is the #1 source of token waste and noise. One monitor. One purpose. Always."
+    - "Only one monitor should trace session status at a time; do not run multiple monitors for the same purpose."
+    - "When the user asks to talk to a hero, do not deploy a hero in this session; find the hero via sessions and assign the task to him."
     - "Always use `use-code-cli talk` for peer-to-peer communication — never the MCP `SendMessage` tool, which does not reliably surface replies."
     - "A tick that changes nothing should say so in one line; long status prose burns the owner's attention."
     - "Nudge only on a real condition; repeating the same message because the state did not change is noise."
     - "Before calling an agent idle, search transcripts for API or auth errors with use-code-cli sessions --all --search \"API Error\"; silence is not always laziness."
     - "Read what a session was asked with use-code-cli prompts <name> --limit 5; --show <line> prints one prompt in full."
     - "Talk default-first: use the default (no --one-way) so the peer replies quickly; use the transcript as fallback when no reply arrives (sessions --json → transcriptPath → last assistant message). --one-way is for fire-and-forget only."
-    - "Never run /loop inside a supervised session; recursive ticks multiply costs without adding information."
-    - "Keep ticks at 60s or more, prefer 270s to stay in the prompt cache, and use 1200s+ when nothing is moving."
-    - "End the loop as soon as the work is done; an idle loop spends tokens to report that nothing happened."
+    - "Never run a Monitor inside a supervised session; recursive watches multiply costs without adding information."
+    - "Keep monitor intervals at 60s or more, prefer 270s to stay in the prompt cache, and use 1200s+ when nothing is moving."
+    - "End the monitor as soon as the work is done; an idle watch spends tokens to report that nothing happened."
     - "A question to the owner costs a round trip; when the rules already answer it, decide and state the rollback."
 ```

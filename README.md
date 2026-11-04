@@ -192,3 +192,17 @@ the safest.
 An empty message — nothing after `---` and empty stdin, or a terminal on stdin
 — is an error.
 
+
+### `monitors`
+
+List background monitors recovered from session transcripts (read-only).
+
+```bash
+use-code-cli monitors [target] [--all] [--search <text>] [--filter-name <names>] [--filter-status <statuses>] [--filter-hero <names>] [--limit <n>]
+```
+
+Monitors are session-only (they live in the Claude Code process), so this
+command can only *report* them — it cannot create, update, or delete them.
+Create/stop monitors from inside the session with Claude Code's `Monitor` /
+`TaskStop` tools. `--all` includes offline sessions (their monitors are the
+last known ones). `target` limits output to one session.
