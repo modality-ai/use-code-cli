@@ -1,6 +1,12 @@
 import http from "node:http";
 import { readFileSync } from "node:fs";
+import { Hono } from "hono";
+import { serveStatic } from "@hono/bun";
 import { aiTool } from "../scripts/index";
+
+const publicDir = new URL("../../public", import.meta.url).pathname;
+const staticApp = new Hono();
+staticApp.use("/styles/*", serveStatic({ root: publicDir }));
 
 export interface StartOptions {
   port?: number;
@@ -19,6 +25,32 @@ export function start(options: StartOptions = {}): http.Server {
       if (url === "/") {
         res.writeHead(302, { Location: "/help" });
         res.end();
+        return;
+      }
+      if (url.startsWith("/styles/")) {
+        const response = await staticApp.fetch(new Request(`http://localhost${req.url ?? "/"}`));
+        res.writeHead(response.status, Object.fromEntries(response.headers));
+        res.end(Buffer.from(await response.arrayBuffer()));
+        return;
+      }
+      if (url === "/api/sessions") {
+        const result = (await aiTool.execute({ command: "sessions" })) as { success?: boolean; data?: unknown[] };
+        const sessions = Array.isArray(result?.data)
+          ? result.data.map((s: any) => {
+              if (s && typeof s.lastPrompt === "string") {
+                const cleaned = String(s.lastPrompt)
+                  .replace(/<\/?cross-session-message[^>]*>/g, "")
+                  .replace(/<!-- use-code-cli:auto-reply[^>]*-->/g, "")
+                  .replace(/This came from another Claude session[\s\S]*$/g, "")
+                  .replace(/^Another Claude session sent a message:\n/, "")
+                  .trim();
+                return { ...s, lastPrompt: cleaned };
+              }
+              return s;
+            })
+          : [];
+        res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+        res.end(JSON.stringify({ success: true, data: sessions }));
         return;
       }
       if (url === "/sessions") {
@@ -44,30 +76,7 @@ export function start(options: StartOptions = {}): http.Server {
 @media (prefers-color-scheme: dark) { :root { --paper:#1a1b1e; --surface:#22252a; --border:#3a3e44; --text-primary:#e8e6e1; --text-muted:#a6a9ae; --accent:#4dacb2; } }
 body { margin:0; }
 </style>
-<script src="https://cdn.tailwindcss.com"></script>
-<script>
-tailwind.config = {
-  darkMode: 'media',
-  theme: {
-    extend: {
-      colors: {
-        paper: 'var(--paper)',
-        surface: 'var(--surface)',
-        border: 'var(--border)',
-        text: { primary: 'var(--text-primary)', muted: 'var(--text-muted)' },
-        accent: { collaboration: 'var(--accent)' }
-      },
-      fontFamily: {
-        display: ['"Noto Sans TC"', '"PingFang TC"', '"Microsoft JhengHei"', 'sans-serif'],
-        body: ['"Noto Sans TC"', '"PingFang TC"', '"Microsoft JhengHei"', 'sans-serif'],
-        code: ['"IBM Plex Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace']
-      },
-      borderRadius: { sm: '4px', md: '12px', lg: '16px' },
-      spacing: { xs: '4px', sm: '8px', md: '16px', lg: '24px', xl: '32px', section: '64px', 'island-gap': '24px', 'plate-offset': '8px' }
-    }
-  }
-};
-</script>
+<link rel="stylesheet" href="/styles/tailwind.css">
 <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
 </head><body class="bg-paper text-text-primary font-body"><div id="root" class="max-w-[960px] mx-auto my-lg p-md"></div>
@@ -83,9 +92,21 @@ function cleanPrompt(text) {
 }
 function App() {
   const [sessions, setSessions] = React.useState(Array.isArray(window.__SESSIONS__) ? window.__SESSIONS__ : []);
-  const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState(null);
-  if (loading) return React.createElement('p', {className:'text-text-muted'}, 'Loading...');
+  React.useEffect(() => {
+    let active = true;
+    const poll = async () => {
+      try {
+        const r = await fetch('/api/sessions');
+        const d = await r.json();
+        if (active && Array.isArray(d.data)) setSessions(d.data);
+        setError(null);
+      } catch (e) { if (active) setError(String(e)); }
+    };
+    poll();
+    const id = setInterval(poll, 3000);
+    return () => { active = false; clearInterval(id); };
+  }, []);
   if (error) return React.createElement('p', {className:'text-text-primary'}, 'Error: ' + error);
   if (sessions.length === 0) return React.createElement('p', {className:'text-text-muted'}, 'No active sessions.');
   return React.createElement('div', null,
@@ -101,7 +122,7 @@ function App() {
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
 </script>
 </body></html>`;
-        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
         res.end(html);
         return;
       }
@@ -134,7 +155,7 @@ article th { background:var(--paper); }
 article a { color:var(--accent); }
 .muted { color:var(--text-muted); }
 </style>
-<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="/styles/tailwind.css">
 </head><body><div class="container"><article>${rendered}</article></div></body></html>`;
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
         res.end(html);

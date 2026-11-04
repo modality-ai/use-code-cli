@@ -1,0 +1,36 @@
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
+
+@theme static {
+  --color-paper: #fbf7ef;
+  --color-surface: #fffdf8;
+  --color-border: #d8d4cb;
+  --color-text-primary: #23262b;
+  --color-text-muted: #5b5f66;
+  --color-accent-collaboration: #1f6f78;
+  --font-display: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+  --font-body: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+  --font-code: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+  --radius-sm: 4px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  --spacing-section: 64px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-paper: #1a1b1e;
+    --color-surface: #22252a;
+    --color-border: #3a3e44;
+    --color-text-primary: #e8e6e1;
+    --color-text-muted: #a6a9ae;
+    --color-accent-collaboration: #4dacb2;
+  }
+}
+
+@source "../**/*.{ts,tsx,html}";
