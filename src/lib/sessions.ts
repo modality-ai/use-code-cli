@@ -492,6 +492,9 @@ const PEER_PROMPT_PATTERN =
 /** Claude Code's wrapper around a delivered peer message; its markup is not text. */
 const PEER_ENVELOPE_PATTERN = /<\/?cross-session-message[^>]*>/g;
 
+/** Claude Code's trailing note that a peer message was not typed by the user. */
+const PEER_WRAPPER_PATTERN = /This came from another Claude session — not typed by your user\./g;
+
 /** The entry a prompt the human typed or sent was recorded as. */
 const HUMAN_PROMPT_PATTERN = /"type"\s*:\s*"user"[^\n]*?"turnOrigin"\s*:\s*"human"/g;
 
@@ -509,7 +512,7 @@ function lastPromptIn(text: string): string | undefined {
 
   const typedAt = lastMatchAt(HUMAN_PROMPT_PATTERN, text)?.at ?? typed?.at ?? -1;
   if (peer.at > typedAt) {
-    return unescapeJsonString(peer.value).replace(PEER_ENVELOPE_PATTERN, "").trim();
+    return unescapeJsonString(peer.value).replace(PEER_ENVELOPE_PATTERN, "").replace(PEER_WRAPPER_PATTERN, "").trim();
   }
   return typed ? unescapeJsonString(typed.value) : undefined;
 }
@@ -632,7 +635,7 @@ function promptFromLine(raw: string, line: number): SessionPrompt | undefined {
   if (!text) return undefined;
   const cleaned = (
     kind === "peer"
-      ? text.replace(PEER_PREFIX, "").replace(PEER_ENVELOPE_PATTERN, "")
+      ? text.replace(PEER_PREFIX, "").replace(PEER_ENVELOPE_PATTERN, "").replace(PEER_WRAPPER_PATTERN, "")
       : text
   ).trim();
   if (!cleaned) return undefined;

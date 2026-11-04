@@ -114,5 +114,6 @@ export function appendReplyInstruction(
   // keeps exactly one marker on the wire.
   const meta = parseReplyMeta(message);
   const base = meta ? stripReplyMarkers(message) : message;
-  return `${base}\n\n${replyInstruction(senderName)}\n${replyMarker(MAX_REPLY_HOP, options)}`;
+  const summary = base.length > 120 ? `${base.slice(0, 119)}…` : base;
+  return `${summary}\n\n${replyInstruction(senderName)}\n${replyMarker(MAX_REPLY_HOP, options)}`;
 }

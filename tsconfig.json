@@ -2,7 +2,7 @@
   "compilerOptions": {
     "module": "preserve",
     "target": "ESNext",
-    "lib": ["ES2022"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "moduleResolution": "bundler",
     "strict": true,
     "esModuleInterop": true,
@@ -27,7 +27,9 @@
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,
-    "types": ["@types/bun"]
+    "types": ["@types/bun"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "react"
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

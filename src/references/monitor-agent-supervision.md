@@ -102,6 +102,13 @@ grep -c "API Error\|missing access_token" <transcriptPath>
 
 A session that died on an auth error looks identical to an idle one in `sessions`. Fix the cause (usually `/login` in that terminal) and re-send the task instead of starting a new agent.
 
+## 4.1 Tool discipline (avoid noisy loops)
+
+When verifying files during a tick, prefer bash (`cat`/`grep`/`sed`) over repeated tool calls:
+- If a dedicated tool errors on a missing/required parameter, do **not** retry the same malformed call — switch to bash for the read.
+- Keep verification to one command per check; repeated identical calls look like a hang to the owner and burn tokens.
+- `use-code-cli talk` returns immediately with a `msg_id`; the peer's reply arrives asynchronously as a separate message — do not block or re-send while waiting.
+
 ## 5. Escalation ladder
 
 | Consecutive idle ticks | Action |

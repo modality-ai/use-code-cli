@@ -21,6 +21,8 @@
   },
   "devDependencies": {
     "@modality-counter/core": "^2.8.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "modality-bun-kit": "^1.4.4",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
@@ -42,7 +44,9 @@
     "build:commands": "modality-cli generate-commands",
     "build:cli": "bun build ./src/runner/cli.ts ./src/index.ts --target=bun --outdir=./dist --root=./src --external @modality-counter/core",
     "build": "bun run build:commands && bun run clean && bun run build:types && bun run build:cli && chmod +x ./dist/runner/cli.js",
-    "test": "bun run build:commands && npm run build && bun test"
+    "test": "bun run build:commands && npm run build && bun test",
+    "start": "bun src/runner/server.ts",
+    "dev": "bun --hot src/runner/server.ts"
   },
   "files": [
     "dist",

@@ -206,3 +206,7 @@ command can only *report* them — it cannot create, update, or delete them.
 Create/stop monitors from inside the session with Claude Code's `Monitor` /
 `TaskStop` tools. `--all` includes offline sessions (their monitors are the
 last known ones). `target` limits output to one session.
+
+## Dev server
+
+Run `bun start` then open http://127.0.0.1:3000/sessions for a JSON list of sessions.
