@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 const root = join(import.meta.dir, "..");
 const src = join(root, "src", "styles", "index.css");
-const outDir = join(root, "public", "styles");
+const outDir = join(root, "public", "dist");
 const tmp = join(outDir, "tailwind.css");
 
 mkdirSync(outDir, { recursive: true });
@@ -30,5 +30,5 @@ for (const f of readdirSync(outDir)) {
   }
 }
 
-writeFileSync(join(outDir, "manifest.json"), JSON.stringify({ style: `/styles/${hashedName}` }));
+writeFileSync(join(outDir, "manifest.json"), JSON.stringify({ style: `/dist/${hashedName}` }));
 console.log(`Built ${hashed}`);

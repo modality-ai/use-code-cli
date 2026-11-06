@@ -9,7 +9,7 @@ export const publicRoot = join(root, "public");
 export const cacheFor = (path: string): string => {
   if (path.startsWith("/assets/")) return "public, max-age=31536000, immutable";
   if (path.startsWith("/static/scene/")) return "public, max-age=0, must-revalidate";
-  if (path === "/static/client.js" || (path.startsWith("/styles/") && path.endsWith(".css")))
+  if ((path.startsWith("/dist/") && path.endsWith(".js")) || (path.startsWith("/dist/") && path.endsWith(".css")))
     return "public, max-age=0, must-revalidate";
   if (path.endsWith(".html") || path === "/" || !path.includes(".")) return "no-cache";
   return "public, max-age=300, must-revalidate";

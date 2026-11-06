@@ -9,11 +9,11 @@ export interface RootLayoutProps {
 
 function resolveCssHref(): string {
   try {
-    const manifestPath = new URL("../../public/styles/manifest.json", import.meta.url).pathname;
+    const manifestPath = new URL("../../public/dist/manifest.json", import.meta.url).pathname;
     const manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
-    return manifest.style ?? manifest.tailwind ?? "/styles/style.css";
+    return manifest.style ?? manifest.tailwind ?? "/dist/style.css";
   } catch {
-    return "/styles/style.css";
+    return "/dist/style.css";
   }
 }
 

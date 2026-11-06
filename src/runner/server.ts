@@ -1,4 +1,5 @@
 import { readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { Hono } from "hono";
 import { staticHandler } from "./static";
 import React from "react";
@@ -86,6 +87,16 @@ export function start(options: StartOptions = {}): ReturnType<typeof Bun.serve> 
       if (clientScript) {
         const script = clientScript(data);
         html = baseHtml.replace("</body>", `${script}</body>`);
+      } else {
+        // Auto-inject the compiled client bundle for this page (Next.js-like), if it exists.
+        const relDir = filePath.replace(/.*src\/web\//, "").replace(/\/[^\/]+$/, "");
+        const bundleUrl = "/dist/" + relDir + "/client.js";
+        const bundlePath = join(import.meta.dir, "..", "..", "public", bundleUrl.replace(/^\//, ""));
+        try {
+          if ((await import("node:fs")).existsSync(bundlePath)) {
+            html = baseHtml.replace("</body>", `<script type="module" src="${bundleUrl}"></script></body>`);
+          }
+        } catch {}
       }
       return c.html(html);
     });

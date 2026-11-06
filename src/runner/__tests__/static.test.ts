@@ -20,8 +20,8 @@ describe("cacheFor", () => {
   });
 
   it("returns revalidate for client.js and css", () => {
-    expect(cacheFor("/static/client.js")).toBe("public, max-age=0, must-revalidate");
-    expect(cacheFor("/styles/style.abc.css")).toBe("public, max-age=0, must-revalidate");
+    expect(cacheFor("/dist/session/[name]/client.js")).toBe("public, max-age=0, must-revalidate");
+    expect(cacheFor("/dist/style.abc.css")).toBe("public, max-age=0, must-revalidate");
   });
 
   it("returns 5 minute cache for other assets", () => {
