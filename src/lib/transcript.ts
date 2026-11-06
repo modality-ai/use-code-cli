@@ -80,6 +80,13 @@ export function parseTranscript(lines: string[]): TranscriptEntry[] {
       if (text || tools.length) {
         entries.push({ role: "assistant", text, html: text ? Bun.markdown.html(text) : "", tools: tools.length ? tools : undefined });
       }
+    } else if (obj.type === "system" && obj.subtype === "away_summary") {
+      const content = typeof obj.content === "string" ? obj.content : "";
+      // Strip <think>...</think> reasoning tags, keep the recap text
+      const cleaned = content.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+      if (cleaned) {
+        entries.push({ role: "system", text: cleaned, html: Bun.markdown.html(cleaned) });
+      }
     }
   }
 

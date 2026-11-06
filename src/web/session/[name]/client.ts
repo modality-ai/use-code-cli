@@ -21,11 +21,15 @@ function esc(s: any): string {
 }
 
 function cls(e: any): string {
-  return e.role === "user" ? "text-accent-collaboration" : "text-text-primary";
+  if (e.role === "user") return "text-accent-collaboration";
+  if (e.role === "system") return "text-text-muted italic";
+  return "text-text-primary";
 }
 
 function label(e: any): string {
-  return (e.role === "user" ? "❯ " : "⏺ ") + (e.role === "user" ? "You" : "Claude");
+  if (e.role === "user") return "❯ You";
+  if (e.role === "system") return "📋 Recap";
+  return "⏺ Claude";
 }
 
 function tryPrettyJson(text: any): string | null {

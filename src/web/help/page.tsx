@@ -1,19 +1,21 @@
 import React from "react";
 
 export default function HelpPage() {
-  return React.createElement(
-    "div",
-    null,
-    React.createElement("h1", null, "use-code-cli server"),
-    React.createElement("p", null, "Start with ", React.createElement("code", null, "bun start"), " (or ", React.createElement("code", null, "bun src/runner/server.ts"), ")."),
-    React.createElement("p", null, "Port defaults to 3000; override with ", React.createElement("code", null, "PORT"), " env var."),
-    React.createElement("h2", null, "Endpoints"),
-    React.createElement("ul", null,
-      React.createElement("li", null, React.createElement("code", null, "GET /sessions"), " - HTML list of all sessions"),
-      React.createElement("li", null, React.createElement("code", null, "GET /design"), " - rendered design system"),
-      React.createElement("li", null, React.createElement("code", null, "GET /help"), " - this page")
-    ),
-    React.createElement("h2", null, "Example"),
-    React.createElement("pre", null, "curl http://127.0.0.1:3000/sessions")
+  return (
+    <div>
+      <h1>use-code-cli server</h1>
+      <p>
+        Start with <code>bun start</code> (or <code>bun src/runner/server.ts</code>).
+      </p>
+      <p>Port defaults to 3000; override with <code>PORT</code> env var.</p>
+      <h2>Endpoints</h2>
+      <ul>
+        <li><code>GET /sessions</code> - HTML list of all sessions</li>
+        <li><code>GET /design</code> - rendered design system</li>
+        <li><code>GET /help</code> - this page</li>
+      </ul>
+      <h2>Example</h2>
+      <pre>curl http://127.0.0.1:3000/sessions</pre>
+    </div>
   );
 }
