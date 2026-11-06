@@ -46,7 +46,7 @@
     "build:types": "bun tsc -p ./",
     "build:commands": "modality-cli generate-commands",
     "build:cli": "bun build ./src/runner/cli.ts ./src/index.ts --target=bun --outdir=./dist --root=./src --external @modality-counter/core",
-    "build:styles": "bun node_modules/@tailwindcss/cli/dist/index.mjs -i src/styles/index.css -o public/styles/tailwind.css --minify",
+    "build:styles": "bun scripts/build-css.ts",
     "build": "bun run build:commands && bun run build:styles && bun run clean && bun run build:types && bun run build:cli && chmod +x ./dist/runner/cli.js",
     "test": "bun run build:commands && npm run build && bun test",
     "start": "bun src/runner/server.ts",

@@ -1,12 +1,43 @@
-import http from "node:http";
-import { readFileSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { Hono } from "hono";
-import { serveStatic } from "@hono/bun";
-import { aiTool } from "../scripts/index";
+import { staticHandler } from "./static";
+import React from "react";
+import { renderToString } from "react-dom/server";
+import RootLayout from "../web/layout";
 
-const publicDir = new URL("../../public", import.meta.url).pathname;
-const staticApp = new Hono();
-staticApp.use("/styles/*", serveStatic({ root: publicDir }));
+const webDir = new URL("../web", import.meta.url).pathname;
+
+function discoverFiles(dir: string, base = "", pattern: RegExp): Map<string, string> {
+  const routes = new Map<string, string>();
+  let entries: string[] = [];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return routes;
+  }
+  for (const name of entries) {
+    const full = `${dir}/${name}`;
+    let st;
+    try {
+      st = statSync(full);
+    } catch {
+      continue;
+    }
+    if (st.isDirectory()) {
+      const sub = discoverFiles(full, base ? `${base}/${name}` : name, pattern);
+      for (const [r, f] of sub) routes.set(r, f);
+      continue;
+    }
+    if (pattern.test(name)) {
+      const route = base === "" ? "/" : `/${base}`;
+      routes.set(route, full);
+    }
+  }
+  return routes;
+}
+
+const pageRoutes = discoverFiles(webDir, "", /^page\.(tsx|ts|jsx|js)$/);
+const apiRoutes = discoverFiles(webDir, "", /^route\.(tsx|ts|jsx|js)$/);
 
 export interface StartOptions {
   port?: number;
@@ -14,186 +45,62 @@ export interface StartOptions {
   includeOffline?: boolean;
 }
 
-export function start(options: StartOptions = {}): http.Server {
+export function start(options: StartOptions = {}): ReturnType<typeof Bun.serve> {
   const port = options.port ?? Number(process.env.PORT ?? 3000);
   const host = options.host ?? "127.0.0.1";
-  const includeOffline = options.includeOffline ?? true;
 
-  const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url ?? "/", "http://localhost").pathname;
-    try {
-      if (url === "/") {
-        res.writeHead(302, { Location: "/help" });
-        res.end();
-        return;
-      }
-      if (url.startsWith("/styles/")) {
-        const response = await staticApp.fetch(new Request(`http://localhost${req.url ?? "/"}`));
-        res.writeHead(response.status, Object.fromEntries(response.headers));
-        res.end(Buffer.from(await response.arrayBuffer()));
-        return;
-      }
-      if (url === "/api/sessions") {
-        const result = (await aiTool.execute({ command: "sessions" })) as { success?: boolean; data?: unknown[] };
-        const sessions = Array.isArray(result?.data)
-          ? result.data.map((s: any) => {
-              if (s && typeof s.lastPrompt === "string") {
-                const cleaned = String(s.lastPrompt)
-                  .replace(/<\/?cross-session-message[^>]*>/g, "")
-                  .replace(/<!-- use-code-cli:auto-reply[^>]*-->/g, "")
-                  .replace(/This came from another Claude session[\s\S]*$/g, "")
-                  .replace(/^Another Claude session sent a message:\n/, "")
-                  .trim();
-                return { ...s, lastPrompt: cleaned };
-              }
-              return s;
-            })
-          : [];
-        res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
-        res.end(JSON.stringify({ success: true, data: sessions }));
-        return;
-      }
-      if (url === "/sessions") {
-        const result = (await aiTool.execute({ command: "sessions" })) as { success?: boolean; data?: unknown[] };
-        const sessions = Array.isArray(result?.data)
-          ? result.data.map((s: any) => {
-              if (s && typeof s.lastPrompt === "string") {
-                const cleaned = String(s.lastPrompt)
-                  .replace(/<\/?cross-session-message[^>]*>/g, "")
-                  .replace(/<!-- use-code-cli:auto-reply[^>]*-->/g, "")
-                  .replace(/This came from another Claude session[\s\S]*$/g, "")
-                  .replace(/^Another Claude session sent a message:\n/, "")
-                  .trim();
-                return { ...s, lastPrompt: cleaned };
-              }
-              return s;
-            })
-          : [];
-        const sessionsJson = JSON.stringify(sessions).replace(/</g, "\\u003c");
-        const html = `<!doctype html><html><head><meta charset="utf-8"><title>Sessions</title>
-<style>
-:root { --paper:#fbf7ef; --surface:#fffdf8; --border:#d8d4cb; --text-primary:#23262b; --text-muted:#5b5f66; --accent:#1f6f78; }
-@media (prefers-color-scheme: dark) { :root { --paper:#1a1b1e; --surface:#22252a; --border:#3a3e44; --text-primary:#e8e6e1; --text-muted:#a6a9ae; --accent:#4dacb2; } }
-body { margin:0; }
-</style>
-<link rel="stylesheet" href="/styles/tailwind.css">
-<script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-</head><body class="bg-paper text-text-primary font-body"><div id="root" class="max-w-[960px] mx-auto my-lg p-md"></div>
-<script>window.__SESSIONS__ = ${sessionsJson};</script>
-<script>
-function cleanPrompt(text) {
-  return String(text || '')
-    .replace(/<\\/?cross-session-message[^>]*>/g, '')
-    .replace(/<!-- use-code-cli:auto-reply[^>]*-->/g, '')
-    .replace(/This came from another Claude session[\s\S]*$/g, '')
-    .replace(/^Another Claude session sent a message:\\n/, '')
-    .trim();
-}
-function App() {
-  const [sessions, setSessions] = React.useState(Array.isArray(window.__SESSIONS__) ? window.__SESSIONS__ : []);
-  const [error, setError] = React.useState(null);
-  React.useEffect(() => {
-    let active = true;
-    const poll = async () => {
-      try {
-        const r = await fetch('/api/sessions');
-        const d = await r.json();
-        if (active && Array.isArray(d.data)) setSessions(d.data);
-        setError(null);
-      } catch (e) { if (active) setError(String(e)); }
-    };
-    poll();
-    const id = setInterval(poll, 3000);
-    return () => { active = false; clearInterval(id); };
-  }, []);
-  if (error) return React.createElement('p', {className:'text-text-primary'}, 'Error: ' + error);
-  if (sessions.length === 0) return React.createElement('p', {className:'text-text-muted'}, 'No active sessions.');
-  return React.createElement('div', null,
-    React.createElement('h1', {className:'text-2xl font-semibold mb-md font-display'}, 'Sessions'),
-    sessions.map((s,i) => React.createElement('div', {className:'border border-border rounded-sm p-3 mb-sm bg-surface', key:i},
-      React.createElement('div', {className:'font-semibold text-accent-collaboration'}, s.name || s.sessionId),
-      React.createElement('div', {className:'font-code text-[13px] text-text-muted'}, (s.hero||'-') + ' · ' + (s.status||'-')),
-      React.createElement('div', {className:'text-text-muted'}, s.cwd || '-'),
-      React.createElement('div', null, cleanPrompt(s.lastPrompt || ''))
-    ))
-  );
-}
-ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
-</script>
-</body></html>`;
-        res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
-        res.end(html);
-        return;
-      }
+  const app = new Hono();
+  app.use("*", staticHandler);
 
-      if (url === "/design") {
-        let rendered = "";
-        try {
-          const md = readFileSync(new URL("../../design.md", import.meta.url), "utf8");
-          rendered = Bun.markdown.html(md);
-        } catch (err) {
-          rendered = `<p>Error reading design.md: ${String(err)}</p>`;
-        }
-        const html = `<!doctype html><html><head><meta charset="utf-8"><title>Design System — Island</title>
-<style>
-:root { --paper:#fbf7ef; --surface:#fffdf8; --border:#d8d4cb; --text-primary:#23262b; --text-muted:#5b5f66; --accent:#1f6f78; }
-@media (prefers-color-scheme: dark) { :root { --paper:#1a1b1e; --surface:#22252a; --border:#3a3e44; --text-primary:#e8e6e1; --text-muted:#a6a9ae; --accent:#4dacb2; } }
-body { margin:0; font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif; background:var(--paper); color:var(--text-primary); }
-.container { max-width:960px; margin:24px auto; padding:16px; }
-article { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:24px; }
-article h1, article h2, article h3 { color:var(--text-primary); }
-article h1 { font-size:28px; margin:0 0 16px; }
-article h2 { font-size:22px; margin:24px 0 12px; }
-article h3 { font-size:18px; margin:16px 0 8px; }
-article p, article li { line-height:1.6; }
-article code { font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,monospace; font-size:13px; background:var(--paper); padding:2px 4px; border-radius:4px; }
-article pre { background:var(--paper); border:1px solid var(--border); border-radius:12px; padding:16px; overflow:auto; }
-article table { width:100%; border-collapse:collapse; margin:12px 0; }
-article th, article td { border:1px solid var(--border); padding:8px; text-align:left; }
-article th { background:var(--paper); }
-article a { color:var(--accent); }
-.muted { color:var(--text-muted); }
-</style>
-<link rel="stylesheet" href="/styles/tailwind.css">
-</head><body><div class="container"><article>${rendered}</article></div></body></html>`;
-        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-        res.end(html);
-        return;
+  // Dynamic API routes (Next.js style: src/web/.../route.ts exporting GET/POST/etc.)
+  for (const [route, filePath] of apiRoutes) {
+    app.all(route, async (c) => {
+      const mod: any = await import(filePath);
+      const handler = mod[c.req.method];
+      if (typeof handler !== "function") {
+        return c.json({ success: false, error: "method not allowed" }, 405);
       }
+      const res = await handler(c.req.raw);
+      return res instanceof Response ? res : c.json(res);
+    });
+  }
 
-      if (url === "/help") {
-        const html = `<!doctype html><html><head><meta charset="utf-8"><title>use-code-cli server</title></head><body>
-<h1>use-code-cli server</h1>
-<p>Start with <code>bun start</code> (or <code>bun src/runner/server.ts</code>).</p>
-<p>Port defaults to 3000; override with <code>PORT</code> env var.</p>
-<h2>Endpoints</h2>
-<ul>
-<li><code>GET /sessions</code> - HTML list of all sessions</li>
-<li><code>GET /design</code> - rendered design system</li>
-<li><code>GET /help</code> - this page</li>
-</ul>
-<h2>Example</h2>
-<pre>curl http://127.0.0.1:3000/sessions</pre>
-</body></html>`;
-        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-        res.end(html);
-        return;
+  // Dynamic file-based routes
+  for (const [route, filePath] of pageRoutes) {
+    app.get(route, async (c) => {
+      const mod: any = await import(filePath);
+      const Page = mod.default;
+      const loadData = typeof mod.loadData === "function" ? mod.loadData : async () => ({});
+      const clientScript = typeof mod.clientScript === "function" ? mod.clientScript : null;
+      const data = await loadData();
+      const pageEl = React.createElement(Page, data || {});
+      const title = route === "/" ? "use-code-cli" : route.slice(1);
+      const baseHtml = renderToString(React.createElement(RootLayout, { title, children: pageEl }));
+      let html = baseHtml;
+      if (clientScript) {
+        const script = clientScript(data);
+        html = baseHtml.replace("</body>", `${script}</body>`);
       }
-      res.writeHead(404, { "content-type": "application/json" });
-      res.end(JSON.stringify({ success: false, error: "not found" }));
-    } catch (err) {
-      res.writeHead(500, { "content-type": "application/json" });
-      res.end(JSON.stringify({ success: false, error: String(err) }));
-    }
+      return c.html(html);
+    });
+  }
+
+  // Root redirect when no index page
+  if (!pageRoutes.has("/")) {
+    app.get("/", (c) => c.redirect("/help"));
+  }
+
+  app.notFound((c) => c.json({ success: false, error: "not found" }, 404));
+
+  const server = Bun.serve({
+    fetch: app.fetch,
+    port,
+    hostname: host,
   });
-
-  server.listen(port, host, () => {
-    console.log(`use-code-cli server listening on http://${host}:${port}`);
-  });
+  console.log(`use-code-cli server listening on http://${host}:${port}`);
   return server;
 }
 
-if (require.main === module) {
+if (import.meta.main) {
   start();
 }
