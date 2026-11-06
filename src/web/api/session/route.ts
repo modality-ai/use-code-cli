@@ -11,7 +11,7 @@ export async function GET(request: Request): Promise<Response> {
 
   const result = (await aiTool.execute({ command: "session", target: name })) as {
     success?: boolean;
-    data?: { transcriptPath?: string | null; name?: string | null };
+    data?: { transcriptPath?: string | null; name?: string | null; online?: boolean };
     message?: string;
   };
 
@@ -25,7 +25,7 @@ export async function GET(request: Request): Promise<Response> {
     const entries = parseTranscript(lines);
     return Response.json({
       success: true,
-      data: { name: result.data.name || name, transcriptPath, entries },
+      data: { name: result.data.name || name, transcriptPath, entries, online: result.data.online ?? false },
     });
   } catch (e) {
     return Response.json({ success: false, error: "cannot read transcript" }, { status: 500 });

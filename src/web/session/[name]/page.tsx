@@ -23,7 +23,7 @@ export default function SessionPage(props: SessionPageProps) {
         <button type="button" id="scroll-top" className="text-[12px] text-text-muted border border-border rounded-sm px-2 py-0.5" style={{ cursor: "pointer" }}>↑ Top</button>
         <button type="button" id="scroll-bottom" className="text-[12px] text-text-muted border border-border rounded-sm px-2 py-0.5" style={{ cursor: "pointer" }}>↓ Bottom</button>
       </div>
-      <div className="chat-input">
+      <div className="chat-input" style={{ display: "none" }}>
         <input id="chat-input" type="text" placeholder="Send a message to this session..." />
         <button id="chat-send">Send</button>
       </div>

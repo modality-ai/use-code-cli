@@ -46,7 +46,7 @@ details {
 @source "../**/*.{ts,tsx,html}";
 
 .chat-input {
-  display: flex;
+  display: none;
   gap: 8px;
   margin-top: 12px;
   width: 100%;

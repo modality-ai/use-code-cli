@@ -104,6 +104,9 @@ async function init() {
     const r = await fetch("/api/session?name=" + encodeURIComponent(name));
     const d = await r.json();
     if (d.success && Array.isArray(d.data?.entries)) renderEntries(d.data.entries);
+    const online = d.success ? (d.data?.online !== false) : false;
+    const chatInput = document.querySelector(".chat-input") as HTMLElement | null;
+    if (chatInput) chatInput.style.display = online ? "flex" : "none";
   } catch {}
 }
 init();
