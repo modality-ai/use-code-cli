@@ -16,6 +16,7 @@
   "git.addAICoAuthor": "off",
   "dependencies": {
     "@hono/bun": "^1.0.1",
+    "@tailwindcss/typography": "^0.5.20",
     "modality-cli-kit": "^0.16.1",
     "modality-mcp-kit": "^2.1.0",
     "zod": "^4.6.7"
