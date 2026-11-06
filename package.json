@@ -50,7 +50,8 @@
     "build": "bun run build:commands && bun run build:styles && bun run clean && bun run build:types && bun run build:cli && chmod +x ./dist/runner/cli.js",
     "test": "bun run build:commands && npm run build && bun test",
     "start": "bun src/runner/server.ts",
-    "dev": "bun --hot src/runner/server.ts"
+    "dev": "bun scripts/dev.ts",
+    "watch:css": "bun scripts/watch-css.ts"
   },
   "files": [
     "dist",

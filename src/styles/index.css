@@ -33,4 +33,13 @@
   }
 }
 
+details {
+  color: var(--color-text-primary);
+  & > summary {
+    cursor: pointer;
+    color: var(--color-accent-collaboration);
+    font-weight: 600;
+  }
+}
+
 @source "../**/*.{ts,tsx,html}";

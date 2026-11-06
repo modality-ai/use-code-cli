@@ -1,6 +1,5 @@
 import React from "react";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 
 export interface RootLayoutProps {
   children?: React.ReactNode;
@@ -35,7 +34,7 @@ export default function RootLayout({ children, title = "use-code-cli", cssHref }
         <script crossOrigin="anonymous" src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" />
       </head>
       <body className="bg-paper text-text-primary font-body">
-        <div id="root" className="max-w-240 mx-auto my-lg p-md">{children}</div>
+        <div id="root" className="max-w-240 mx-auto my-lg p-md mt-0">{children}</div>
       </body>
     </html>
   );

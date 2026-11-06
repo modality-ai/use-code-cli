@@ -6,11 +6,12 @@ import { join } from "node:path";
 const root = join(import.meta.dir, "..", "..");
 export const publicRoot = join(root, "public");
 
-const cacheFor = (path: string): string => {
+export const cacheFor = (path: string): string => {
   if (path.startsWith("/assets/")) return "public, max-age=31536000, immutable";
   if (path.startsWith("/static/scene/")) return "public, max-age=0, must-revalidate";
   if (path === "/static/client.js" || (path.startsWith("/styles/") && path.endsWith(".css")))
     return "public, max-age=0, must-revalidate";
+  if (path.endsWith(".html") || path === "/" || !path.includes(".")) return "no-cache";
   return "public, max-age=300, must-revalidate";
 };
 
@@ -28,7 +29,7 @@ const files: MiddlewareHandler = serveStatic({
 
 export const staticHandler: MiddlewareHandler = async (c, next) => {
   if (c.req.method !== "GET" && c.req.method !== "HEAD") {
-    c.res = await c.notFound();
+    await next();
     return;
   }
   const response = await files(c, next);

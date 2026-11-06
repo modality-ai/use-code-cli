@@ -5,6 +5,10 @@ import React from "react";
 import { renderToString } from "react-dom/server";
 import RootLayout from "../web/layout";
 
+export function routeSegment(name: string): string {
+  return /^\[(.*)\]$/.test(name) ? `:${name.slice(1, -1)}` : name;
+}
+
 const webDir = new URL("../web", import.meta.url).pathname;
 
 function discoverFiles(dir: string, base = "", pattern: RegExp): Map<string, string> {
@@ -24,7 +28,8 @@ function discoverFiles(dir: string, base = "", pattern: RegExp): Map<string, str
       continue;
     }
     if (st.isDirectory()) {
-      const sub = discoverFiles(full, base ? `${base}/${name}` : name, pattern);
+      const segment = routeSegment(name);
+      const sub = discoverFiles(full, base ? `${base}/${segment}` : segment, pattern);
       for (const [r, f] of sub) routes.set(r, f);
       continue;
     }
@@ -72,7 +77,8 @@ export function start(options: StartOptions = {}): ReturnType<typeof Bun.serve> 
       const Page = mod.default;
       const loadData = typeof mod.loadData === "function" ? mod.loadData : async () => ({});
       const clientScript = typeof mod.clientScript === "function" ? mod.clientScript : null;
-      const data = await loadData();
+      const params = c.req.param() as Record<string, string>;
+      const data = await loadData({ params, name: params.name });
       const pageEl = React.createElement(Page, data || {});
       const title = route === "/" ? "use-code-cli" : route.slice(1);
       const baseHtml = renderToString(React.createElement(RootLayout, { title, children: pageEl }));
