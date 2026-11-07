@@ -3,6 +3,8 @@ name: "*use-code-cli"
 description: "Supervise other Claude Code sessions from a Monitor tick: read state, detect progress, nudge, escalate, and stop."
 ---
 
+> **Rule:** Always arm exactly one Monitor before any supervision work. No exceptions.
+
 ```yaml
 method:
   name: "*use-code-cli"
@@ -57,7 +59,7 @@ usage_modes:
       - "The owner asks to watch, tick, poll, or supervise other agent sessions on an interval."
       - "A delegated task needs a supervisor that nudges idle agents without re-assigning the work."
     execution_flow:
-      - "Arm exactly ONE Monitor for session-status supervision BEFORE any tick work. Run `use-code-cli session <self> --json` and check the `monitor` field first; if none is active, arm one (single purpose, single monitor — never a second). Supervision without an active monitor is forbidden: do not fall back to one-off ticks. See monitor-agent-supervision.md §0 (Monitor Discipline)."
+      - "Always arm exactly one Monitor before any supervision work. Check `use-code-cli session <self> --json` → `monitor`; if none active, arm one. Never fall back to one-off ticks. See monitor-agent-supervision.md §0."
       - "Read state with use-code-cli sessions --json — name, hero, status, cwd and lastPrompt — adding --filter-status, --filter-hero, --filter-name or --filter-project when only some sessions matter."
       - "Check background watches with use-code-cli monitors --json (or monitors <name>) — confirm each is still running and stop stale ones with monitors <id> --stop."
       - "Note: to find team members in the same project, always use `use-code-cli sessions --filter-project` (bare defaults to the current working directory)."
@@ -82,7 +84,7 @@ tactical_notes:
     tick:
       - "Read sessions --json, keeping name, hero, status, cwd and lastPrompt for each target."
       - "Read monitors --json to confirm each background watch is alive; stop stale ones."
-      - "Monitor Discipline: Before arming ANY Monitor, check `use-code-cli session <self> --json` → `monitor` field. If a monitor is already running, STOP it first. Never arm a second. One monitor. One purpose."
+      - "Monitor Discipline: Always arm exactly one Monitor before any supervision work. Check `monitor` field first; stop any active one before arming a new. Never a second."
       - "Diff against the previous tick with git status and the key files' mtimes."
       - "Classify busy or idle, then nudge, wait, or escalate accordingly."
       - "Check the stop condition before ending the tick."
@@ -98,8 +100,8 @@ tactical_notes:
       - "Ask only when the action is irreversible, costs money, changes product scope, or publishes externally."
       - "Never end a turn with a question when an existing rule already covers the case."
   mission_critical:
-    - "Supervising agents WITHOUT an active Monitor is forbidden. Before any supervision work, check `use-code-cli session <self> --json` → `monitor` field; if none active, arm exactly one (single purpose). Never fall back to one-off ticks. This is a hard mandate, not a suggestion."
-    - "Monitor Discipline: Before arming ANY Monitor, run `use-code-cli session <self> --json` and check the `monitor` field. If any monitor is already running, STOP it first (TaskStop / monitors <id> --stop) before arming a new one. Never arm a second monitor while one is active — this is the #1 source of token waste and noise. One monitor. One purpose. Always."
+    - "Supervising without an active Monitor is forbidden. Always arm exactly one first."
+    - "Monitor Discipline: Always arm exactly one Monitor before any supervision work. Stop any active one before arming a new. Never a second."
     - "Only one monitor should trace session status at a time; do not run multiple monitors for the same purpose."
     - "When the user asks to talk to a hero, do not deploy a hero in this session; find the hero via sessions and assign the task to him."
     - "Always use `use-code-cli talk` for peer-to-peer communication — never the MCP `SendMessage` tool, which does not reliably surface replies."

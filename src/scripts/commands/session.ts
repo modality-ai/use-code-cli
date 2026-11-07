@@ -10,6 +10,7 @@ import {
   readMonitors,
   type SessionMonitor,
   readSessions,
+  deleteSession,
   readTranscriptMeta,
   sessionLabel as label,
   setSessionName,
@@ -18,6 +19,7 @@ import {
   type SessionCron,
   type SessionInfo,
 } from "../../lib/sessions";
+import { deliver, liveSessions } from "../../lib/peer";
 
 const SessionArgsSchema = z.object({
   target: z
@@ -36,6 +38,26 @@ const SessionArgsSchema = z.object({
     .min(1)
     .optional()
     .describe("Move the session's transcript into the project directory for this cwd"),
+  stop: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe("Kill the target session's process (online sessions only)"),
+  delete: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe("Delete the session's transcript and pinned name (offline sessions only unless --force)"),
+  "stop-all-monitor": z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe("Ask the owning session to stop all of its background monitors via TaskStop (session-only; requires it online)"),
+  force: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe("Allow deleting an online session's transcript (implies --delete)"),
 });
 
 type SessionArgs = z.infer<typeof SessionArgsSchema>;
@@ -167,6 +189,86 @@ async function session(args: SessionArgs) {
   if (!s) {
     return { success: false, message: `No session matches "${args.target}".` };
   }
+
+  if (args["stop-all-monitor"]) {
+    if (!s.online) {
+      return {
+        success: false,
+        message: `Session ${label(s)} is offline; monitors are session-only. Start it and run TaskStop inside it.`,
+      };
+    }
+    const monitors = await readMonitors(s);
+    if (monitors.length === 0) {
+      return { success: true, message: `Session ${label(s)} has no active monitors.` };
+    }
+    const live = await liveSessions();
+    const session = live.find((x) => x.sessionId === s.sessionId);
+    if (!session) {
+      return {
+        success: false,
+        message: `Session ${label(s)} is not reachable for messaging. Run TaskStop({task_id: "..."}) inside it for: ${monitors.map((m) => m.id).join(", ")}.`,
+      };
+    }
+    const ids = monitors.map((m) => m.id);
+    try {
+      await deliver(
+        session,
+        `Please stop all background monitors by calling TaskStop for each: ${ids
+          .map((id) => `${id}`)
+          .join(", ")}. (Monitors: ${monitors.map((m) => `${m.id} ("${m.description ?? ""}")`).join("; ")})`,
+      );
+      return {
+        success: true,
+        message: `Asked session ${label(s)} to stop ${monitors.length} monitor${monitors.length === 1 ? "" : "s"}: ${ids.join(", ")}.`,
+      };
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      return {
+        success: false,
+        message: `Could not message session ${label(s)}: ${reason}. Run TaskStop inside it for: ${ids.join(", ")}.`,
+      };
+    }
+  }
+
+  if (args.delete || args.force) {
+    if (s.online && !args.force) {
+      return {
+        success: false,
+        message: `Session ${label(s)} is still active (pid ${s.pid}); pass --force to delete its transcript anyway, or stop it first with --stop.`,
+      };
+    }
+    const { transcriptRemoved } = await deleteSession(s);
+    const lines = [`Deleted session ${label(s)} (${s.sessionId}).`];
+    lines.push(transcriptRemoved ? "Transcript removed." : "No transcript found; nothing to remove.");
+    lines.push("Pinned name cleared from the registry (if present).");
+    return { success: true, message: lines.join("\n"), data: { sessionId: s.sessionId, deleted: true } };
+  }
+
+  // Stop mode: kill the session's process.
+  if (args.stop) {
+    if (!s.online) {
+      return {
+        success: false,
+        message: `Session ${label(s)} is offline; cannot stop it. (Only active sessions can be stopped.)`,
+      };
+    }
+    try {
+      process.kill(s.pid, "SIGTERM");
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      // EPERM etc. — fall back to reporting.
+      return {
+        success: false,
+        message: `Could not stop session ${label(s)} (pid ${s.pid}): ${reason}.`,
+      };
+    }
+    return {
+      success: true,
+      message: `Killed session ${label(s)} (pid ${s.pid}).`,
+      data: { sessionId: s.sessionId, pid: s.pid, name: label(s) },
+    };
+  }
+
   if (args.rename !== undefined || args.cwd !== undefined) {
     return performSessionUpdate(s, args.rename, args.cwd);
   }
@@ -180,13 +282,14 @@ async function session(args: SessionArgs) {
   const lines = [
     name,
     row("state", state),
+    ...(s.online ? [row("pid", String(s.pid))] : []),
+    row("name", name),
     ...(s.nameSource === "user" ? [row("name source", "user (--rename)")] : []),
+    row("sessionId", s.sessionId),
     row("workspace", s.cwd),
     row("branch", meta.branch),
     row("hero", meta.hero),
     row("last prompt", meta.lastPrompt ? `"${oneLine(meta.lastPrompt, 100)}"` : undefined),
-    row("pid", String(s.pid)),
-    row("sessionId", s.sessionId),
     row("transcript", rawFile),
     row("version", s.version),
     row("started", s.startedAt ? `${formatTime(s.startedAt)} (${ago(s.startedAt)})` : undefined),
@@ -241,7 +344,7 @@ async function session(args: SessionArgs) {
 
 export const sessionCommand: CLICommand = {
   name: "session",
-  description: "Show one session's workspace, hero, cron jobs, and how to talk to it",
+  description: "Show one session's workspace, hero, cron jobs, and how to talk to it; --stop kills an active session",
   inputSchema: SessionArgsSchema,
   positionalKeys: ["target"],
   execute: session,
@@ -249,5 +352,6 @@ export const sessionCommand: CLICommand = {
     "use-code-cli session 49606 --json",
     "use-code-cli session use-design-05 --rename fix-auth",
     "use-code-cli session po-use-island --cwd /Volumes/GoldenSnake/git/use-island",
+    "use-code-cli session use-design-05 --stop",
   ],
 };

@@ -1,4 +1,5 @@
-import { readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Hono } from "hono";
 import { staticHandler } from "./static";
@@ -16,6 +17,20 @@ export function pageTitle(route: string, params: Record<string, string> = {}): s
 }
 
 const webDir = new URL("../web", import.meta.url).pathname;
+
+// Client bundle URLs to inject for a route dir. client-manifest.json (written by
+// tools/build-client.ts) maps route dir -> entry script URLs; falls back to the
+// legacy single client.js so pages still hydrate before a first manifest build.
+async function clientScriptsFor(relDir: string): Promise<string[]> {
+  const distDir = join(import.meta.dir, "..", "..", "public", "dist");
+  try {
+    const manifest = JSON.parse(await readFile(join(distDir, "client-manifest.json"), "utf8"));
+    if (Array.isArray(manifest[relDir])) return manifest[relDir];
+  } catch {}
+  const legacyUrl = "/dist/" + relDir + "/client.js";
+  if (existsSync(join(distDir, relDir, "client.js"))) return [legacyUrl];
+  return [];
+}
 
 function discoverFiles(dir: string, base = "", pattern: RegExp): Map<string, string> {
   const routes = new Map<string, string>();
@@ -93,15 +108,13 @@ export function start(options: StartOptions = {}): ReturnType<typeof Bun.serve> 
         const script = clientScript(data);
         html = baseHtml.replace("</body>", `${script}</body>`);
       } else {
-        // Auto-inject the compiled client bundle for this page (Next.js-like), if it exists.
+        // Auto-inject the compiled client bundle(s) for this page (Next.js-like).
         const relDir = filePath.replace(/.*src\/web\//, "").replace(/\/[^\/]+$/, "");
-        const bundleUrl = "/dist/" + relDir + "/client.js";
-        const bundlePath = join(import.meta.dir, "..", "..", "public", bundleUrl.replace(/^\//, ""));
-        try {
-          if ((await import("node:fs")).existsSync(bundlePath)) {
-            html = baseHtml.replace("</body>", `<script type="module" src="${bundleUrl}"></script></body>`);
-          }
-        } catch {}
+        const scripts = await clientScriptsFor(relDir);
+        if (scripts.length) {
+          const tags = scripts.map((url) => `<script type="module" src="${url}"></script>`).join("");
+          html = baseHtml.replace("</body>", tags + "</body>");
+        }
       }
       return c.html(html);
     });
@@ -118,6 +131,9 @@ export function start(options: StartOptions = {}): ReturnType<typeof Bun.serve> 
     fetch: app.fetch,
     port,
     hostname: host,
+    // SSE streams stay open with no data for long stretches; disable Bun's
+    // default 10s idle timeout so they aren't cut mid-chunk.
+    idleTimeout: 255,
   });
   console.log(`use-code-cli server listening on http://${host}:${port}`);
   return server;

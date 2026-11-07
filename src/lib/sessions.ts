@@ -261,6 +261,35 @@ export function sessionLabel(s: { name?: string; sessionId: string }): string {
 }
 
 /**
+ * Delete a session: remove its transcript file and its pinned name from the
+ * registry. Returns whether a transcript was actually removed.
+ */
+export async function deleteSession(s: SessionInfo): Promise<{ transcriptRemoved: boolean }> {
+  const path = await transcriptPath(s);
+  let transcriptRemoved = false;
+  if (path) {
+    try {
+      const { unlink } = await import("node:fs/promises");
+      await unlink(path);
+      transcriptRemoved = true;
+    } catch {
+      transcriptRemoved = false;
+    }
+  }
+  try {
+    const names = await readSessionNames();
+    if (Object.prototype.hasOwnProperty.call(names, s.sessionId)) {
+      delete names[s.sessionId];
+      await mkdir(SESSIONS_DIR, { recursive: true });
+      await writeFile(NAMES_FILE, `${JSON.stringify(names, null, 2)}\n`, "utf8");
+    }
+  } catch {
+    // Best-effort: registry cleanup shouldn't fail the delete.
+  }
+  return { transcriptRemoved };
+}
+
+/**
  * Sessions a target names. Exact name / sessionId / pid wins; otherwise a name
  * prefix, so `session use-design` finds `use-design-05`.
  */
@@ -352,6 +381,57 @@ export async function readSessionsLive(): Promise<SessionInfo[]> {
  * keeps the transcript at ~/.claude/projects/<project>/<sessionId>.jsonl.
  * Offline sessions are recovered from those transcripts.
  */
+
+/**
+ * The name a transcript records for its session, if any: Claude Code writes a
+ * `custom-title` (and `agent-name`) line when a session is named with `-n` or
+ * renamed, and an `ai-title` line for its auto-generated display name, so an
+ * offline session whose pid file is gone can still recover it. A user-set name
+ * takes precedence over the auto-generated one.
+ */
+/** Pure parser: extract the session name recorded in a transcript's text. */
+export function parseTranscriptSessionName(text: string): string | undefined {
+  const lines = text.split(/\r?\n/);
+  // Claude Code writes several naming records: `custom-title` / `agent-name`
+  // for user-set names (highest priority) and `ai-title` for the auto-generated
+  // display name. A user-set name wins even if an ai-title was written later.
+  let lastCustom: string | undefined;
+  let lastAi: string | undefined;
+  for (const line of lines) {
+    const raw = line.trim();
+    if (raw === "") continue;
+    try {
+      const entry = JSON.parse(raw) as {
+        type?: string;
+        customTitle?: unknown;
+        agentName?: unknown;
+        aiTitle?: unknown;
+      };
+      if (entry.type === "custom-title" && typeof entry.customTitle === "string" && entry.customTitle !== "") {
+        lastCustom = entry.customTitle;
+      }
+      if (entry.type === "agent-name" && typeof entry.agentName === "string" && entry.agentName !== "") {
+        lastCustom = entry.agentName;
+      }
+      if (entry.type === "ai-title" && typeof entry.aiTitle === "string" && entry.aiTitle !== "") {
+        lastAi = entry.aiTitle;
+      }
+    } catch {
+      // Skip malformed lines.
+    }
+  }
+  return lastCustom ?? lastAi;
+}
+
+async function readTranscriptSessionName(path: string): Promise<string | undefined> {
+  try {
+    const text = await readFile(path, "utf8");
+    return parseTranscriptSessionName(text);
+  } catch {
+    return undefined;
+  }
+}
+
 async function readOfflineSessions(known: Set<string>): Promise<SessionInfo[]> {
   const out: SessionInfo[] = [];
   let projects: string[];
@@ -375,6 +455,7 @@ async function readOfflineSessions(known: Set<string>): Promise<SessionInfo[]> {
       try {
         const st = await stat(path);
         const { start, end } = await readTranscriptCwds(path);
+        const transcriptName = await readTranscriptSessionName(path);
         out.push({
           pid: 0,
           sessionId,
@@ -384,6 +465,9 @@ async function readOfflineSessions(known: Set<string>): Promise<SessionInfo[]> {
           updatedAt: st.mtimeMs,
           status: "offline",
           online: false,
+          ...(transcriptName !== undefined
+            ? { name: transcriptName, nameSource: "transcript" }
+            : {}),
         });
       } catch {
         // Skip unreadable transcripts.
@@ -399,6 +483,20 @@ export async function readSessions(includeOffline: boolean): Promise<SessionInfo
   if (includeOffline) {
     const known = new Set(sessions.map((s) => s.sessionId));
     sessions.push(...(await readOfflineSessions(known)));
+  }
+  // Online sessions: a derived pid-file name (e.g. "use-code-cli-53") is only a
+  // fallback; Claude Code's own display title (custom-title / ai-title) is more
+  // useful, so override it. User-set names (nameSource "user") are preserved.
+  for (const s of sessions) {
+    if (!s.online) continue;
+    if (s.name !== undefined && s.nameSource !== "derived") continue;
+    const path = await transcriptPath(s);
+    if (!path) continue;
+    const transcriptName = await readTranscriptSessionName(path);
+    if (transcriptName !== undefined) {
+      s.name = transcriptName;
+      s.nameSource = "transcript";
+    }
   }
   applySessionNames(sessions, await readSessionNames());
   return sessions.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
@@ -981,4 +1079,81 @@ export async function searchTranscript(s: SessionInfo, term: string): Promise<Tr
   }
 
   return first ? { matches, line: first.line, snippet: first.snippet } : NO_MATCH;
+}
+
+/**
+ * Compress a transcript in place by trimming bulky string payloads (tool
+ * results, tool inputs, and other oversized fields) while keeping every line
+ * valid JSON so Claude Code can still resume the session. Returns byte counts.
+ */
+/** Trim bulky string payloads (and recursively arrays/objects) to at most `max` chars. */
+export function trimValue(value: unknown, max: number = 800): unknown {
+  if (typeof value === "string") {
+    if (value.length <= max) return value;
+    return `${value.slice(0, max)}… [compressed: ${value.length - max} more chars]`;
+  }
+  if (Array.isArray(value)) return value.map((v) => trimValue(v, max));
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = trimValue(v, max);
+    }
+    return out;
+  }
+  return value;
+}
+
+export async function compressTranscript(
+  path: string,
+  summary?: string,
+): Promise<{
+  originalBytes: number;
+  newBytes: number;
+  entries: number;
+}> {
+  const { readFile, writeFile, rename } = await import("node:fs/promises");
+  const text = await readFile(path, "utf8");
+  const originalBytes = Buffer.byteLength(text, "utf8");
+  const MAX = 800;
+
+  if (summary !== undefined) {
+    const sessionId = path.split("/").pop()?.replace(/\.jsonl$/, "") ?? "";
+    const compacted = JSON.stringify({
+      type: "system",
+      subtype: "compact_boundary",
+      content: summary,
+      sessionId,
+    });
+    const newText = `${compacted}\n`;
+    const tmp = `${path}.compact.tmp`;
+    await writeFile(tmp, newText, "utf8");
+    await rename(tmp, path);
+    return {
+      originalBytes,
+      newBytes: Buffer.byteLength(newText, "utf8"),
+      entries: 1,
+    };
+  }
+
+  const lines = text.split(/\r?\n/);
+  const out: string[] = [];
+  let entries = 0;
+  for (const line of lines) {
+    if (line.trim() === "") {
+      out.push(line);
+      continue;
+    }
+    try {
+      const obj = JSON.parse(line);
+      out.push(JSON.stringify(trimValue(obj, MAX)));
+      entries++;
+    } catch {
+      out.push(line);
+    }
+  }
+  const newText = out.join("\n");
+  const tmp = `${path}.compress.tmp`;
+  await writeFile(tmp, newText, "utf8");
+  await rename(tmp, path);
+  return { originalBytes, newBytes: Buffer.byteLength(newText, "utf8"), entries };
 }

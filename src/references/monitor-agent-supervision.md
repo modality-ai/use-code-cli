@@ -5,6 +5,8 @@ description: How to run a Monitor that supervises other Claude Code sessions wit
 
 # Monitor × use-code-cli
 
+**Rule:** Always arm exactly one Monitor before any supervision work. No exceptions.
+
 `Monitor` runs a shell command on a cadence and streams each output line as an event. `use-code-cli` reads and writes other Claude Code sessions. Together they form a supervisor that checks work, nudges, escalates, and stops — without a human polling.
 
 ## 1. Choose the cadence
@@ -59,12 +61,9 @@ use-code-cli talk <session> --- "<message>" --one-way   # no reply expected
 
 Keep the idle counter outside the prompt (a small JSON file under `/tmp`, keyed by session name). A tick that forgets the count can never escalate.
 
-## 0. Monitor Discipline (read before arming anything)
+## 0. Monitor Discipline
 
-Before arming ANY Monitor, run `use-code-cli session <self> --json` and check the `monitor` field.
-If any monitor is already running, STOP it first (`TaskStop` or `use-code-cli monitor <id> --stop`) before arming a new one.
-Never arm a second monitor while one is active — this is the #1 source of token waste and noise.
-One monitor. One purpose. Always.
+Always arm exactly one Monitor before any supervision work. Check `use-code-cli session <self> --json` → `monitor`; if none active, arm one. Stop any active monitor before arming a new one. Never a second. One monitor. One purpose. Always.
 
 ## 3.5 Monitor script example
 

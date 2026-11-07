@@ -30,8 +30,6 @@ export default function RootLayout({ children, title = "use-code-cli", cssHref }
         <title>{title}</title>
         <style dangerouslySetInnerHTML={{ __html: themeVars }} />
         <link rel="stylesheet" href={href} />
-        <script crossOrigin="anonymous" src="https://unpkg.com/react@18/umd/react.development.js" />
-        <script crossOrigin="anonymous" src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" />
       </head>
       <body className="bg-paper text-text-primary font-body">
         <div id="root" className="max-w-240 mx-auto my-lg p-md mt-0">{children}</div>

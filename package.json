@@ -46,6 +46,7 @@
     "use-code-cli": "./dist/runner/cli.js"
   },
   "scripts": {
+    "po": "bash -lic 'open-yolo --resume po-use-code-cli'",
     "clean": "find ./dist -name '*.*' | xargs rm -rf",
     "build:types": "bun tsc -p ./",
     "build:commands": "modality-cli generate-commands",

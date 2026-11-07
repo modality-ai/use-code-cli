@@ -204,6 +204,7 @@ async function sessions(args: SessionsArgs) {
       for (const r of rows) {
         largeLines.push(`${r.name || r.sessionId}:`);
         largeLines.push(`  match: ${r.matches} hit${r.matches === 1 ? "" : "s"} · line ${r.line} · "${r.snippet}"`);
+        largeLines.push(`  id:   ${r.sessionId}`);
         largeLines.push(`  cwd:  ${r.cwd}`);
         largeLines.push("");
       }
@@ -213,6 +214,7 @@ async function sessions(args: SessionsArgs) {
         if (r.lastPrompt) {
           largeLines.push(`  last: "${oneLine(r.lastPrompt, 1000)}"`);
         }
+        largeLines.push(`  id:   ${r.sessionId}`);
         largeLines.push(`  cwd:  ${r.cwd}`);
         largeLines.push("");
       }
