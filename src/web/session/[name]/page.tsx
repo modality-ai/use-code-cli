@@ -12,7 +12,7 @@ export default function SessionPage(props: SessionPageProps) {
         <a href="/sessions" className="text-[12px] text-accent-collaboration hover:underline">← Back to sessions</a>
         <h1 className="text-2xl font-semibold font-display">{name || "Session"}</h1>
       </div>
-      <div id="transcript" className="border border-border rounded-sm p-3 bg-surface font-code text-[13px] whitespace-pre-wrap max-h-[70vh] overflow-auto">
+      <div id="transcript" className="border border-border rounded-sm p-3 bg-surface font-code text-[13px] max-h-[70vh] overflow-auto">
         <p className="text-text-muted">Loading session transcript...</p>
       </div>
       <div className="flex items-center gap-2 mt-2">

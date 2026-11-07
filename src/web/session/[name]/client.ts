@@ -28,7 +28,7 @@ sessionStore.addListener((state: any) => {
 });
 
 function esc(s: any): string {
-  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 function cls(e: any): string {
@@ -64,15 +64,36 @@ function tryPrettyJson(text: any): string | null {
   return out.join("\n");
 }
 
+/** Plain-text preview of an entry's message for the pinned one-line row. */
+function teaserOf(e: any): string {
+  const source = e.text != null ? String(e.text) : decodeHtmlText(e.html || "");
+  const flat = source.replace(/\s+/g, " ").trim();
+  return flat ? esc(flat.slice(0, 200)) : "";
+}
+
+function decodeHtmlText(html: string): string {
+  const d = document.createElement("div");
+  d.innerHTML = html;
+  return d.textContent || "";
+}
+
 function renderEntry(e: any): string {
   const tools = Array.isArray(e.tools)
     ? e.tools
-        .map((t: any, ti: number) => {
+        .map((t: any) => {
           const pretty = tryPrettyJson(t.result);
-          const resultHtml = pretty
+          // Fold bodies stay in a data attribute until the fold is opened:
+          // text nodes that were never laid out can't make the page collapse
+          // (a 50k-px open <pre> can freeze the tab outright).
+          const resultHtml = t.resultHtml
+            ? t.resultHtml
+            : pretty
             ? '<pre class="json whitespace-pre-wrap text-[12px] mt-1">' + esc(pretty) + "</pre>"
-            : t.resultHtml
-            ? '<div class="mt-1 md-content max-w-none">' + t.resultHtml + "</div>"
+            : t.result
+            ? '<pre class="whitespace-pre-wrap text-[12px] mt-1">' + esc(t.result) + "</pre>"
+            : "";
+          const lazyBody = resultHtml
+            ? '<div class="lazy-body" data-body="' + esc(resultHtml) + '"></div>'
             : "";
           return (
             '<details class="pl-4 mt-1 border border-border rounded-sm p-2">' +
@@ -82,35 +103,112 @@ function renderEntry(e: any): string {
             '<pre class="whitespace-pre-wrap text-[12px] mt-1">' +
             esc(t.input != null ? JSON.stringify(t.input, null, 2) : "") +
             "</pre>" +
-            resultHtml +
+            lazyBody +
             "</details>"
           );
         })
         .join("")
     : "";
+  const sticky = e.role === "user" ? " sticky top-0 bg-surface" : "";
+  const labelRow = sticky
+    ? '<div class="' +
+      cls(e) +
+      " relative font-semibold cursor-pointer flex items-baseline gap-2 leading-5" +
+      '">' +
+      '<span class="shrink-0">' +
+      esc(label(e)) +
+      "</span>" +
+      '<span class="teaser flex-1 min-w-0 truncate font-normal text-text-muted">' +
+      teaserOf(e) +
+      "</span>" +
+      "</div>"
+    : '<div class="' + cls(e) + ' font-semibold">' + esc(label(e)) + "</div>";
   return (
-    '<div class="mb-sm">' +
-    '<div class="' +
-    cls(e) +
-    ' font-semibold">' +
-    esc(label(e)) +
-    "</div>" +
+    '<div class="mb-sm' +
+    sticky +
+    '">' +
+    labelRow +
     (e.html
-      ? '<div class="pl-4 md-content max-w-none">' + e.html + "</div>"
+      ? '<div class="entry-body pl-4 md-content max-w-none">' + e.html + "</div>"
       : e.text
-      ? '<div class="pl-4 whitespace-pre-wrap">' + esc(e.text) + "</div>"
+      ? '<div class="entry-body pl-4 whitespace-pre-wrap">' + esc(e.text) + "</div>"
       : "") +
     tools +
     "</div>"
   );
 }
 
+/**
+ * Pinned (sticky) entries collapse to a one-line label: an entry whose top has
+ * reached the scroll container's padding edge is stuck, so mark it. Pinned
+ * elements rest at the scrollport top inset by the container's border+padding,
+ * so the threshold must match that offset, not just the 1px border.
+ */
+function updateStuck(root: HTMLElement): void {
+  const cs = getComputedStyle(root);
+  const inset =
+    (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.paddingTop) || 0) + 1;
+  const rootTop = root.getBoundingClientRect().top;
+  const stickyEls = root.querySelectorAll<HTMLElement>(".sticky.top-0");
+  for (const wrapper of stickyEls) {
+    wrapper.classList.toggle("stuck", wrapper.getBoundingClientRect().top <= rootTop + inset);
+  }
+}
+
+/**
+ * Clicking the pinned band toggles its fold, like <details>/<summary>.
+ * The expanded body overlays below the band, so clicks inside it resolve to a
+ * non-first child and won't collapse the entry.
+ */
+function bindStickyToggle(root: HTMLElement): void {
+  const bound = root as HTMLElement & { __stickyToggleBound?: boolean };
+  if (bound.__stickyToggleBound) return;
+  bound.__stickyToggleBound = true;
+  root.addEventListener("click", (ev) => {
+    const target = ev.target as HTMLElement | null;
+    const child = target?.closest(".sticky.top-0 > div");
+    const wrapper = child?.parentElement;
+    if (!child || !wrapper || wrapper.firstElementChild !== child) return;
+    wrapper.classList.toggle("open");
+  });
+}
+
+/** Materialize a fold's pending body the first time it opens. */
+function hydrateFold(d: HTMLDetailsElement): void {
+  const body = d.querySelector<HTMLElement>(".lazy-body");
+  if (!body || body.dataset.hydrated) return;
+  body.innerHTML = body.dataset.body || "";
+  delete body.dataset.body;
+  body.dataset.hydrated = "yes";
+}
+
 function renderEntries(entries: any[]): void {
   const el = document.getElementById("transcript");
   if (!el) return;
   el.innerHTML = (Array.isArray(entries) ? entries : []).map(renderEntry).join("");
+  updateStuck(el);
+  bindStickyToggle(el);
+  const holder = el as HTMLElement & { __scrollBound?: boolean };
+  if (!holder.__scrollBound) {
+    holder.__scrollBound = true;
+    el.addEventListener("scroll", () => updateStuck(el), { passive: true });
+  }
+  // toggle doesn't bubble, so bind each fold directly; listeners die with
+  // their nodes on the next rebuild.
+  for (const d of el.querySelectorAll<HTMLDetailsElement>("details")) {
+    d.addEventListener("toggle", () => hydrateFold(d));
+  }
   const sc = document.getElementById("autoscroll") as HTMLInputElement | null;
   if (sc && sc.checked) el.scrollTop = el.scrollHeight;
+}
+
+/**
+ * With "Auto-scroll to bottom" unchecked the page is frozen: no re-render, no
+ * status churn — DOM stays put while the user reads history.
+ */
+function liveUpdates(): boolean {
+  const sc = document.getElementById("autoscroll") as HTMLInputElement | null;
+  return !sc || sc.checked;
 }
 
 // initial paint: fetch transcript from API (server renders shell only)
@@ -128,6 +226,7 @@ function applySessionState(d: any) {
 }
 
 async function refreshState() {
+  if (!liveUpdates()) return;
   try {
     const r = await fetch("/api/session?name=" + encodeURIComponent(name));
     const d = await r.json();
@@ -135,7 +234,9 @@ async function refreshState() {
   } catch {}
 }
 
-async function init() {
+/** Full catch-up: reload entries + state (initial paint, and on re-enabling). */
+async function reloadSession(): Promise<void> {
+  if (!liveUpdates()) return;
   try {
     const r = await fetch("/api/session?name=" + encodeURIComponent(name));
     const d = await r.json();
@@ -144,9 +245,16 @@ async function init() {
     applySessionState(d);
   } catch {}
 }
-init();
+reloadSession();
 // Poll session status so busy/idle transitions show up promptly.
 setInterval(refreshState, 500);
+
+// Resuming updates is instant: one catch-up reload instead of waiting for SSE.
+document
+  .getElementById("autoscroll")
+  ?.addEventListener("change", () => {
+    if (liveUpdates()) reloadSession();
+  });
 
 
 // live updates via SSE
@@ -155,6 +263,7 @@ let retry: ReturnType<typeof setTimeout> | null = null;
 function connect(): void {
   es = new EventSource("/api/session/events?name=" + encodeURIComponent(name));
   es.onmessage = (ev: MessageEvent) => {
+    if (!liveUpdates()) return;
     try {
       const d = JSON.parse(ev.data);
       if (d.error) {
@@ -167,8 +276,10 @@ function connect(): void {
     } catch {}
   };
   es.onerror = () => {
-    const stateEl = document.getElementById("session-state");
-    if (stateEl) stateEl.textContent = "🔄 reconnecting…";
+    if (liveUpdates()) {
+      const stateEl = document.getElementById("session-state");
+      if (stateEl) stateEl.textContent = "🔄 reconnecting…";
+    }
     if (es && es.readyState === EventSource.CLOSED) {
       es.close();
       if (retry) clearTimeout(retry);

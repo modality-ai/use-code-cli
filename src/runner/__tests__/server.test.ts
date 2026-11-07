@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { routeSegment } from "../server";
+import { pageTitle, routeSegment } from "../server";
 
 describe("routeSegment", () => {
   it("converts bracketed dir names to colon params", () => {
@@ -20,5 +20,24 @@ describe("routeSegment", () => {
 
   it("handles empty brackets", () => {
     expect(routeSegment("[]")).toBe(":");
+  });
+});
+
+describe("pageTitle", () => {
+  it("uses the app name for the root route", () => {
+    expect(pageTitle("/")).toBe("use-code-cli");
+  });
+
+  it("substitutes dynamic params into the route", () => {
+    expect(pageTitle("/session/:name", { name: "use-code-cli-4e" })).toBe("session/use-code-cli-4e");
+  });
+
+  it("keeps the placeholder when a param is missing", () => {
+    expect(pageTitle("/session/:name")).toBe("session/:name");
+  });
+
+  it("passes static routes through unchanged", () => {
+    expect(pageTitle("/help")).toBe("help");
+    expect(pageTitle("/tunnel")).toBe("tunnel");
   });
 });

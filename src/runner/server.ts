@@ -10,6 +10,11 @@ export function routeSegment(name: string): string {
   return /^\[(.*)\]$/.test(name) ? `:${name.slice(1, -1)}` : name;
 }
 
+export function pageTitle(route: string, params: Record<string, string> = {}): string {
+  if (route === "/") return "use-code-cli";
+  return route.slice(1).replace(/:([A-Za-z0-9_]+)/g, (_, key: string) => params[key] ?? `:${key}`);
+}
+
 const webDir = new URL("../web", import.meta.url).pathname;
 
 function discoverFiles(dir: string, base = "", pattern: RegExp): Map<string, string> {
@@ -81,7 +86,7 @@ export function start(options: StartOptions = {}): ReturnType<typeof Bun.serve> 
       const params = c.req.param() as Record<string, string>;
       const data = await loadData({ params, name: params.name });
       const pageEl = React.createElement(Page, data || {});
-      const title = route === "/" ? "use-code-cli" : route.slice(1);
+      const title = pageTitle(route, params);
       const baseHtml = renderToString(React.createElement(RootLayout, { title, children: pageEl }));
       let html = baseHtml;
       if (clientScript) {

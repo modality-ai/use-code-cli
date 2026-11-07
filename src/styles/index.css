@@ -45,6 +45,103 @@ details {
 
 @source "../**/*.{ts,tsx,html}";
 
+/* Rendered markdown (transcript entries, tool results) */
+.md-content table {
+  border-collapse: collapse;
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+.md-content th,
+.md-content td {
+  border: 1px solid var(--color-border);
+  padding: 4px 10px;
+  text-align: left;
+}
+.md-content th {
+  font-weight: 600;
+}
+
+/* Long unbreakable tokens (paths, hashes, URLs) must never stretch the
+   column: anywhere-breaking wraps them inside the entry box, so pinned one-
+   line bands, open bodies, and opened tool-fold pre bodies all stay within
+   the transcript width. */
+.entry-body,
+.md-content,
+.lazy-body,
+.lazy-body pre,
+.stuck.open .entry-body {
+  overflow-wrap: anywhere;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Sticky entry collapse: the entry wrapper (mb-sm sticky) pins while its user
+   message is the most recent one above the scroll edge. The fold must never
+   change layout: the body keeps its flow space via visibility, clip-path
+   crops the wrapper to the 20px label band, and drop-shadow derives from that
+   clipped silhouette so the band reads as a floating bar. Clicking the band
+   toggles .open to overlay the full body right under it, like
+   <details>/<summary>; the border-bottom separates band from content. */
+.stuck {
+  /* Only the actively pinned wrapper gets stacking priority; unpinned sticky
+     wrappers keep z-auto so passing "❯ You" labels can't paint over the band. */
+  z-index: 10;
+  clip-path: inset(0 0 calc(100% - 34px) 0);
+}
+.stuck > :first-child {
+  border-bottom: 1px solid var(--border);
+}
+/* Painted shadow strip under the pinned band (box-shadow is unreliable here) */
+.stuck > :first-child::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: 12px;
+  background: linear-gradient(to bottom, rgb(0 0 0 / 0.22), transparent);
+  pointer-events: none;
+}
+.stuck.open {
+  clip-path: none;
+}
+.stuck.open > :first-child {
+  border-bottom: 0;
+  position: relative;
+  z-index: 30;
+}
+.stuck.open > :first-child::after {
+  content: none;
+}
+.stuck .entry-body,
+.stuck details {
+  visibility: hidden;
+}
+.stuck.open .entry-body {
+  visibility: visible;
+  position: absolute;
+  top: 21px;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  margin-top: 0;
+  padding: 8px 16px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-top: 0;
+  border-radius: 0 0 2px 2px;
+  box-shadow: 0 10px 18px -6px rgb(0 0 0 / 0.25);
+}
+.stuck.open details {
+  display: none;
+}
+.stuck .teaser {
+  display: block;
+}
+.stuck.open .teaser {
+  display: none;
+}
+
 .chat-input {
   display: none;
   gap: 8px;
