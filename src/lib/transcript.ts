@@ -2,6 +2,7 @@ import { cleanPrompt } from "./prompt";
 
 export interface TranscriptTool {
   name: string;
+  id?: string;
   input?: any;
   result?: string;
   resultHtml?: string;
@@ -191,13 +192,13 @@ export function parseTranscript(lines: string[]): TranscriptEntry[] {
     } else if (obj.type === "assistant" && obj.message) {
       const content = obj.message.content;
       const texts: string[] = [];
-      const tools: { name: string; input?: any }[] = [];
+      const tools: { name: string; id?: string; input?: any }[] = [];
       if (Array.isArray(content)) {
         for (const b of content) {
           if (b?.type === "text" && b.text) texts.push(b.text);
           if (b?.type === "tool_use") {
             const idx = tools.length;
-            tools.push({ name: b.name || "tool", input: b.input });
+            tools.push({ name: b.name || "tool", id: b.id, input: b.input });
             if (b.id) {
               // record placeholder; entry not pushed yet
               toolIndex.set(b.id, { entryIdx: entries.length, toolIdx: idx });

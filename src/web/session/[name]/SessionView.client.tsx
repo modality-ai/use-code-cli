@@ -65,28 +65,57 @@ function teaserOf(e: Entry): string {
   return source.replace(/\s+/g, " ").trim().slice(0, 200);
 }
 
-/** A tool-call fold; its body mounts on first open (was the lazy-body trick). */
-function ToolFold({ tool }: { tool: any }) {
+/** A tool-call fold; its body (input + result) mounts on first open, and the
+ *  result is fetched on demand if it wasn't shipped in the initial payload. */
+function ToolFold({ tool, sessionName }: { tool: any; sessionName?: string }) {
   const [loaded, setLoaded] = useState(false);
+  const [input, setInput] = useState<any>(tool.input);
+  const [result, setResult] = useState<string | undefined>(tool.result);
+  const [resultHtml, setResultHtml] = useState<string | undefined>(tool.resultHtml);
+  const [loading, setLoading] = useState(false);
+  const [fetched, setFetched] = useState(!!(tool.input || tool.result || tool.resultHtml));
+  const onToggle = async (ev: any) => {
+    if (!ev.currentTarget.open) return;
+    setLoaded(true);
+    if (fetched) return;
+    if (!tool.id || !sessionName) { setFetched(true); return; }
+    setLoading(true);
+    try {
+      const r = await fetch(`/api/session/tool-result?name=${encodeURIComponent(sessionName)}&toolId=${encodeURIComponent(tool.id)}`);
+      const d = await r.json();
+      if (d?.success) {
+        setInput(d.input);
+        setResult(d.result);
+        setResultHtml(d.resultHtml);
+      }
+    } catch {
+      // ignore; keep empty
+    } finally {
+      setLoading(false);
+      setFetched(true);
+    }
+  };
   return (
     <details
       className="pl-4 mt-1 border border-border rounded-sm p-2"
-      onToggle={(ev) => {
-        if (ev.currentTarget.open) setLoaded(true);
-      }}
+      onToggle={onToggle}
     >
       <summary>CLICK TO SEE {tool.name || "tool"}</summary>
-      <pre className="whitespace-pre-wrap text-[12px] mt-1">
-        {tool.input != null ? JSON.stringify(tool.input, null, 2) : ""}
-      </pre>
-      {loaded &&
-        (tool.resultHtml ? (
-          <div className="lazy-body" dangerouslySetInnerHTML={{ __html: tool.resultHtml }} />
-        ) : tool.result ? (
-          <pre className={tryPrettyJson(tool.result) ? "json whitespace-pre-wrap text-[12px] mt-1" : "whitespace-pre-wrap text-[12px] mt-1"}>
-            {tryPrettyJson(tool.result) ?? String(tool.result)}
+      {loaded && (
+        <>
+          <pre className="whitespace-pre-wrap text-[12px] mt-1">
+            {input != null ? JSON.stringify(input, null, 2) : ""}
           </pre>
-        ) : null)}
+          {loading && <div className="text-text-muted text-[12px] mt-1">Loading…</div>}
+          {!loading && (resultHtml ? (
+            <div className="lazy-body" dangerouslySetInnerHTML={{ __html: resultHtml }} />
+          ) : result ? (
+            <pre className={tryPrettyJson(result) ? "json whitespace-pre-wrap text-[12px] mt-1" : "whitespace-pre-wrap text-[12px] mt-1"}>
+              {tryPrettyJson(result) ?? String(result)}
+            </pre>
+          ) : null)}
+        </>
+      )}
     </details>
   );
 }
@@ -96,7 +125,7 @@ function ToolFold({ tool }: { tool: any }) {
  * (`.stuck`, set imperatively below) the band collapses to the teaser row and
  * clicking the label folds it open (`.open`, React state).
  */
-function Entry({ e, sticky }: { e: Entry; sticky: boolean }) {
+function Entry({ e, sticky, sessionName }: { e: Entry; sticky: boolean; sessionName?: string }) {
   const [open, setOpen] = useState(false);
   const wrapper = "mb-sm" + (sticky ? " sticky top-0 bg-surface" : "") + (open ? " open" : "");
   const labelCls = "relative font-semibold" + (sticky ? " flex items-baseline gap-2 leading-5 cursor-pointer" : "");
@@ -121,7 +150,7 @@ function Entry({ e, sticky }: { e: Entry; sticky: boolean }) {
         <div className="entry-body pl-4 whitespace-pre-wrap">{e.text}</div>
       ) : null}
 
-      {Array.isArray(e.tools) && e.tools.map((t, i) => <ToolFold key={i} tool={t} />)}
+      {Array.isArray(e.tools) && e.tools.map((t, i) => <ToolFold key={i} tool={t} sessionName={sessionName} />)}
     </div>
   );
 }
@@ -308,7 +337,7 @@ export default function SessionView(props: BootProps & { payload?: string }) {
         {entries.length === 0 ? (
           <p className="text-text-muted">Loading session transcript...</p>
         ) : (
-          entries.map((e, i) => <Entry key={i} e={e} sticky={e.role === "user"} />)
+          entries.map((e, i) => <Entry key={i} e={e} sticky={e.role === "user"} sessionName={name} />)
         )}
       </div>
       <div className="flex items-center gap-2 mt-2">

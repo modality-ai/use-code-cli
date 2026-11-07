@@ -32,6 +32,31 @@ export function pickBestSession<T extends { online?: boolean; status?: string; u
   return sorted[0] ?? null;
 }
 
+/** Strip input/result/resultHtml from every tool in every entry (mutates in place). */
+export function stripToolResults(entries: any[]): void {
+  for (const e of entries) {
+    if (!Array.isArray(e?.tools)) continue;
+    for (const t of e.tools) {
+      delete (t as any).input;
+      delete (t as any).result;
+      delete (t as any).resultHtml;
+    }
+  }
+}
+
+/** Find the tool with the given id across all entries; returns its data or undefined. */
+export function findToolById(entries: any[], toolId: string): { input?: any; result?: string; resultHtml?: string } | undefined {
+  for (const e of entries) {
+    if (!Array.isArray(e?.tools)) continue;
+    for (const t of e.tools) {
+      if (t?.id === toolId) {
+        return { input: t.input, result: t.result, resultHtml: t.resultHtml };
+      }
+    }
+  }
+  return undefined;
+}
+
 export async function resolveSessionTarget(name: string): Promise<string | null> {
   if (!name) return null;
   // Prefer the cheap live-only read; fall back to the full offline scan only
@@ -123,6 +148,9 @@ export async function fetchSessionData(name: string, options?: { includeEntries?
   try {
     const lines = readFileSync(transcriptPath, "utf-8").split(/\n/).filter(Boolean);
     const entries = parseTranscript(lines);
+    // Lazy-load tool results: strip them from the initial payload so the
+    // browser only fetches a result when its "CLICK TO SEE" fold is opened.
+    stripToolResults(entries);
     return {
       success: true,
       data: {
@@ -133,6 +161,38 @@ export async function fetchSessionData(name: string, options?: { includeEntries?
         status: result.data?.status ?? null,
       },
     };
+  } catch {
+    return { success: false, error: "cannot read transcript" };
+  }
+}
+
+export interface ToolResultData {
+  success: boolean;
+  input?: any;
+  result?: string;
+  resultHtml?: string;
+  error?: string;
+}
+
+export async function fetchToolResult(name: string, toolId: string): Promise<ToolResultData> {
+  if (!name || !toolId) return { success: false, error: "missing name or toolId" };
+  const target = (await resolveSessionTarget(name)) ?? name;
+  const result = (await aiTool.execute({ command: "session", target })) as {
+    success?: boolean;
+    data?: { transcriptPath?: string | null };
+    message?: string;
+  };
+  if (!result?.success) return { success: false, error: result?.message || "session not found" };
+  const transcriptPath = result.data?.transcriptPath ?? null;
+  if (!transcriptPath) return { success: false, error: "no transcript" };
+  try {
+    const lines = readFileSync(transcriptPath, "utf-8").split(/\n/).filter(Boolean);
+    const entries = parseTranscript(lines);
+    const tool = findToolById(entries, toolId);
+    if (tool) {
+      return { success: true, input: tool.input, result: tool.result, resultHtml: tool.resultHtml };
+    }
+    return { success: false, error: "tool not found" };
   } catch {
     return { success: false, error: "cannot read transcript" };
   }

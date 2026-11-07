@@ -253,3 +253,28 @@ describe("parseTranscript tool result handling", () => {
     expect(tool.resultHtml).toBeUndefined();
   });
 });
+
+describe("parseTranscript tool id capture", () => {
+  it("captures id on a tool_use block", () => {
+    const lines = [JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "abc-123", name: "bash", input: { cmd: "ls" } }] } })];
+    const out = parseTranscript(lines);
+    expect(out[0]!.tools![0]!.id).toBe("abc-123");
+  });
+
+  it("leaves id undefined when tool_use has no id", () => {
+    const lines = [JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "bash", input: {} }] } })];
+    const out = parseTranscript(lines);
+    expect(out[0]!.tools![0]!.id).toBeUndefined();
+  });
+
+  it("carries id through to the tool after result attachment", () => {
+    const lines = [
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "t9", name: "bash", input: { cmd: "ls" } }] } }),
+      JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t9", content: "ok" }] } }),
+    ];
+    const out = parseTranscript(lines);
+    const tool = out.find((e) => e.role === "assistant")!.tools![0]!;
+    expect(tool.id).toBe("t9");
+    expect(tool.result).toBe("ok");
+  });
+});
