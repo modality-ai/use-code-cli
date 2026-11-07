@@ -19,6 +19,7 @@
     "@tailwindcss/typography": "^0.5.20",
     "modality-cli-kit": "^0.16.1",
     "modality-mcp-kit": "^2.1.0",
+    "reshow-flux-base": "^1.1.13",
     "reshow-unit": "^0.19.3",
     "zod": "^4.6.7"
   },

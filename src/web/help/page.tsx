@@ -10,9 +10,18 @@ export default function HelpPage() {
       <p>Port defaults to 3000; override with <code>PORT</code> env var.</p>
       <h2>Endpoints</h2>
       <ul>
-        <li><code>GET /sessions</code> - HTML list of all sessions</li>
-        <li><code>GET /design</code> - rendered design system</li>
-        <li><code>GET /help</code> - this page</li>
+        <li><a href="/sessions" className="text-accent-collaboration hover:underline"><code>GET /sessions</code></a> - HTML list of all sessions</li>
+        <li><code>GET /session/:name</code> - live transcript viewer with auto-scroll and session state</li>
+        <li><a href="/tunnel" className="text-accent-collaboration hover:underline"><code>GET /tunnel</code></a> - cloudflared tunnel launcher (URL + stream output)</li>
+        <li><a href="/design" className="text-accent-collaboration hover:underline"><code>GET /design</code></a> - rendered design system</li>
+        <li><a href="/help" className="text-accent-collaboration hover:underline"><code>GET /help</code></a> - this page</li>
+      </ul>
+      <h2>API</h2>
+      <ul>
+        <li><code>GET /api/session?name=</code> - transcript entries, online status, busy/idle state</li>
+        <li><code>GET /api/tunnel</code> - cloudflared availability + current tunnel URL</li>
+        <li><code>POST /api/tunnel</code> - start a cloudflared tunnel</li>
+        <li><code>DELETE /api/tunnel</code> - stop the running tunnel</li>
       </ul>
       <h2>Example</h2>
       <pre>curl http://127.0.0.1:3000/sessions</pre>

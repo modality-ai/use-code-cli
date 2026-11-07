@@ -9,3 +9,6 @@ build
 webpack.pid
 dist
 public/dist
+
+# Runtime artifacts
+tunnel.url

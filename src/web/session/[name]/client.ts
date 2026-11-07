@@ -1,5 +1,7 @@
 "use client";
 
+import { onlineEmoji, sessionDispatch, sessionStore, statusEmoji } from "./store";
+
 // Client-side enhancement for the session page.
 // Server renders the initial transcript; this module handles live SSE updates + chat.
 declare global {
@@ -15,6 +17,15 @@ const name =
     new URLSearchParams(location.search).get("name") ||
     decodeURIComponent(location.pathname.split("/").filter(Boolean).pop() || ""))) ||
   "";
+
+// Keep the session-state indicator in sync with the global store.
+sessionStore.addListener((state: any) => {
+  const el = document.getElementById("session-state");
+  if (el) {
+    el.textContent = `${statusEmoji(state.status)} ${state.status} · ${onlineEmoji(state.online)} ${state.online ? "active" : "offline"}`;
+  }
+  return state;
+});
 
 function esc(s: any): string {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -103,17 +114,39 @@ function renderEntries(entries: any[]): void {
 }
 
 // initial paint: fetch transcript from API (server renders shell only)
+function applySessionState(d: any) {
+  const online = d.success ? (d.data?.online !== false) : false;
+  const status = (d.data?.status as string | null) || "idle";
+  const chatInput = document.querySelector(".chat-input") as HTMLElement | null;
+  if (chatInput) chatInput.style.display = online ? "flex" : "none";
+  if (d.success) {
+    sessionDispatch({ name, online, status });
+  } else {
+    const stateEl = document.getElementById("session-state");
+    if (stateEl) stateEl.textContent = "⚠️ unavailable";
+  }
+}
+
+async function refreshState() {
+  try {
+    const r = await fetch("/api/session?name=" + encodeURIComponent(name));
+    const d = await r.json();
+    applySessionState(d);
+  } catch {}
+}
+
 async function init() {
   try {
     const r = await fetch("/api/session?name=" + encodeURIComponent(name));
     const d = await r.json();
     if (d.success && Array.isArray(d.data?.entries)) renderEntries(d.data.entries);
-    const online = d.success ? (d.data?.online !== false) : false;
-    const chatInput = document.querySelector(".chat-input") as HTMLElement | null;
-    if (chatInput) chatInput.style.display = online ? "flex" : "none";
+    // Reuse the same response instead of a second fetch.
+    applySessionState(d);
   } catch {}
 }
 init();
+// Poll session status so busy/idle transitions show up promptly.
+setInterval(refreshState, 500);
 
 
 // live updates via SSE
@@ -129,10 +162,13 @@ function connect(): void {
         if (s) s.textContent = "Error: " + d.error;
       } else if (Array.isArray(d.entries)) {
         renderEntries(d.entries);
+        refreshState();
       }
     } catch {}
   };
   es.onerror = () => {
+    const stateEl = document.getElementById("session-state");
+    if (stateEl) stateEl.textContent = "🔄 reconnecting…";
     if (es && es.readyState === EventSource.CLOSED) {
       es.close();
       if (retry) clearTimeout(retry);
