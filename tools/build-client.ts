@@ -1,19 +1,19 @@
 // Build browser client bundles for the web layer (Next.js App Router-like).
 //
-// Client entry points (Phase 3 contract):
-//   - primary: a file whose first statement is the `'use client'` directive
-//     (co-locate next to page.tsx and import it from there, Next.js style);
-//   - transition: legacy auto-discovered client.ts / client.tsx — still built
-//     only for route dirs with no 'use client' boundary, deprecated.
+// Client entry points:
+//   - a file whose first statement is the `'use client'` directive
+//     (co-located next to page.tsx, Next.js style). Legacy auto-discovered
+//     client.ts / client.tsx entries are no longer supported.
 //
 // All entries build in a single Bun.build (root src/web, splitting) so shared
 // deps like React land in a shared chunk. Output preserves the path relative
-// to src/web: src/web/sessions/client.ts -> public/dist/sessions/client.js.
+// to src/web: src/web/sessions/SessionsApp.client.tsx -> public/dist/sessions/SessionsApp.client.js.
 // client-manifest.json maps route dir -> entry script URLs for server injection.
 // (build-css.ts has its own manifest.json — never clobber it.)
 
-import { readFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
+import { tmpdir } from "node:os";
 
 const SRC_ROOT = "src/web";
 const OUT_DIR = "public/dist";
@@ -42,35 +42,11 @@ function hasUseClient(code: string): boolean {
 
 const glob = new Bun.Glob(`${SRC_ROOT}/**/*{.ts,.tsx}`);
 
-// Pass 1: collect candidates and the set of route dirs that have a boundary.
-const directiveFiles: string[] = [];
-const legacyFiles: string[] = [];
+const entries: string[] = [];
 for (const file of glob.scanSync(".")) {
   if (file.endsWith(".d.ts")) continue;
   const content = readFileSync(file, "utf8");
-  if (hasUseClient(content)) {
-    directiveFiles.push(file);
-  } else if (/\/client\.tsx?$/.test(file)) {
-    legacyFiles.push(file);
-  }
-}
-
-// Pass 2: a legacy auto-entry builds only when its route dir has no
-// 'use client' component; otherwise the directive entry replaces it.
-const boundaryDirs = new Set(directiveFiles.map(dirname));
-const entries = [...directiveFiles];
-const deprecated: string[] = [];
-for (const file of legacyFiles) {
-  if (boundaryDirs.has(dirname(file))) {
-    console.log(
-      "skipped legacy auto-entry",
-      file,
-      "- route dir has 'use client' components; migrate this code there",
-    );
-    continue;
-  }
-  deprecated.push(file);
-  entries.push(file);
+  if (hasUseClient(content)) entries.push(file);
 }
 
 if (entries.length === 0) {
@@ -78,16 +54,42 @@ if (entries.length === 0) {
   process.exit(0);
 }
 
+// Build-time injection of hydration shim: generate a wrapper per entry that
+// re-exports the original module and calls hydrateClient(defaultExport) unless
+// `autoHydrate === false` is exported. Wrappers live in a temp staging dir
+// mirroring src/web relative paths so output naming/paths are preserved.
+const stagingRoot = mkdtempSync(join(tmpdir(), "build-client-"));
+const hydrateAbs = resolve(import.meta.dir, "..", "src", "lib", "hydrate.ts");
+for (const file of entries) {
+  const rel = relative(SRC_ROOT, file);
+  const originalAbs = resolve(process.cwd(), file);
+  const wrapperPath = join(stagingRoot, rel);
+  mkdirSync(dirname(wrapperPath), { recursive: true });
+  const wrapper = `export * from ${JSON.stringify(originalAbs)};\n` +
+    `import * as __client_mod__ from ${JSON.stringify(originalAbs)};\n` +
+    `import { hydrateClient } from ${JSON.stringify(hydrateAbs)};\n` +
+    `const __client_default__ = __client_mod__.default;\n` +
+    `if (__client_mod__.autoHydrate !== false && __client_default__) {\n` +
+    `  hydrateClient(__client_default__);\n` +
+    `}\n` +
+    `export default __client_default__;\n`;
+  writeFileSync(wrapperPath, wrapper);
+}
+
+const wrapperEntries = entries.map((f) => join(stagingRoot, relative(SRC_ROOT, f)));
+
 const result = await Bun.build({
-  entrypoints: entries,
+  entrypoints: wrapperEntries,
   outdir: OUT_DIR,
-  root: SRC_ROOT,
+  root: stagingRoot,
   target: "browser",
   splitting: true,
   naming: "[dir]/[name].[ext]",
 });
+
 if (!result.success) {
   for (const m of result.logs) console.error(m);
+  try { rmSync(stagingRoot, { recursive: true, force: true }); } catch {}
   process.exit(1);
 }
 
@@ -106,11 +108,5 @@ await Bun.write(join(OUT_DIR, "client-manifest.json"), JSON.stringify(manifest, 
 for (const dir of Object.keys(manifest).sort()) {
   console.log(dir, "->", manifest[dir].join(", "));
 }
-if (deprecated.length) {
-  console.warn(
-    "deprecation: legacy auto-entries built without a 'use client' directive:",
-    deprecated.join(", "),
-    "- mark client entries with 'use client' (legacy discovery is removed in Phase 4)",
-  );
-}
+try { rmSync(stagingRoot, { recursive: true, force: true }); } catch {}
 console.log(`built ${entries.length} client entries -> ${OUT_DIR}/client-manifest.json`);

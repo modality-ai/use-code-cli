@@ -55,7 +55,7 @@ async function compact(args: CompactArgs) {
 
 export const compactCommand: CLICommand = {
   name: "compact",
-  description: "Compact a session's transcript in place: trim bulky payloads, or replace with a summary via --summary",
+  description: "Compact a session's transcript in place: trim bulky payloads, or replace with a summary via --summary. NOTE: When an LLM/agent invokes this command, it MUST always provide --summary — a comprehensive recap of the session so far that REPLACES the entire transcript; running without --summary only trims oversized payloads and leaves the full verbose history intact (no real compaction).",
   inputSchema: CompactArgsSchema,
   positionalKeys: ["target"],
   execute: compact,

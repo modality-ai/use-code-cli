@@ -44,6 +44,15 @@ describe("web page SSR + client bundle injection", () => {
     expect(html).toMatch(/active sessions\.|\/session\//); // empty vs populated markup
   });
 
+  it("client entries contain no manual hydration calls (build shim handles it)", () => {
+    const glob = new Bun.Glob("src/web/**/*.client.tsx");
+    for (const file of glob.scanSync(".")) {
+      const src = require("node:fs").readFileSync(file, "utf8");
+      expect(src).not.toMatch(/hydrateClient\s*\(/);
+      expect(src).not.toMatch(/hydrateRoot\s*\(/);
+    }
+  });
+
   it("emits the consolidated sessionView slice on the session route", async () => {
     const html = await getHtml("/session/use-code-cli-51");
     expect(html).toContain('<div><script>window.__REACT_DATA__ = { sessionView: {"name":"use-code-cli-51"');

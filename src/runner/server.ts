@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Hono } from "hono";
@@ -19,16 +19,13 @@ export function pageTitle(route: string, params: Record<string, string> = {}): s
 const webDir = new URL("../web", import.meta.url).pathname;
 
 // Client bundle URLs to inject for a route dir. client-manifest.json (written by
-// tools/build-client.ts) maps route dir -> entry script URLs; falls back to the
-// legacy single client.js so pages still hydrate before a first manifest build.
+// tools/build-client.ts) maps route dir -> entry script URLs.
 async function clientScriptsFor(relDir: string): Promise<string[]> {
   const distDir = join(import.meta.dir, "..", "..", "public", "dist");
   try {
     const manifest = JSON.parse(await readFile(join(distDir, "client-manifest.json"), "utf8"));
     if (Array.isArray(manifest[relDir])) return manifest[relDir];
   } catch {}
-  const legacyUrl = "/dist/" + relDir + "/client.js";
-  if (existsSync(join(distDir, relDir, "client.js"))) return [legacyUrl];
   return [];
 }
 

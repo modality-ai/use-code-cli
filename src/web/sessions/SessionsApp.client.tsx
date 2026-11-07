@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { hydrateRoot } from "react-dom/client";
 
 // Client-side enhancement for the sessions page, Next.js style: page.tsx
 // imports this 'use client' component. SSR renders the initial list, and the
@@ -104,8 +103,4 @@ export default function SessionsApp({ initial, payloadHtml }: { initial?: Sessio
   );
 }
 
-// Hydration entry: server renders the initial list; reuse it client-side.
-if (typeof document !== "undefined") {
-  const root = document.getElementById("root");
-  if (root) hydrateRoot(root, React.createElement(SessionsApp));
-}
+// Hydration is performed automatically by the build shim (see tools/build-client.ts).

@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { hydrateRoot } from "react-dom/client";
 import type { SessionData } from "./session-data";
 import { onlineEmoji, statusEmoji } from "./store";
 
@@ -362,9 +361,4 @@ export default function SessionView(props: BootProps & { payload?: string }) {
   );
 }
 
-// Hydration entry: server renders the initial transcript; reuse it client-side.
-// The element includes SessionView only (page.tsx imports the component for SSR).
-if (typeof document !== "undefined") {
-  const root = document.getElementById("root");
-  if (root) hydrateRoot(root, React.createElement(SessionView));
-}
+// Hydration is performed automatically by the build shim (see tools/build-client.ts).
