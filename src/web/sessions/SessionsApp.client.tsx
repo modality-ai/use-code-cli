@@ -79,7 +79,7 @@ export default function SessionsApp({ initial, payloadHtml }: { initial?: Sessio
       <div className="flex items-center gap-2 mb-md">
         <h1 className="text-2xl font-semibold font-display">Sessions</h1>
         {lastUpdated > 0 && (
-          <span className="text-[12px] text-text-muted font-mono tabular-nums min-w-[150px] inline-block text-left">
+          <span className="text-xs text-text-muted font-mono tabular-nums min-w-36 inline-block text-left">
             Live · updated {new Date(lastUpdated).toLocaleTimeString()}
           </span>
         )}
@@ -92,7 +92,7 @@ export default function SessionsApp({ initial, payloadHtml }: { initial?: Sessio
           >
             {s.name || s.sessionId}
           </a>
-          <div className="font-code text-[13px] text-text-muted">
+          <div className="font-code text-sm text-text-muted">
             {(s.hero || "-") + " · " + (s.status || "-")}
           </div>
           <div className="text-text-muted">{s.cwd || "-"}</div>

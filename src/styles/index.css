@@ -83,29 +83,4 @@ details {
   border-bottom: 1px solid var(--color-border);
 }
 
-.chat-input {
-  display: none;
-  gap: 8px;
-  margin-top: 12px;
-  width: 100%;
-}
-.chat-input input {
-  flex: 1 1 auto;
-  min-width: 0;
-  width: 100%;
-  padding: 8px 12px;
-  border-radius: 6px;
-  border: 1px solid var(--color-border, #333);
-  background: var(--color-surface, #1e1e1e);
-  color: var(--color-text-primary, #e6e6e1);
-  box-sizing: border-box;
-}
-.chat-input button {
-  flex: 0 0 auto;
-  padding: 8px 12px;
-  border-radius: 6px;
-  border: 1px solid var(--color-border, #333);
-  background: var(--color-surface, #1e1e1e);
-  color: var(--color-text-primary, #e6e6e1);
-  cursor: pointer;
-}
+/* .chat-input converted to Tailwind utility classes in ChatInput.tsx */

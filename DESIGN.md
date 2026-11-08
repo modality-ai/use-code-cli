@@ -22,7 +22,7 @@ Generated via `use-design tokens island --format json`. Source theme: `use-desig
 
 | Token | Value | Tailwind utility |
 |---|---|---|
-| `shadow.pinned` | 0 10px 16px -6px rgb(0 0 0 / 0.35) | `shadow-[0_10px_16px_-6px_rgba(0,0,0,0.35)]` |
+| `shadow.pinned` | 0 10px 16px -6px rgb(0 0 0 / 0.35) | `shadow-md` (approximates the pinned shadow; arbitrary value removed) |
 
 Use: the session transcript pinned context chip (`#context-bar`) and its
 expand panel ("pinned message") both float over the scrolling transcript with

@@ -93,7 +93,7 @@ function ToolFold({ tool, sessionName }: { tool: any; sessionName?: string }) {
             if (isDiffTool) {
               return (
                 <>
-                  {loading && <div className="text-text-muted text-[12px] mt-1">Loading…</div>}
+                  {loading && <div className="text-text-muted text-xs mt-1">Loading…</div>}
                   {!loading && (resultHtml ? (
                     <div className="lazy-body" dangerouslySetInnerHTML={{ __html: resultHtml }} />
                   ) : null)}
@@ -102,16 +102,16 @@ function ToolFold({ tool, sessionName }: { tool: any; sessionName?: string }) {
             }
             return (
               <>
-                <pre className="whitespace-pre-wrap text-[12px] mt-1">
+                <pre className="whitespace-pre-wrap text-xs mt-1">
                   {input != null ? prettyJson(input) : ""}
                 </pre>
-                {loading && <div className="text-text-muted text-[12px] mt-1">Loading…</div>}
+                {loading && <div className="text-text-muted text-xs mt-1">Loading…</div>}
                 {!loading && (resultHtml ? (
                   <div className="lazy-body" dangerouslySetInnerHTML={{ __html: resultHtml }} />
                 ) : result ? (() => {
                   const pretty = tryPrettyJson(result);
                   return (
-                    <pre className={(pretty ? "json " : "") + "whitespace-pre-wrap text-[12px] mt-1"}>
+                    <pre className={(pretty ? "json " : "") + "whitespace-pre-wrap text-xs mt-1"}>
                       {pretty ?? String(result)}
                     </pre>
                   );
@@ -383,13 +383,13 @@ export default function SessionView(props: BootProps & { payload?: string }) {
       <script suppressHydrationWarning dangerouslySetInnerHTML={{ __html: payloadHtml }} />
 
       <div className="flex items-center gap-3 mb-md">
-        <a href="/sessions" className="text-[12px] text-accent-collaboration hover:underline">← Back to sessions</a>
+        <a href="/sessions" className="text-xs text-accent-collaboration hover:underline">← Back to sessions</a>
         <h1 className="text-2xl font-semibold font-display">{name || "Session"}</h1>
       </div>
-      <div id="transcript" ref={scrollRef} className="border border-border rounded-sm p-3 bg-surface font-code text-[13px] max-h-[70vh] overflow-auto">
+      <div id="transcript" ref={scrollRef} className="border border-border rounded-sm p-3 bg-surface font-code text-sm max-h-2/3 overflow-auto">
         <div
           id="context-bar"
-          className="sticky -top-3 z-10 flex items-baseline gap-2 h-[34px] bg-surface text-[13px] cursor-pointer shadow-[0_10px_16px_-6px_rgba(0,0,0,0.35)]"
+          className="sticky -top-3 z-10 flex items-baseline gap-2 h-8 bg-surface text-sm cursor-pointer shadow-md"
           style={{ visibility: bar ? "visible" : "hidden" }}
           onClick={() => setBarOpen((i) => (bar && i === bar.index ? null : bar?.index ?? null))}
         >
@@ -399,10 +399,10 @@ export default function SessionView(props: BootProps & { payload?: string }) {
             /* Absolute overlay under the chip: opening never reflows the
                transcript, so the scroll position stays exactly where it is. */
             <div
-              className="absolute left-0 right-0 top-full z-20 mt-1 max-h-[55vh] overflow-auto border border-border rounded-sm bg-surface p-3 shadow-[0_10px_16px_-6px_rgba(0,0,0,0.35)]"
+              className="absolute left-0 right-0 top-full z-20 mt-1 max-h-1/2 overflow-auto border border-border rounded-sm bg-surface p-3 shadow-md"
               onClick={(ev) => ev.stopPropagation()}
             >
-              <div className="mb-1 text-[11px] text-text-muted uppercase tracking-wide">pinned message</div>
+              <div className="mb-1 text-xs text-text-muted uppercase tracking-wide">pinned message</div>
               <EntryBody e={barEntry} sessionName={name} />
             </div>
           )}
@@ -414,7 +414,7 @@ export default function SessionView(props: BootProps & { payload?: string }) {
         )}
       </div>
       <div className="flex items-center gap-2 mt-2">
-        <label className="flex items-center gap-1 text-[12px] text-text-muted cursor-pointer">
+        <label className="flex items-center gap-1 text-xs text-text-muted cursor-pointer">
           <input
             id="autoscroll"
             ref={autoscrollRef}
@@ -431,7 +431,7 @@ export default function SessionView(props: BootProps & { payload?: string }) {
         <button
           type="button"
           id="scroll-top"
-          className="text-[12px] text-text-muted border border-border rounded-sm px-2 py-0.5 cursor-pointer"
+          className="text-xs text-text-muted border border-border rounded-sm px-2 py-0.5 cursor-pointer"
           onClick={() => scrollRef.current && (scrollRef.current.scrollTop = 0)}
         >
           ↑ Top
@@ -439,12 +439,12 @@ export default function SessionView(props: BootProps & { payload?: string }) {
         <button
           type="button"
           id="scroll-bottom"
-          className="text-[12px] text-text-muted border border-border rounded-sm px-2 py-0.5 cursor-pointer"
+          className="text-xs text-text-muted border border-border rounded-sm px-2 py-0.5 cursor-pointer"
           onClick={() => scrollRef.current && (scrollRef.current.scrollTop = scrollRef.current.scrollHeight)}
         >
           ↓ Bottom
         </button>
-        <span id="session-state" className="text-[12px] text-text-muted ml-auto">{stateText}</span>
+        <span id="session-state" className="text-xs text-text-muted ml-auto">{stateText}</span>
       </div>
       <ChatInput
         chatOpen={chatOpen}

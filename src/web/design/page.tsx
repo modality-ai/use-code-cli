@@ -7,7 +7,7 @@ export interface DesignPageProps {
 
 export default function DesignPage({ rendered }: DesignPageProps) {
   return (
-    <div className="max-w-[960px] mx-auto my-6 p-4">
+    <div className="max-w-4xl mx-auto my-6 p-4">
       <article
         className="prose prose-neutral dark:prose-invert bg-surface border border-border rounded-xl p-6"
         dangerouslySetInnerHTML={{ __html: rendered }}
