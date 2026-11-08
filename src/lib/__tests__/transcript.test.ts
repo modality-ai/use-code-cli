@@ -79,7 +79,7 @@ describe("parseTranscript", () => {
 
   it("overrides resultHtml with md for non-diff tools on result", () => {
     const lines = [
-      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "t2", name: "bash", input: { cmd: "ls" } }] } }),
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "t2", name: "grep", input: { pattern: "x" } }] } }),
       JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t2", content: "file.txt" }] } }),
     ];
     const out = parseTranscript(lines);
@@ -275,9 +275,20 @@ describe("parseTranscript tool result handling", () => {
     expect(tool.result).toContain("truncated for display");
   });
 
-  it("sets resultHtml for a non-empty tool result", () => {
+  it("renders bash results as a pre block without markdown re-wrapping", () => {
     const entries = parseTranscript([
       JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "t1", name: "bash", input: {} }] } }),
+      JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "line1\nline2 **bold** <tag>" }] } }),
+    ]);
+    const tool = entries[0]!.tools![0]!;
+    expect(tool.resultHtml).toContain("<pre class=\"whitespace-pre-wrap\">line1\nline2 **bold** &lt;tag&gt;</pre>");
+    expect(tool.resultHtml).not.toContain("<strong>");
+    expect(tool.resultHtml).not.toContain("<p>");
+  });
+
+  it("sets resultHtml for a non-empty tool result", () => {
+    const entries = parseTranscript([
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "t1", name: "grep", input: {} }] } }),
       JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "hello **world**" }] } }),
     ]);
     const tool = entries[0]!.tools![0]!;
@@ -293,6 +304,29 @@ describe("parseTranscript tool result handling", () => {
     ]);
     const tool = entries[0]!.tools![0]!;
     expect(tool.resultHtml).toBeUndefined();
+  });
+});
+
+describe("parseTranscript bash result handling", () => {
+  it("renders a truncated bash result as a pre block including the truncation notice", () => {
+    const big = "x".repeat(25_000);
+    const entries = parseTranscript([
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "t1", name: "bash", input: {} }] } }),
+      JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", content: big }] } }),
+    ]);
+    const tool = entries[0]!.tools![0]!;
+    expect(tool.resultHtml).toBeDefined();
+    expect(tool.resultHtml).toContain('<pre class="whitespace-pre-wrap">');
+    expect(tool.resultHtml).toContain("truncated for display");
+  });
+
+  it("treats tool name case-insensitively for bash", () => {
+    const entries = parseTranscript([
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "t1", name: "Bash", input: {} }] } }),
+      JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "out" }] } }),
+    ]);
+    const tool = entries[0]!.tools![0]!;
+    expect(tool.resultHtml).toContain('<pre class="whitespace-pre-wrap">out</pre>');
   });
 });
 

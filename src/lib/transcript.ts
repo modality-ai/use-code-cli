@@ -1,5 +1,6 @@
 import { cleanPrompt } from "./prompt";
 import { colorDiffHtml, resolveEditStartLine } from "./output/color-diff";
+import { escHtml, preHtml } from "./output/format";
 
 export interface TranscriptTool {
   name: string;
@@ -14,10 +15,6 @@ export interface TranscriptEntry {
   text: string;
   html?: string;
   tools?: TranscriptTool[];
-}
-
-function escHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 /**
@@ -185,6 +182,8 @@ export function parseTranscript(lines: string[]): TranscriptEntry[] {
                   // numbers, so suppress color-diff's counter and render them
                   // as neutral context lines (identical old/new, no +/-).
                   toolObj.resultHtml = shown ? colorDiffHtml(shown, shown, { filePath: fp, lineNumbers: false }) : undefined;
+                } else if (tname === "bash") {
+                  toolObj.resultHtml = shown ? preHtml(shown) : undefined;
                 } else {
                   toolObj.resultHtml = shown ? mdHtml(shown) : undefined;
                 }

@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import type { SessionData } from "./session-data";
 import { onlineEmoji, statusEmoji } from "./store";
-import { tryPrettyJson } from "../../../lib/output/json";
+import { prettyJson, tryPrettyJson } from "../../../lib/output/json";
 
 // Client-side view for one session, Next.js style: page.tsx imports this
 // 'use client' component. The server renders the initial transcript; this
@@ -99,16 +99,19 @@ function ToolFold({ tool, sessionName }: { tool: any; sessionName?: string }) {
             return (
               <>
                 <pre className="whitespace-pre-wrap text-[12px] mt-1">
-                  {input != null ? JSON.stringify(input, null, 2) : ""}
+                  {input != null ? prettyJson(input) : ""}
                 </pre>
                 {loading && <div className="text-text-muted text-[12px] mt-1">Loading…</div>}
                 {!loading && (resultHtml ? (
                   <div className="lazy-body" dangerouslySetInnerHTML={{ __html: resultHtml }} />
-                ) : result ? (
-                  <pre className={tryPrettyJson(result) ? "json whitespace-pre-wrap text-[12px] mt-1" : "whitespace-pre-wrap text-[12px] mt-1"}>
-                    {tryPrettyJson(result) ?? String(result)}
-                  </pre>
-                ) : null)}
+                ) : result ? (() => {
+                  const pretty = tryPrettyJson(result);
+                  return (
+                    <pre className={(pretty ? "json " : "") + "whitespace-pre-wrap text-[12px] mt-1"}>
+                      {pretty ?? String(result)}
+                    </pre>
+                  );
+                })() : null)}
               </>
             );
           })()}
