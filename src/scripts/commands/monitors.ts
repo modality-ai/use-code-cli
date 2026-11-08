@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { optionalValueFlag, renderTable, type CLICommand } from "modality-cli-kit";
-import { formatTime, oneLine, plural } from "../../lib/format";
+import { formatTime, oneLine, plural } from "../../lib/output/format";
 import { filterStatusField } from "../../lib/flags";
 import {
   describeSessionFilter,

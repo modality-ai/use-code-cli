@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { mkdir, open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
+import { prettyJsonFile } from "./output/json";
 
 /**
  * Small per-user state file for loop safety: which msg_ids this machine
@@ -39,7 +40,7 @@ function keyOf(inReplyTo: string, targetSessionId: string): string {
 async function writeJson(path: string, value: unknown): Promise<void> {
   await mkdir(STATE_DIR, { recursive: true });
   const tmp = `${path}.tmp.${process.pid}`;
-  await writeFile(tmp, JSON.stringify(value, null, 2) + "\n");
+  await writeFile(tmp, prettyJsonFile(value));
   await rename(tmp, path);
 }
 

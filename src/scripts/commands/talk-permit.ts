@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { readFile, writeFile, rename } from "node:fs/promises";
 import type { CLICommand } from "modality-cli-kit";
+import { prettyJsonFile } from "../../lib/output/json";
 
 const KEY = "crossSessionInbound";
 const VALUES = ["accept", "hold", "refuse", "unset"] as const;
@@ -56,7 +57,7 @@ async function inbound(args: InboundArgs) {
 
   // Write atomically so a crash cannot corrupt the user's settings.
   const tmp = `${SETTINGS_PATH}.tmp.${process.pid}`;
-  await writeFile(tmp, JSON.stringify(settings, null, 2) + "\n");
+  await writeFile(tmp, prettyJsonFile(settings));
   await rename(tmp, SETTINGS_PATH);
 
   return {

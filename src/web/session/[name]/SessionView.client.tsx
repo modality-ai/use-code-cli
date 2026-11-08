@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import type { SessionData } from "./session-data";
 import { onlineEmoji, statusEmoji } from "./store";
+import { tryPrettyJson } from "../../../lib/output/json";
 
 // Client-side view for one session, Next.js style: page.tsx imports this
 // 'use client' component. The server renders the initial transcript; this
@@ -24,27 +25,6 @@ function label(e: Entry): string {
   if (e.role === "user") return "❯ You";
   if (e.role === "system") return "📋 Recap";
   return "⏺ Claude";
-}
-
-function tryPrettyJson(text: any): string | null {
-  if (typeof text !== "string" || !text.trim()) return null;
-  try {
-    return JSON.stringify(JSON.parse(text.trim()), null, 2);
-  } catch {}
-  let parsedAny = false;
-  const out = String(text)
-    .split(/\n/)
-    .map((line) => {
-      const trimmed = line.trim();
-      if (!trimmed) return line;
-      try {
-        parsedAny = true;
-        return JSON.stringify(JSON.parse(trimmed), null, 2);
-      } catch {
-        return line;
-      }
-    });
-  return parsedAny ? out.join("\n") : null;
 }
 
 /** Plain-text preview of an entry's message for the pinned one-line row. */

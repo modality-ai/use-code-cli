@@ -44,10 +44,10 @@ describe("stripToolResults", () => {
       { tools: [{ id: "t1", name: "bash", input: { cmd: "ls" }, result: "out", resultHtml: "<p>out</p>" }] },
     ];
     stripToolResults(entries);
-    expect(entries[0].tools[0].input).toBeUndefined();
-    expect(entries[0].tools[0].result).toBeUndefined();
-    expect(entries[0].tools[0].resultHtml).toBeUndefined();
-    expect(entries[0].tools[0].id).toBe("t1");
+    expect(entries[0]!.tools![0]!.input).toBeUndefined();
+    expect(entries[0]!.tools![0]!.result).toBeUndefined();
+    expect(entries[0]!.tools![0]!.resultHtml).toBeUndefined();
+    expect(entries[0]!.tools![0]!.id).toBe("t1");
   });
 
   it("is a no-op when there are no tools", () => {

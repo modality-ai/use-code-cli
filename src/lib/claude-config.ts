@@ -13,6 +13,7 @@ import {
   unlink,
   writeFile,
 } from "node:fs/promises";
+import { prettyJsonFile } from "./output/json";
 
 /** How many of Claude Code's own config backups to keep. */
 const MAX_BACKUPS = 5;
@@ -210,7 +211,7 @@ export async function forgetProjectConfig(
       await backupConfig(file);
       const mode = (await stat(file)).mode & 0o777;
       const tmp = `${file}.${process.pid}.tmp`;
-      await writeFile(tmp, `${JSON.stringify(config, null, 2)}\n`, { mode });
+      await writeFile(tmp, prettyJsonFile(config), { mode });
       await rename(tmp, file);
     }
 

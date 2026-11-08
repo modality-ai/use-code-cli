@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { CLICommand } from "modality-cli-kit";
-import { formatTime, oneLine, plural } from "../../lib/format";
+import { formatTime, oneLine, plural } from "../../lib/output/format";
 import {
   appendSessionTitle,
   findSessions,

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { CLICommand } from "modality-cli-kit";
-import { formatTime, plural } from "../../lib/format";
+import { formatTime, plural } from "../../lib/output/format";
 import { readProjects } from "../../lib/projects";
 import { readSessions } from "../../lib/sessions";
 

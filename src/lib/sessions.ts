@@ -3,6 +3,7 @@ import { basename, dirname, join } from "node:path";
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { appendFile, mkdir, open, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { prettyJsonFile } from "./output/json";
 
 export const SESSIONS_DIR = join(homedir(), ".claude", "sessions");
 export const PROJECTS_DIR = join(homedir(), ".claude", "projects");
@@ -76,7 +77,7 @@ export async function setSessionName(sessionId: string, name: string): Promise<v
   const names = await readSessionNames();
   names[sessionId] = name;
   await mkdir(SESSIONS_DIR, { recursive: true });
-  await writeFile(NAMES_FILE, `${JSON.stringify(names, null, 2)}\n`, "utf8");
+  await writeFile(NAMES_FILE, prettyJsonFile(names), "utf8");
 }
 
 /**
@@ -281,7 +282,7 @@ export async function deleteSession(s: SessionInfo): Promise<{ transcriptRemoved
     if (Object.prototype.hasOwnProperty.call(names, s.sessionId)) {
       delete names[s.sessionId];
       await mkdir(SESSIONS_DIR, { recursive: true });
-      await writeFile(NAMES_FILE, `${JSON.stringify(names, null, 2)}\n`, "utf8");
+      await writeFile(NAMES_FILE, prettyJsonFile(names), "utf8");
     }
   } catch {
     // Best-effort: registry cleanup shouldn't fail the delete.

@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { z } from "zod";
 import { optionalValueFlag, type CLICommand } from "modality-cli-kit";
-import { formatTime, oneLine, plural } from "../../lib/format";
+import { formatTime, oneLine, plural } from "../../lib/output/format";
 import {
   readMemoryFiles,
   searchMemoryFile,

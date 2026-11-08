@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { rm, stat } from "node:fs/promises";
 import { z } from "zod";
 import type { CLICommand } from "modality-cli-kit";
-import { plural } from "../../lib/format";
+import { plural } from "../../lib/output/format";
 import {
   forgetProjectConfig,
   type ForgetProjectResult,

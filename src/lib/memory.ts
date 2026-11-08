@@ -1,6 +1,6 @@
 import { join, relative } from "node:path";
 import { readdir, readFile, stat } from "node:fs/promises";
-import { oneLine } from "./format";
+import { oneLine } from "./output/format";
 import { readProjects } from "./projects";
 import { PROJECTS_DIR } from "./sessions";
 
