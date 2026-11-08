@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { TUNNEL_BTN, TUNNEL_OUTPUT, TUNNEL_STATUS, TUNNEL_URL, UNLINK_BTN, COPY_BTN } from "./dom-ids";
 
 export interface TunnelPageProps {
@@ -8,11 +8,13 @@ export interface TunnelPageProps {
 }
 
 export default function TunnelApp({ url }: TunnelPageProps = {}) {
-  function updateActionButtons(hasUrl: boolean) {
+  const [hasUrl, setHasUrl] = useState<boolean>(!!url);
+  function updateActionButtons(u: boolean) {
+    setHasUrl(u);
     const copyBtn = document.getElementById(COPY_BTN) as HTMLButtonElement | null;
     const unlinkBtn = document.getElementById(UNLINK_BTN) as HTMLButtonElement | null;
-    if (copyBtn) copyBtn.disabled = !hasUrl;
-    if (unlinkBtn) unlinkBtn.disabled = !hasUrl;
+    if (copyBtn) copyBtn.disabled = !u;
+    if (unlinkBtn) unlinkBtn.disabled = !u;
   }
   function setUrlSection(u: string | null) {
     const el = document.getElementById(TUNNEL_URL);
@@ -128,8 +130,8 @@ export default function TunnelApp({ url }: TunnelPageProps = {}) {
       <h2>Tunnel URL</h2>
       <div className="flex items-center gap-2">
         <div id={TUNNEL_URL} className="flex-1 border border-border rounded-sm p-3 bg-surface font-code text-[13px] break-all">{url || "—"}</div>
-        <button id={COPY_BTN} onClick={copy} disabled className="px-3 py-2 rounded-sm border border-border cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Copy</button>
-        <button id={UNLINK_BTN} onClick={unlink} disabled className="px-3 py-2 rounded-sm border border-border cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Unlink</button>
+        <button id={COPY_BTN} onClick={copy} disabled={!hasUrl} className="px-3 py-2 rounded-sm border border-border cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Copy</button>
+        <button id={UNLINK_BTN} onClick={unlink} disabled={!hasUrl} className="px-3 py-2 rounded-sm border border-border cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Unlink</button>
       </div>
       <div className="border border-border rounded-sm p-3 bg-surface mt-md">
         <div className="font-semibold mb-xs">Output</div>
