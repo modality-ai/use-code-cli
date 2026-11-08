@@ -92,8 +92,10 @@ async function talkHero(args: TalkHeroArgs) {
   const metas = await Promise.all(
     projectSessions.map(async (s) => ({ s, meta: await readTranscriptMeta(s) })),
   );
-  const term = hero.toLowerCase();
-  const matches = metas.filter(({ meta }) => (meta.hero ?? "").toLowerCase().includes(term));
+  const term = hero.trim().toLowerCase();
+  const matches = metas.filter(({ meta }) =>
+    (meta.hero ?? "").trim().toLowerCase().includes(term),
+  );
 
   if (matches.length === 0) {
     return {
