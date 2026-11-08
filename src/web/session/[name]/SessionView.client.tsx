@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import type { SessionData } from "./session-data";
 import { onlineEmoji, statusEmoji } from "./store";
+import ChatInput from "./ChatInput";
 import { prettyJson, tryPrettyJson } from "../../../lib/output/json";
 
 // Client-side view for one session, Next.js style: page.tsx imports this
@@ -379,19 +380,13 @@ export default function SessionView(props: BootProps & { payload?: string }) {
         </button>
         <span id="session-state" className="text-[12px] text-text-muted ml-auto">{stateText}</span>
       </div>
-      <div className="chat-input" style={{ display: chatOpen ? "flex" : "none" }}>
-        <input
-          id="chat-input"
-          ref={chatRef}
-          type="text"
-          placeholder="Send a message to this session..."
-          onKeyDown={(ev) => {
-            if (ev.key === "Enter") send();
-          }}
-        />
-        <button id="chat-send" onClick={send} disabled={sending}>Send</button>
-      </div>
-      <div id="chat-status" className="text-[12px] text-text-muted mt-1">{chatStatus}</div>
+      <ChatInput
+        chatOpen={chatOpen}
+        chatRef={chatRef}
+        chatStatus={chatStatus}
+        sending={sending}
+        onSend={send}
+      />
     </div>
   );
 }
