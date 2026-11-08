@@ -17,6 +17,7 @@
   "dependencies": {
     "@hono/bun": "^1.0.1",
     "@tailwindcss/typography": "^0.5.20",
+    "diff": "^9.0.0",
     "modality-cli-kit": "^0.16.1",
     "modality-mcp-kit": "^2.1.0",
     "reshow-flux-base": "^1.1.13",

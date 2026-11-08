@@ -83,17 +83,35 @@ function ToolFold({ tool, sessionName }: { tool: any; sessionName?: string }) {
       <summary>CLICK TO SEE {tool.name || "tool"}</summary>
       {loaded && (
         <>
-          <pre className="whitespace-pre-wrap text-[12px] mt-1">
-            {input != null ? JSON.stringify(input, null, 2) : ""}
-          </pre>
-          {loading && <div className="text-text-muted text-[12px] mt-1">Loading…</div>}
-          {!loading && (resultHtml ? (
-            <div className="lazy-body" dangerouslySetInnerHTML={{ __html: resultHtml }} />
-          ) : result ? (
-            <pre className={tryPrettyJson(result) ? "json whitespace-pre-wrap text-[12px] mt-1" : "whitespace-pre-wrap text-[12px] mt-1"}>
-              {tryPrettyJson(result) ?? String(result)}
-            </pre>
-          ) : null)}
+          {(() => {
+            const tname = String(tool?.name || "").toLowerCase();
+            const isDiffTool = tname === "write" || tname === "edit" || tname === "read";
+            if (isDiffTool) {
+              return (
+                <>
+                  {loading && <div className="text-text-muted text-[12px] mt-1">Loading…</div>}
+                  {!loading && (resultHtml ? (
+                    <div className="lazy-body" dangerouslySetInnerHTML={{ __html: resultHtml }} />
+                  ) : null)}
+                </>
+              );
+            }
+            return (
+              <>
+                <pre className="whitespace-pre-wrap text-[12px] mt-1">
+                  {input != null ? JSON.stringify(input, null, 2) : ""}
+                </pre>
+                {loading && <div className="text-text-muted text-[12px] mt-1">Loading…</div>}
+                {!loading && (resultHtml ? (
+                  <div className="lazy-body" dangerouslySetInnerHTML={{ __html: resultHtml }} />
+                ) : result ? (
+                  <pre className={tryPrettyJson(result) ? "json whitespace-pre-wrap text-[12px] mt-1" : "whitespace-pre-wrap text-[12px] mt-1"}>
+                    {tryPrettyJson(result) ?? String(result)}
+                  </pre>
+                ) : null)}
+              </>
+            );
+          })()}
         </>
       )}
     </details>

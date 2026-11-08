@@ -1,4 +1,5 @@
 import { cleanPrompt } from "./prompt";
+import { colorDiffHtml, resolveEditStartLine } from "./output/color-diff";
 
 export interface TranscriptTool {
   name: string;
@@ -165,8 +166,28 @@ export function parseTranscript(lines: string[]): TranscriptEntry[] {
                 // lock a tab (a 50k-line open <pre> freezes layout outright).
                 // The full text stays in the raw transcript on disk.
                 const shown = trimResult(resText);
-                (e.tools[ref.toolIdx] as any).result = shown;
-                (e.tools[ref.toolIdx] as any).resultHtml = shown ? mdHtml(shown) : undefined;
+                const toolObj = (e.tools[ref.toolIdx] as any);
+                toolObj.result = shown;
+                const tname = String(toolObj.name || "").toLowerCase();
+                if (tname === "edit") {
+                  const fp = toolObj.input?.file_path || toolObj.input?.path;
+                  const resolved = resolveEditStartLine(fp, toolObj.input?.old_string ?? "", toolObj.input?.new_string ?? "");
+                  toolObj.resultHtml = colorDiffHtml(toolObj.input?.old_string ?? "", toolObj.input?.new_string ?? "", {
+                    filePath: fp, lineNumbers: true,
+                    oldStartLine: resolved.oldStartLine, newStartLine: resolved.newStartLine,
+                    markApproximate: resolved.confidence !== "exact",
+                  });
+                } else if (tname === "write") {
+                  toolObj.resultHtml = colorDiffHtml("", toolObj.input?.content ?? "", { filePath: toolObj.input?.file_path || toolObj.input?.path, lineNumbers: true, oldStartLine: 1, newStartLine: 1 });
+                } else if (tname === "read") {
+                  const fp = toolObj.input?.file_path || toolObj.input?.path;
+                  // Read results already carry their own (offset-aware) line
+                  // numbers, so suppress color-diff's counter and render them
+                  // as neutral context lines (identical old/new, no +/-).
+                  toolObj.resultHtml = shown ? colorDiffHtml(shown, shown, { filePath: fp, lineNumbers: false }) : undefined;
+                } else {
+                  toolObj.resultHtml = shown ? mdHtml(shown) : undefined;
+                }
               }
             }
           }
@@ -198,7 +219,20 @@ export function parseTranscript(lines: string[]): TranscriptEntry[] {
           if (b?.type === "text" && b.text) texts.push(b.text);
           if (b?.type === "tool_use") {
             const idx = tools.length;
-            tools.push({ name: b.name || "tool", id: b.id, input: b.input });
+            const toolObj: any = { name: b.name || "tool", id: b.id, input: b.input };
+            const tname = String(toolObj.name || "").toLowerCase();
+            if (tname === "edit") {
+              const fp = toolObj.input?.file_path || toolObj.input?.path;
+              const resolved = resolveEditStartLine(fp, toolObj.input?.old_string ?? "", toolObj.input?.new_string ?? "");
+              toolObj.resultHtml = colorDiffHtml(toolObj.input?.old_string ?? "", toolObj.input?.new_string ?? "", {
+                filePath: fp, lineNumbers: true,
+                oldStartLine: resolved.oldStartLine, newStartLine: resolved.newStartLine,
+                markApproximate: resolved.confidence !== "exact",
+              });
+            } else if (tname === "write") {
+              toolObj.resultHtml = colorDiffHtml("", toolObj.input?.content ?? "", { filePath: toolObj.input?.file_path || toolObj.input?.path, lineNumbers: true, oldStartLine: 1, newStartLine: 1 });
+            }
+            tools.push(toolObj);
             if (b.id) {
               // record placeholder; entry not pushed yet
               toolIndex.set(b.id, { entryIdx: entries.length, toolIdx: idx });

@@ -45,6 +45,48 @@ describe("parseTranscript", () => {
     expect(assistant!.tools![0]!.result).toBe("file.txt");
   });
 
+  it("sets resultHtml to a color diff for edit tools", () => {
+    const lines = [
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "e1", name: "edit", input: { file_path: "/tmp/x", old_string: "a", new_string: "b" } }] } }),
+    ];
+    const out = parseTranscript(lines);
+    const assistant = out.find((e) => e.role === "assistant");
+    expect(assistant!.tools![0]!.resultHtml).toContain('<pre class="color-diff">');
+  });
+
+  it("sets resultHtml to a color diff for write tools", () => {
+    const lines = [
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "w1", name: "write", input: { file_path: "/tmp/x", content: "hello" } }] } }),
+    ];
+    const out = parseTranscript(lines);
+    const assistant = out.find((e) => e.role === "assistant");
+    expect(assistant!.tools![0]!.resultHtml).toContain('<pre class="color-diff">');
+  });
+
+  it("renders read results as color-diff keeping the tool's own line numbers", () => {
+    const lines = [
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "r1", name: "Read", input: { file_path: "/tmp/x" } }] } }),
+      JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "r1", content: "     3\thello\n     4\tworld" }] } }),
+    ];
+    const out = parseTranscript(lines);
+    const assistant = out.find((e) => e.role === "assistant");
+    const html = assistant!.tools![0]!.resultHtml!;
+    expect(html).toContain('<pre class="color-diff">');
+    // single numbering: the tool's own counter survives, no color-diff counter added
+    expect(html).toContain("3\thello");
+    expect(html).not.toMatch(/\s3\s+3\s/);
+  });
+
+  it("overrides resultHtml with md for non-diff tools on result", () => {
+    const lines = [
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "t2", name: "bash", input: { cmd: "ls" } }] } }),
+      JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t2", content: "file.txt" }] } }),
+    ];
+    const out = parseTranscript(lines);
+    const assistant = out.find((e) => e.role === "assistant");
+    expect(assistant!.tools![0]!.resultHtml).toContain("file.txt");
+  });
+
   it("parses assistant string content", () => {
     const lines = [JSON.stringify({ type: "assistant", message: { content: "plain string" } })];
     const out = parseTranscript(lines);

@@ -8,6 +8,7 @@ Claude Code's built-in tooling only ever delivers a message to a single peer. `u
 
 - **`talk`** — deliver a message to one session (with reply instructions, `---` literal mode, `--one-way`, `--in-reply-to`).
 - **`talk-to-all`** — deliver one message to **every** matching session in a single shot. Filter by name, status, or hero. This is the killer feature: one command, N agents.
+- **`talk-permit`** — gate inbound cross-session messages: show or set `crossSessionInbound` (`accept` | `hold` | `refuse` | `unset`) in `~/.claude/settings.json`, so a session controls whether — and how — other sessions can reach it.
 
 ## Usage
 
