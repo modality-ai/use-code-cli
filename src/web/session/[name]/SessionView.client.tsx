@@ -198,6 +198,7 @@ export default function SessionView(props: BootProps & { payload?: string }) {
       : { success: false, online: false, status: "idle" },
   );
   const [chatStatus, setChatStatus] = useState(""); // send progress + SSE errors
+  const [sending, setSending] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -306,7 +307,8 @@ export default function SessionView(props: BootProps & { payload?: string }) {
 
   const send = async () => {
     const input = chatRef.current;
-    if (!input || !input.value.trim()) return;
+    if (!input || !input.value.trim() || sending) return;
+    setSending(true);
     setChatStatus("sending...");
     try {
       const r = await fetch("/api/talk", {
@@ -315,14 +317,17 @@ export default function SessionView(props: BootProps & { payload?: string }) {
         body: JSON.stringify({ name, message: input.value }),
       });
       const d = await r.json();
-      if (d.success) {
+      const inner = d?.data;
+      if (d.success && inner?.success !== false) {
         setChatStatus("sent");
         input.value = "";
       } else {
-        setChatStatus("error: " + (d.error || "failed"));
+        setChatStatus("error: " + (inner?.message || d.error || "failed"));
       }
     } catch (e) {
       setChatStatus("error: " + String(e));
+    } finally {
+      setSending(false);
     }
   };
 
@@ -384,7 +389,7 @@ export default function SessionView(props: BootProps & { payload?: string }) {
             if (ev.key === "Enter") send();
           }}
         />
-        <button id="chat-send" onClick={send}>Send</button>
+        <button id="chat-send" onClick={send} disabled={sending}>Send</button>
       </div>
       <div id="chat-status" className="text-[12px] text-text-muted mt-1">{chatStatus}</div>
     </div>
