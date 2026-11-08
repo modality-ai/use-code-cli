@@ -22,14 +22,17 @@ interface BootProps {
   initial?: SessionData | null;
 }
 
-function label(e: Entry): string {
+/** Pinned context indicator: most recent user entry fully scrolled past. */
+type BarState = { index: number; teaser: string } | null;
+
+export function label(e: Entry): string {
   if (e.role === "user") return "❯ You";
   if (e.role === "system") return "📋 Recap";
   return "⏺ Claude";
 }
 
 /** Plain-text preview of an entry's message for the pinned one-line row. */
-function decodeHtmlText(html: string): string {
+export function decodeHtmlText(html: string): string {
   return html
     .replace(/<[^>]*>/g, " ")
     .replace(/&#(\d+);/g, (_, code: string) => String.fromCharCode(Number(code)))
@@ -41,7 +44,7 @@ function decodeHtmlText(html: string): string {
     .replace(/&amp;/g, "&");
 }
 
-function teaserOf(e: Entry): string {
+export function teaserOf(e: Entry): string {
   const source = e.text != null ? String(e.text) : decodeHtmlText(e.html || "");
   return source.replace(/\s+/g, " ").trim().slice(0, 200);
 }
@@ -122,30 +125,11 @@ function ToolFold({ tool, sessionName }: { tool: any; sessionName?: string }) {
   );
 }
 
-/**
- * One transcript entry. User entries pin to the container top; while pinned
- * (`.stuck`, set imperatively below) the band collapses to the teaser row and
- * clicking the label folds it open (`.open`, React state).
- */
-function Entry({ e, sticky, sessionName }: { e: Entry; sticky: boolean; sessionName?: string }) {
-  const [open, setOpen] = useState(false);
-  const wrapper = "mb-sm" + (sticky ? " sticky top-0 bg-surface" : "") + (open ? " open" : "");
-  const labelCls = "relative font-semibold" + (sticky ? " flex items-baseline gap-2 leading-5 cursor-pointer" : "");
+/** Entry payload: body + tool folds, shared by the transcript and the
+    context chip's expand panel (must never change outer layout). */
+function EntryBody({ e, sessionName }: { e: Entry; sessionName?: string }) {
   return (
-    <div className={wrapper}>
-      <div
-        className={labelCls + (sticky ? "" : " ") + (e.role === "user" ? " text-accent-collaboration" : e.role === "system" ? " text-text-muted italic" : " text-text-primary")}
-        onClick={sticky ? () => setOpen((o) => !o) : undefined}
-      >
-        {sticky ? (
-          <>
-            <span className="shrink-0">{label(e)}</span>
-            <span className="teaser flex-1 min-w-0 truncate font-normal text-text-muted">{teaserOf(e)}</span>
-          </>
-        ) : (
-          label(e)
-        )}
-      </div>
+    <>
       {e.html ? (
         <div className="entry-body pl-4 md-content max-w-none" dangerouslySetInnerHTML={{ __html: e.html }} />
       ) : e.text ? (
@@ -153,24 +137,50 @@ function Entry({ e, sticky, sessionName }: { e: Entry; sticky: boolean; sessionN
       ) : null}
 
       {Array.isArray(e.tools) && e.tools.map((t, i) => <ToolFold key={i} tool={t} sessionName={sessionName} />)}
+    </>
+  );
+}
+
+/**
+ * One transcript entry, rendered plain: entries scroll untouched (natural
+ * heights, no sticky, no collapse) — the pinned context indicator lives in
+ * the container's sticky bar below.
+ */
+function Entry({ e, sessionName }: { e: Entry; sessionName?: string }) {
+  return (
+    <div className="mb-sm entry" data-role={e.role || ""}>
+      <div className={"relative font-semibold " + (e.role === "user" ? " text-accent-collaboration" : e.role === "system" ? " text-text-muted italic" : " text-text-primary")}>
+        {label(e)}
+      </div>
+      <EntryBody e={e} sessionName={sessionName} />
     </div>
   );
 }
 
 /**
- * Stuck detection (was updateStuck): pinned wrappers whose top has reached the
- * scrollport's padding edge get `.stuck`. Class toggling is imperative — same
- * technique as the previous client.ts — React renders the rest.
+ * Context-bar detection (was updateStuck): the most recent user entry that has
+ * fully scrolled past the container's padding edge feeds the sticky indicator
+ * React state. Guarded set — the post-paint effect runs every render.
  */
-function updateStuck(root: HTMLElement | null): void {
-  if (!root) return;
-  const cs = getComputedStyle(root);
-  const inset = (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.paddingTop) || 0) + 1;
+export const BAR_BAND = 34; // px — reserved layout space, matches the bar's height
+
+export function updateBar(root: HTMLElement | null, entries: Entry[], last: BarState): BarState {
+  if (!root) return null;
   const rootTop = root.getBoundingClientRect().top;
-  const stickyEls = root.querySelectorAll<HTMLElement>(".sticky.top-0");
-  for (const wrapper of stickyEls) {
-    wrapper.classList.toggle("stuck", wrapper.getBoundingClientRect().top <= rootTop + inset);
+  const cs = getComputedStyle(root);
+  const edge = rootTop + (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.paddingTop) || 0);
+  const els = root.querySelectorAll<HTMLElement>(".entry");
+  let candidate = -1;
+  for (let i = 0; i < els.length; i++) {
+    const el = els.item(i);
+    if (!el) continue;
+    if ((entries[i]?.role || el.dataset.role) !== "user") continue;
+    if (el.getBoundingClientRect().bottom <= edge) candidate = i;
   }
+  const picked: Entry | undefined = candidate >= 0 ? entries[candidate] : undefined;
+  const next: BarState = picked ? { index: candidate, teaser: teaserOf(picked) } : null;
+  if ((next?.index ?? -1) === (last?.index ?? -1) && (next?.teaser ?? "") === (last?.teaser ?? "")) return last;
+  return next;
 }
 
 // Hydration data channel (Phase B): page.tsx dehydrates { name, initial } into
@@ -205,6 +215,17 @@ export default function SessionView(props: BootProps & { payload?: string }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const chatRef = useRef<HTMLInputElement>(null);
   const autoscrollRef = useRef<HTMLInputElement>(null);
+  const [bar, setBar] = useState<BarState>(null);
+  const [barOpen, setBarOpen] = useState<number | null>(null);
+  const barRef = useRef<BarState>(null);
+  barRef.current = bar;
+  const entriesRef = useRef(entries);
+  entriesRef.current = entries;
+  // The expand panel tracks the chip: it closes when the pinned message
+  // changes (chip target moved to another entry) or the chip disappears.
+  useEffect(() => {
+    if (barOpen !== null && (!bar || bar.index !== barOpen)) setBarOpen(null);
+  }, [bar, barOpen]);
   // While "Auto-scroll to bottom" is unchecked the page freezes: no state
   // updates, no status churn — DOM stays put while the user reads history.
   const liveRef = useRef(true);
@@ -275,6 +296,15 @@ export default function SessionView(props: BootProps & { payload?: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [name]);
 
+  // Context bar follows scrolling.
+  useEffect(() => {
+    const root = scrollRef.current;
+    const onScroll = () => setBar((b) => updateBar(root, entriesRef.current, b));
+    root?.addEventListener("scroll", onScroll, { passive: true });
+    return () => root?.removeEventListener("scroll", onScroll);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // First paint catch-up (SSE pushes full entries on connect too).
   const bootedRef = useRef(false);
   useEffect(() => {
@@ -284,19 +314,33 @@ export default function SessionView(props: BootProps & { payload?: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Post-paint passes: stuck flags + auto-scroll (when enabled).
+  // Post-paint pass: refresh the context-bar target (guarded set in updateBar).
   useEffect(() => {
-    updateStuck(scrollRef.current);
-    const root = scrollRef.current;
-    const onScroll = () => updateStuck(root);
-    root?.addEventListener("scroll", onScroll, { passive: true });
-    return () => root?.removeEventListener("scroll", onScroll);
+    setBar((b) => updateBar(scrollRef.current, entries, b));
   });
 
-  // Auto-scroll on transcript growth when enabled.
+  // Scroll maintenance on transcript growth (entries only — bar changes must
+  // never yank the scroll position while the user reads history):
+  //  - auto-scroll to bottom (when enabled)
+  //  - otherwise freeze the view on the same transcript line, re-anchoring for
+  //    any pinned context-bar space that appeared above
+  //  - without the bar, plain growth below keeps scrollTop untouched
   useEffect(() => {
+    const root = scrollRef.current;
     const sc = autoscrollRef.current;
-    if (sc?.checked) scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+    if (!root) return;
+    if (sc?.checked) {
+      root.scrollTo({ top: root.scrollHeight });
+      return;
+    }
+    // Compute the bar fresh (barRef.current is stale on this entries change)
+    // so the re-anchor reflects the bar that will actually be painted.
+    const barNow = updateBar(root, entries, barRef.current);
+    if (!barNow) return;
+    const next = root.querySelectorAll(".entry").item(barNow.index + 1) as HTMLElement | null;
+    if (!next) return;
+    const delta = next.getBoundingClientRect().top - root.getBoundingClientRect().top - (parseFloat(getComputedStyle(root).paddingTop) || 0) - BAR_BAND;
+    if (delta > 0.5) root.scrollTop += delta;
   }, [entries]);
 
   const stateText = reconnecting
@@ -332,6 +376,8 @@ export default function SessionView(props: BootProps & { payload?: string }) {
     }
   };
 
+  const barEntry: Entry | undefined = bar && barOpen === bar.index ? entries[bar.index] : undefined;
+
   return (
     <div>
       <script suppressHydrationWarning dangerouslySetInnerHTML={{ __html: payloadHtml }} />
@@ -341,10 +387,30 @@ export default function SessionView(props: BootProps & { payload?: string }) {
         <h1 className="text-2xl font-semibold font-display">{name || "Session"}</h1>
       </div>
       <div id="transcript" ref={scrollRef} className="border border-border rounded-sm p-3 bg-surface font-code text-[13px] max-h-[70vh] overflow-auto">
+        <div
+          id="context-bar"
+          className="sticky -top-3 z-10 flex items-baseline gap-2 h-[34px] bg-surface text-[13px] cursor-pointer shadow-[0_10px_16px_-6px_rgba(0,0,0,0.35)]"
+          style={{ visibility: bar ? "visible" : "hidden" }}
+          onClick={() => setBarOpen((i) => (bar && i === bar.index ? null : bar?.index ?? null))}
+        >
+          <span className="shrink-0 font-semibold text-accent-collaboration">❯ You</span>
+          <span className="flex-1 min-w-0 truncate font-normal text-text-muted">{bar ? bar.teaser : " "}</span>
+          {barEntry && (
+            /* Absolute overlay under the chip: opening never reflows the
+               transcript, so the scroll position stays exactly where it is. */
+            <div
+              className="absolute left-0 right-0 top-full z-20 mt-1 max-h-[55vh] overflow-auto border border-border rounded-sm bg-surface p-3 shadow-[0_10px_16px_-6px_rgba(0,0,0,0.35)]"
+              onClick={(ev) => ev.stopPropagation()}
+            >
+              <div className="mb-1 text-[11px] text-text-muted uppercase tracking-wide">pinned message</div>
+              <EntryBody e={barEntry} sessionName={name} />
+            </div>
+          )}
+        </div>
         {entries.length === 0 ? (
           <p className="text-text-muted">Loading session transcript...</p>
         ) : (
-          entries.map((e, i) => <Entry key={i} e={e} sticky={e.role === "user"} sessionName={name} />)
+          entries.map((e, i) => <Entry key={i} e={e} sessionName={name} />)
         )}
       </div>
       <div className="flex items-center gap-2 mt-2">

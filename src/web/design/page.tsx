@@ -19,10 +19,10 @@ export default function DesignPage({ rendered }: DesignPageProps) {
 export async function loadData(): Promise<DesignPageProps> {
   let rendered = "";
   try {
-    const md = readFileSync(new URL("../../../design.md", import.meta.url), "utf8");
+    const md = readFileSync(new URL("../../../DESIGN.md", import.meta.url), "utf8");
     rendered = (Bun as any).markdown.html(md);
   } catch (err) {
-    rendered = `<p>Error reading design.md: ${String(err)}</p>`;
+    rendered = `<p>Error reading DESIGN.md: ${String(err)}</p>`;
   }
   return { rendered };
 }

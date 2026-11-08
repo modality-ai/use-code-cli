@@ -18,6 +18,17 @@ Generated via `use-design tokens island --format json`. Source theme: `use-desig
 | `radius.md` | 12px |
 | `radius.lg` | 16px |
 
+## Elevation
+
+| Token | Value | Tailwind utility |
+|---|---|---|
+| `shadow.pinned` | 0 10px 16px -6px rgb(0 0 0 / 0.35) | `shadow-[0_10px_16px_-6px_rgba(0,0,0,0.35)]` |
+
+Use: the session transcript pinned context chip (`#context-bar`) and its
+expand panel ("pinned message") both float over the scrolling transcript with
+this shadow. Apply it to other floating overlays pinned over scrollable
+content; combine with `bg-surface` + a `border`.
+
 ## Spacing
 
 | Token | Value |
@@ -108,7 +119,7 @@ Generated via `use-design tokens island --format json`. Source theme: `use-desig
 Regenerate with:
 
 ```bash
-use-design tokens island --format json --out design.md  # or adjust to markdown via script
+use-design tokens island --format json --out DESIGN.md  # or adjust to markdown via script
 ```
 
 Or re-export tokens:
