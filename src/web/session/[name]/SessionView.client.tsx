@@ -210,6 +210,7 @@ export default function SessionView(props: BootProps & { payload?: string }) {
   );
   const [chatStatus, setChatStatus] = useState(""); // send progress + SSE errors
   const [sending, setSending] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -376,6 +377,29 @@ export default function SessionView(props: BootProps & { payload?: string }) {
     }
   };
 
+  const stop = async () => {
+    if (stopping) return;
+    setStopping(true);
+    setChatStatus("stopping...");
+    try {
+      const r = await fetch("/api/session/stop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const d = await r.json();
+      if (d?.success) {
+        setChatStatus("stopped");
+      } else {
+        setChatStatus("error: " + (d?.error || "failed"));
+      }
+    } catch (e) {
+      setChatStatus("error: " + String(e));
+    } finally {
+      setStopping(false);
+    }
+  };
+
   const barEntry: Entry | undefined = bar && barOpen === bar.index ? entries[bar.index] : undefined;
 
   return (
@@ -451,7 +475,9 @@ export default function SessionView(props: BootProps & { payload?: string }) {
         chatRef={chatRef}
         chatStatus={chatStatus}
         sending={sending}
+        busy={meta.status === "busy"}
         onSend={send}
+        onStop={stop}
       />
     </div>
   );
