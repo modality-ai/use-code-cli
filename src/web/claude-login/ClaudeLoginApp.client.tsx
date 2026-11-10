@@ -1,16 +1,19 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { CLAUDE_STATUS, LOGIN_MODE, LOGIN_BTN, STATUS_BTN, CODE_BOX, CODE_INPUT, SEND_CODE_BTN, LOGIN_OUTPUT } from "./dom-ids";
+import { parseLoginUrl } from "./login-url";
 
 export interface ClaudeLoginPageProps {
-  status?: unknown;
+  status?: Record<string, unknown> | null;
 }
 
 export default function ClaudeLoginApp({ status }: ClaudeLoginPageProps = {}) {
   const summary = status
-    ? Object.keys(status as Record<string, unknown>).map((k) => `${k}: ${JSON.stringify((status as Record<string, unknown>)[k])}`).join("\n")
+    ? Object.keys(status).map((k) => `${k}: ${JSON.stringify(status[k])}`).join("\n")
     : "Status unavailable";
+
+  const [loginUrl, setLoginUrl] = useState<string | null>(null);
 
   useEffect(() => {
     let currentSessionId: string | null = null;
@@ -41,6 +44,7 @@ export default function ClaudeLoginApp({ status }: ClaudeLoginPageProps = {}) {
       if (out) out.textContent = "";
       if (btn) btn.disabled = true;
       showInput(false);
+      setLoginUrl(null);
       appendOutput("Starting login...\n");
       try {
         const mode = sel ? sel.value : "claudeai";
@@ -57,7 +61,12 @@ export default function ClaudeLoginApp({ status }: ClaudeLoginPageProps = {}) {
             while (true) {
               const x = await reader.read();
               if (x.done) break;
-              if (x.value) appendOutput(dec.decode(x.value, { stream: true }));
+              if (x.value) {
+                const chunk = dec.decode(x.value, { stream: true });
+                appendOutput(chunk);
+                const u = parseLoginUrl(chunk);
+                if (u) setLoginUrl((prev) => prev ?? u);
+              }
             }
             showInput(false);
             appendOutput("\nDone. Refreshing status...\n");
@@ -114,6 +123,13 @@ export default function ClaudeLoginApp({ status }: ClaudeLoginPageProps = {}) {
           <button id={STATUS_BTN} className="px-3 py-2 rounded-sm border border-border">Refresh status</button>
         </div>
       </div>
+      {loginUrl && (
+        <div className="mb-md">
+          <a href={loginUrl} target="_blank" rel="noopener noreferrer" className="text-accent-collaboration hover:underline break-all">
+            {loginUrl}
+          </a>
+        </div>
+      )}
       <div id={CODE_BOX} className="flex gap-2 mt-md" style={{ display: "none" }}>
         <input id={CODE_INPUT} className="flex-1 border border-border rounded-sm p-2 bg-surface text-text-primary font-code text-sm" placeholder="Paste the code from the browser here" />
         <button id={SEND_CODE_BTN} className="px-3 py-2 rounded-sm bg-accent-collaboration text-white font-semibold">Send code</button>

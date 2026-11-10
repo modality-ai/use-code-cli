@@ -2,7 +2,7 @@ import React from "react";
 import ClaudeLoginApp from "./ClaudeLoginApp.client";
 
 export interface ClaudeLoginPageProps {
-  status?: unknown;
+  status?: Record<string, unknown> | null;
 }
 
 export default function ClaudeLoginPage(props: ClaudeLoginPageProps = {}) {
@@ -10,12 +10,13 @@ export default function ClaudeLoginPage(props: ClaudeLoginPageProps = {}) {
 }
 
 export async function loadData(): Promise<ClaudeLoginPageProps> {
-  let status: unknown = null;
+  let status: Record<string, unknown> | null = null;
   try {
     const proc = Bun.spawn(["claude", "auth", "status"], { stdout: "pipe", stderr: "pipe" });
     const out = await new Response(proc.stdout).text();
     await proc.exited;
-    status = JSON.parse(out.trim());
+    const parsed: unknown = JSON.parse(out.trim());
+    status = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
   } catch {
     status = null;
   }

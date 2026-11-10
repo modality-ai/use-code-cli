@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { parseLoginUrl } from "../../claude-login/login-url";
 
 interface LoginSession {
   id: string;
@@ -7,6 +8,7 @@ interface LoginSession {
   done: boolean;
   exitCode: number | null;
   listeners: Set<(chunk: string) => void>;
+  loginUrl: string | null;
 }
 
 interface LoginRequestBody {
@@ -19,6 +21,7 @@ interface LoginRequestBody {
 const sessions = new Map<string, LoginSession>();
 
 let lastSuccessfulLogin: { at: string; mode: string } | null = null;
+let lastLoginUrl: string | null = null;
 
 export function parseOAuthExpiry(raw: string): string | null {
   if (!raw) return null;
@@ -60,6 +63,8 @@ function notify(s: LoginSession, chunk: string) {
     try { l(chunk); } catch {}
   }
 }
+
+export { parseLoginUrl };
 
 export async function GET(request: Request): Promise<Response> {
   const url = new URL(request.url);
@@ -114,6 +119,7 @@ export async function GET(request: Request): Promise<Response> {
       d.lastLoginAt = lastSuccessfulLogin?.at ?? null;
       d.lastLoginMode = lastSuccessfulLogin?.mode ?? null;
       d.tokenExpiresAt = await readOAuthExpiry();
+      d.loginUrl = lastLoginUrl;
     }
     return Response.json({ success: true, data });
   } catch (e) {
@@ -132,6 +138,7 @@ export async function POST(request: Request): Promise<Response> {
     try {
       const data = (body.value || "") + "\n";
       s.proc.stdin.write(data);
+      s.proc.stdin.flush();
     } catch (e) {
       return Response.json({ success: false, error: String(e) }, { status: 500 });
     }
@@ -143,15 +150,24 @@ export async function POST(request: Request): Promise<Response> {
   if (mode === "console") args.push("--console");
 
   const id = randomUUID();
-  const proc = Bun.spawn(args, { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
-  const s: LoginSession = { id, proc, output: [], done: false, exitCode: null, listeners: new Set() };
+  const proc = Bun.spawn(args, { stdin: "pipe", stdout: "pipe", stderr: "pipe", env: { ...process.env, BROWSER: "/usr/bin/true" } });
+  const s: LoginSession = { id, proc, output: [], done: false, exitCode: null, listeners: new Set(), loginUrl: null };
   sessions.set(id, s);
+  // Reset the global "last login URL" so status reflects this session, not a stale one.
+  lastLoginUrl = null;
 
   const pump = async (reader: ReadableStreamDefaultReader<Uint8Array>) => {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      if (value) notify(s, new TextDecoder().decode(value));
+      if (value) {
+        const chunk = new TextDecoder().decode(value);
+        notify(s, chunk);
+        if (s.loginUrl === null) {
+          const u = parseLoginUrl(chunk);
+          if (u) { s.loginUrl = u; lastLoginUrl = u; }
+        }
+      }
     }
   };
   (async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { parseOAuthExpiry } from "../route";
+import { parseOAuthExpiry, parseLoginUrl } from "../route";
 
 function b64url(obj: unknown): string {
   return Buffer.from(JSON.stringify(obj)).toString("base64url");
@@ -64,5 +64,45 @@ describe("parseOAuthExpiry", () => {
     const token = `${header}.${payload}.sig`;
     const raw = JSON.stringify({ claudeAiOauth: { expiresAt: ms, accessToken: token } });
     expect(parseOAuthExpiry(raw)).toBe(new Date(ms).toISOString());
+  });
+});
+
+describe("parseLoginUrl", () => {
+  it("returns null for empty input", () => {
+    expect(parseLoginUrl("")).toBeNull();
+  });
+
+  it("extracts URL from 'If the browser didn't open, visit:' message", () => {
+    const text = "If the browser didn't open, visit: https://claude.ai/oauth/authorize?foo=bar";
+    expect(parseLoginUrl(text)).toBe("https://claude.ai/oauth/authorize?foo=bar");
+  });
+
+  it("strips trailing punctuation from extracted URL", () => {
+    const text = "If the browser didn't open, visit: https://example.com/path).";
+    expect(parseLoginUrl(text)).toBe("https://example.com/path");
+  });
+
+  it("strips ANSI escape sequences before matching", () => {
+    const text = "\x1b[32mIf the browser didn't open, visit: https://example.com/login\x1b[0m";
+    expect(parseLoginUrl(text)).toBe("https://example.com/login");
+  });
+
+  it("strips OSC hyperlink escapes before matching", () => {
+    const text = "\x1b]8;;https://example.com/x\x07click\x1b]8;;\x07 If the browser didn't open, visit: https://example.com/login";
+    expect(parseLoginUrl(text)).toBe("https://example.com/login");
+  });
+
+  it("falls back to any https URL when visit message absent", () => {
+    const text = "Please open https://auth.example.com/start now";
+    expect(parseLoginUrl(text)).toBe("https://auth.example.com/start");
+  });
+
+  it("returns null when no URL present", () => {
+    expect(parseLoginUrl("no url here")).toBeNull();
+  });
+
+  it("handles http URLs", () => {
+    const text = "visit http://localhost:8080/callback";
+    expect(parseLoginUrl(text)).toBe("http://localhost:8080/callback");
   });
 });
