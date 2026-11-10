@@ -1,5 +1,5 @@
-import type { Session } from "./sessions/SessionsApp.client";
-import type { SessionData } from "./session/[name]/session-data";
+import type { Session } from "../../web/my/sessions/SessionsApp.client";
+import type { SessionData } from "../../web/my/session/[name]/session-data";
 
 /**
  * Single data channel for hydrated routes: page.tsx dehydrates its slice into

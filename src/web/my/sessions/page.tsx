@@ -1,5 +1,5 @@
 import React from "react";
-import { aiTool } from "../../scripts/index";
+import { aiTool } from "../../../scripts/index";
 import SessionsApp, { Session } from "./SessionsApp.client";
 
 export interface SessionsPageProps {

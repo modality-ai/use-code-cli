@@ -41,6 +41,14 @@ describe("shouldSkipStatic", () => {
     expect(shouldSkipStatic("/sessions/x")).toBe(true);
   });
 
+  it("skips my/* routes", () => {
+    expect(shouldSkipStatic("/my/session/foo")).toBe(true);
+    expect(shouldSkipStatic("/my/sessions")).toBe(true);
+    expect(shouldSkipStatic("/my/sessions/x")).toBe(true);
+    expect(shouldSkipStatic("/my/tunnel")).toBe(true);
+    expect(shouldSkipStatic("/my/tunnel/x")).toBe(true);
+  });
+
   it("does not skip static assets with extensions", () => {
     expect(shouldSkipStatic("/index.html")).toBe(false);
     expect(shouldSkipStatic("/img/logo.png")).toBe(false);

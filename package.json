@@ -16,6 +16,8 @@
   "git.addAICoAuthor": "off",
   "dependencies": {
     "@hono/bun": "^1.0.1",
+    "@simplewebauthn/browser": "^14.0.0",
+    "@simplewebauthn/server": "^14.1.0",
     "@tailwindcss/typography": "^0.5.20",
     "diff": "^9.0.0",
     "modality-cli-kit": "^0.16.1",

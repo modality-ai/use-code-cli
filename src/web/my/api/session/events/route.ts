@@ -1,8 +1,8 @@
 import { readFileSync as readFile } from "node:fs";
 import { basename, dirname } from "node:path";
-import { sseResponse } from "../../../../lib/sse";
-import { parseTranscript } from "../../../../lib/transcript";
-import { aiTool } from "../../../../scripts/index";
+import { sseResponse } from "../../../../../lib/sse";
+import { parseTranscript } from "../../../../../lib/transcript";
+import { aiTool } from "../../../../../scripts/index";
 import { fetchSessionData, resolveSessionTarget } from "../../../session/[name]/session-data";
 
 /**

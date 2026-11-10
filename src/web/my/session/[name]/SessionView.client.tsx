@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState } from "react";
 import type { SessionData } from "./session-data";
 import { onlineEmoji, statusEmoji } from "./store";
 import ChatInput from "./ChatInput";
-import { prettyJson, tryPrettyJson } from "../../../lib/output/json";
+import { prettyJson, tryPrettyJson } from "../../../../lib/output/json";
 
 // Client-side view for one session, Next.js style: page.tsx imports this
 // 'use client' component. The server renders the initial transcript; this
@@ -65,7 +65,7 @@ function ToolFold({ tool, sessionName }: { tool: any; sessionName?: string }) {
     if (!tool.id || !sessionName) { setFetched(true); return; }
     setLoading(true);
     try {
-      const r = await fetch(`/api/session/tool-result?name=${encodeURIComponent(sessionName)}&toolId=${encodeURIComponent(tool.id)}`);
+      const r = await fetch(`/my/api/session/tool-result?name=${encodeURIComponent(sessionName)}&toolId=${encodeURIComponent(tool.id)}`);
       const d = await r.json();
       if (d?.success) {
         setInput(d.input);
@@ -246,7 +246,7 @@ export default function SessionView(props: BootProps & { payload?: string }) {
   const catchUp = async () => {
     if (!liveRef.current) return;
     try {
-      const r = await fetch("/api/session?name=" + encodeURIComponent(name));
+      const r = await fetch("/my/api/session?name=" + encodeURIComponent(name));
       const d = await r.json();
       if (!liveRef.current) return;
       applyEntries(d);
@@ -260,7 +260,7 @@ export default function SessionView(props: BootProps & { payload?: string }) {
     let retry: ReturnType<typeof setTimeout> | null = null;
     let retryDelay = 1000;
     const connect = () => {
-      es = new EventSource("/api/session/events?name=" + encodeURIComponent(name));
+      es = new EventSource("/my/api/session/events?name=" + encodeURIComponent(name));
       es.onmessage = (ev: MessageEvent) => {
         if (!liveRef.current) return;
         retryDelay = 1000; // reset backoff on successful message
@@ -382,7 +382,7 @@ export default function SessionView(props: BootProps & { payload?: string }) {
     setStopping(true);
     setChatStatus("stopping...");
     try {
-      const r = await fetch("/api/session/stop", {
+      const r = await fetch("/my/api/session/stop", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name }),
@@ -407,7 +407,7 @@ export default function SessionView(props: BootProps & { payload?: string }) {
       <script suppressHydrationWarning dangerouslySetInnerHTML={{ __html: payloadHtml }} />
 
       <div className="flex items-center gap-3 mb-md">
-        <a href="/sessions" className="text-xs text-accent-collaboration hover:underline">← Back to sessions</a>
+        <a href="/my/sessions" className="text-xs text-accent-collaboration hover:underline">← Back to sessions</a>
         <h1 className="text-2xl font-semibold font-display">{name || "Session"}</h1>
       </div>
       <div id="transcript" ref={scrollRef} className="border border-border rounded-sm p-3 bg-surface font-code text-sm max-h-2/3 overflow-auto">

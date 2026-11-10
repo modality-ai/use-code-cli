@@ -12,3 +12,12 @@ export const MAX_REPLY_HOP = 1;
 
 /** Tag name of the invisible marker: `<!-- use-code-cli:auto-reply hop=1 ... -->`. */
 export const REPLY_MARKER_TAG = "use-code-cli:auto-reply";
+
+/** Application / relying-party name used for WebAuthn registration. */
+export const APP_NAME = "use-code-cli";
+
+/** Route-to-route redirects served by the runner. */
+export const REDIRECTS: Record<string, string> = {
+  "/": "/help",
+  "/login": "/passkey",
+};

@@ -1,4 +1,4 @@
-import { readSessions, findSessions } from "../../../../lib/sessions";
+import { readSessions, findSessions } from "../../../../../lib/sessions";
 import { pickBestSession } from "../../../session/[name]/session-data";
 
 export async function POST(request: Request): Promise<Response> {

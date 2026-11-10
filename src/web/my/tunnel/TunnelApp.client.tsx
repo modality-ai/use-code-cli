@@ -32,11 +32,11 @@ export default function TunnelApp({ url }: TunnelPageProps = {}) {
     if (btn) btn.disabled = true;
     appendOutput("Starting cloudflared tunnel...\n");
     try {
-      const r = await fetch("/api/tunnel", { method: "POST" });
+      const r = await fetch("/my/api/tunnel", { method: "POST" });
       const d = await r.json();
       if (!d.success || !d.sessionId) { appendOutput("Failed to start: " + (d.error || "unknown") + "\n"); return; }
       if (d.url) setUrlSection(d.url);
-      fetch("/api/tunnel?stream=" + encodeURIComponent(d.sessionId))
+      fetch("/my/api/tunnel?stream=" + encodeURIComponent(d.sessionId))
         .then(async (res) => {
           if (!res.body) return;
           const reader = res.body.getReader();
@@ -64,7 +64,7 @@ export default function TunnelApp({ url }: TunnelPageProps = {}) {
     const btn = document.getElementById(UNLINK_BTN) as HTMLButtonElement | null;
     if (btn) btn.disabled = true;
     try {
-      await fetch("/api/tunnel", { method: "DELETE" });
+      await fetch("/my/api/tunnel", { method: "DELETE" });
       setUrlSection(null);
       const out = document.getElementById(TUNNEL_OUTPUT);
       if (out) out.textContent = "";
@@ -100,12 +100,12 @@ export default function TunnelApp({ url }: TunnelPageProps = {}) {
   useEffect(() => {
     const statusEl = document.getElementById(TUNNEL_STATUS);
     function refreshTunnelStatus() {
-      fetch("/api/tunnel")
+      fetch("/my/api/tunnel")
         .then((r) => r.json())
         .then((d) => {
           if (statusEl) statusEl.textContent = d.success ? "cloudflared: " + (d.version || "ready") : "cloudflared not found — install first";
           if (d.url) setUrlSection(d.url);
-          else updateActionButtons(false);
+          else setUrlSection(null);
         })
         .catch((e) => { if (statusEl) statusEl.textContent = "status error: " + String(e); });
     }

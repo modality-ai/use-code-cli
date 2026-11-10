@@ -23,7 +23,7 @@ beforeEach(() => {
   } as any;
   // @ts-ignore
   globalThis.fetch = mock(async (url: string) => {
-    if (String(url).includes("/api/session")) {
+    if (String(url).includes("/my/api/session")) {
       return { json: async () => ({ success: true, data: { name: "Debug --init", entries: [], online: true, status: "idle" } }) } as any;
     }
     if (String(url).includes("/api/talk")) {

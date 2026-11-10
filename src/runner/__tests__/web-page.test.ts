@@ -1,8 +1,11 @@
 import { afterAll, beforeEach, describe, expect, it } from "bun:test";
 import { start } from "../server";
+import { issueSession, SESSION_COOKIE } from "../../lib/web/auth";
 
 const server = start({ host: "127.0.0.1", port: 0 });
-const getHtml = async (path: string) => await (await fetch(`http://127.0.0.1:${server.port}${path}`)).text();
+const authToken = await issueSession("owner");
+const authCookie = `${SESSION_COOKIE}=${authToken}`;
+const getHtml = async (path: string) => await (await fetch(`http://127.0.0.1:${server.port}${path}`, { headers: { Cookie: authCookie } })).text();
 
 describe("web page SSR + client bundle injection", () => {
   afterAll(() => server.stop());
@@ -21,8 +24,8 @@ describe("web page SSR + client bundle injection", () => {
   });
 
   it("injects the co-located client component bundle for tunnel", async () => {
-    const html = await getHtml("/tunnel");
-    expect(html).toContain('<script type="module" src="/dist/tunnel/TunnelApp.client.js">');
+    const html = await getHtml("/my/tunnel");
+    expect(html).toContain('<script type="module" src="/dist/my/tunnel/TunnelApp.client.js">');
   });
 
   it("injects the co-located client component bundle for claude-login", async () => {
@@ -31,12 +34,12 @@ describe("web page SSR + client bundle injection", () => {
   });
 
   it("injects the co-located client component bundle for sessions", async () => {
-    const html = await getHtml("/sessions");
-    expect(html).toContain('<script type="module" src="/dist/sessions/SessionsApp.client.js">');
+    const html = await getHtml("/my/sessions");
+    expect(html).toContain('<script type="module" src="/dist/my/sessions/SessionsApp.client.js">');
   });
 
   it("server-renders initial client component markup + hydration payload for sessions", async () => {
-    const html = await getHtml("/sessions");
+    const html = await getHtml("/my/sessions");
     // Payload assertions use the hydrated-node adjacency ("<div><script>") so
     // quoted mentions of these global names inside transcript text never match.
     expect(html).toContain("<div><script>window.__REACT_DATA__ = { sessions:"); // consolidated channel only
@@ -54,7 +57,7 @@ describe("web page SSR + client bundle injection", () => {
   });
 
   it("emits the consolidated sessionView slice on the session route", async () => {
-    const html = await getHtml("/session/use-code-cli-51");
+    const html = await getHtml("/my/session/use-code-cli-51");
     expect(html).toContain('<div><script>window.__REACT_DATA__ = { sessionView: {"name":"use-code-cli-51"');
     expect(html).not.toContain("<div><script>window.__SESSION_VIEW__"); // legacy emission removed (Phase B)
   });

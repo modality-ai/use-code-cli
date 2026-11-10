@@ -13,7 +13,7 @@ describe("HelpPage", () => {
 
   it("lists the endpoints", () => {
     render(HelpPage());
-    expect(screen().getByText(/GET \/sessions/i)).toBeTruthy();
+    expect(screen().getByText(/GET \/my\/sessions/i)).toBeTruthy();
     expect(screen().getByText(/GET \/design/i)).toBeTruthy();
     expect(screen().getByText(/GET \/help/i)).toBeTruthy();
   });

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
-import { findSessions, readSessions } from "../../../lib/sessions";
-import { parseTranscript } from "../../../lib/transcript";
-import { aiTool } from "../../../scripts/index";
+import { findSessions, readSessions } from "../../../../lib/sessions";
+import { parseTranscript } from "../../../../lib/transcript";
+import { aiTool } from "../../../../scripts/index";
 
 /**
  * When a name is ambiguous (multiple sessions share it), pick the best candidate
@@ -97,7 +97,7 @@ export async function fetchSessionData(name: string, options?: { includeEntries?
   // (which reads transcript metadata / crons / monitors) — keeps the 1s poll
   // cheap.
   if (!includeEntries) {
-    const libs = await import("../../../lib/sessions");
+    const libs = await import("../../../../lib/sessions");
     let all = await libs.readSessions(false);
     let matches = libs.findSessions(all, name);
     if (matches.length === 0) {

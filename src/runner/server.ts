@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Hono } from "hono";
 import { staticHandler } from "./static";
+import { APP_NAME, REDIRECTS } from "../config/constants";
+import { requireAuth } from "../lib/web/auth";
 import React from "react";
 import { renderToString } from "react-dom/server";
 import RootLayout from "../web/layout";
@@ -12,7 +14,7 @@ export function routeSegment(name: string): string {
 }
 
 export function pageTitle(route: string, params: Record<string, string> = {}): string {
-  if (route === "/") return "use-code-cli";
+  if (route === "/") return APP_NAME;
   return route.slice(1).replace(/:([A-Za-z0-9_]+)/g, (_, key: string) => params[key] ?? `:${key}`);
 }
 
@@ -75,6 +77,19 @@ export function start(options: StartOptions = {}): ReturnType<typeof Bun.serve> 
   const app = new Hono();
   app.use("*", staticHandler);
 
+  // Gate everything under /my behind a valid session.
+  app.use("/my/*", async (c, next) => {
+    const auth = await requireAuth(c.req.raw);
+    if (auth.ok) {
+      await next();
+      return;
+    }
+    if (c.req.path.startsWith("/my/api")) {
+      return c.json({ success: false, error: "unauthorized" }, 401);
+    }
+    return c.redirect("/login");
+  });
+
   // Dynamic API routes (Next.js style: src/web/.../route.ts exporting GET/POST/etc.)
   for (const [route, filePath] of apiRoutes) {
     app.all(route, async (c) => {
@@ -96,7 +111,7 @@ export function start(options: StartOptions = {}): ReturnType<typeof Bun.serve> 
       const loadData = typeof mod.loadData === "function" ? mod.loadData : async () => ({});
       const clientScript = typeof mod.clientScript === "function" ? mod.clientScript : null;
       const params = c.req.param() as Record<string, string>;
-      const data = await loadData({ params, name: params.name });
+      const data = await loadData({ params, name: params.name, request: c.req.raw });
       const pageEl = React.createElement(Page, data || {});
       const title = pageTitle(route, params);
       const baseHtml = renderToString(React.createElement(RootLayout, { title, children: pageEl }));
@@ -117,9 +132,10 @@ export function start(options: StartOptions = {}): ReturnType<typeof Bun.serve> 
     });
   }
 
-  // Root redirect when no index page
-  if (!pageRoutes.has("/")) {
-    app.get("/", (c) => c.redirect("/help"));
+  // Configurable redirects (see src/config/constants.ts REDIRECTS).
+  for (const [from, to] of Object.entries(REDIRECTS)) {
+    if (from === "/" && pageRoutes.has("/")) continue;
+    app.get(from, (c) => c.redirect(to));
   }
 
   app.notFound((c) => c.json({ success: false, error: "not found" }, 404));
@@ -132,7 +148,7 @@ export function start(options: StartOptions = {}): ReturnType<typeof Bun.serve> 
     // default 10s idle timeout so they aren't cut mid-chunk.
     idleTimeout: 255,
   });
-  console.log(`use-code-cli server listening on http://${host}:${port}`);
+  console.log(`${APP_NAME} server listening on http://${host}:${port}`);
   return server;
 }
 

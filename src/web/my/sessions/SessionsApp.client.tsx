@@ -87,7 +87,7 @@ export default function SessionsApp({ initial, payloadHtml }: { initial?: Sessio
       {rows.map((s, i) => (
         <div className="border border-border rounded-sm p-3 mb-sm bg-surface" key={i}>
           <a
-            href={"/session/" + encodeURIComponent(s.name || s.sessionId || "")}
+            href={"/my/session/" + encodeURIComponent(s.name || s.sessionId || "")}
             className="font-semibold text-accent-collaboration hover:underline"
           >
             {s.name || s.sessionId}
