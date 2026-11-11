@@ -354,7 +354,7 @@ export default function SessionView(props: BootProps) {
     setSending(true);
     setChatStatus("sending...");
     try {
-      const r = await fetch("/api/talk", {
+      const r = await fetch("/my/api/talk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, message: input.value }),

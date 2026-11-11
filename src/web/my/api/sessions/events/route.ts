@@ -1,6 +1,6 @@
-import { sseResponse } from "../../../../lib/sse";
-import { fetchSessions } from "../../../../lib/live";
-import { PROJECTS_DIR, SESSIONS_DIR } from "../../../../lib/sessions";
+import { sseResponse } from "../../../../../lib/sse";
+import { fetchSessions } from "../../../../../lib/live";
+import { PROJECTS_DIR, SESSIONS_DIR } from "../../../../../lib/sessions";
 
 /**
  * SSE stream of the live sessions list.

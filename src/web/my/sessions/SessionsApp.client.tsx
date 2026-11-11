@@ -42,7 +42,7 @@ export default function SessionsApp({ initial }: { initial?: Session[] }) {
     let es: EventSource | null = null;
     let retry: ReturnType<typeof setTimeout> | null = null;
     const connect = () => {
-      es = new EventSource("/api/sessions/events");
+      es = new EventSource("/my/api/sessions/events");
       es.onmessage = (ev: MessageEvent) => {
         try {
           const d = JSON.parse(ev.data);

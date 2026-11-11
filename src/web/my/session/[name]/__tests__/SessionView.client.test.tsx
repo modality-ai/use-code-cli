@@ -26,7 +26,7 @@ beforeEach(() => {
     if (String(url).includes("/my/api/session")) {
       return { json: async () => ({ success: true, data: { name: "Debug --init", entries: [], online: true, status: "idle" } }) } as any;
     }
-    if (String(url).includes("/api/talk")) {
+    if (String(url).includes("/my/api/talk")) {
       return { json: async () => ({ success: true, data: { success: true, message: "sent" } }) } as any;
     }
     return { json: async () => ({}) } as any;

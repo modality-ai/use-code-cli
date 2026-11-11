@@ -1,5 +1,5 @@
-import { aiTool } from "../../../scripts/index";
-import { resolveSessionTarget } from "../../my/session/[name]/session-data";
+import { aiTool } from "../../../../scripts/index";
+import { resolveSessionTarget } from "../../session/[name]/session-data";
 
 /**
  * The page sends a session's display name, but the talk command matches against

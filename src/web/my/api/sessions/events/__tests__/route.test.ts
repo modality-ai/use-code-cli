@@ -4,7 +4,7 @@ const mockedSessions = [
   { name: "alpha", sessionId: "sid-1", hero: "JAMES", status: "busy", lastPrompt: "hello" },
 ];
 
-mock.module("../../../../../lib/live", () => ({
+mock.module("../../../../../../lib/live", () => ({
   fetchSessions: async () => mockedSessions,
 }));
 
@@ -12,7 +12,7 @@ const { GET } = await import("../route");
 
 describe("sessions events route", () => {
   it("returns an SSE Response with SSE headers", async () => {
-    const req = new Request("http://localhost/api/sessions/events");
+    const req = new Request("http://localhost/my/api/sessions/events");
     const res = await GET(req);
     expect(res).toBeInstanceOf(Response);
     expect(res.headers.get("Content-Type")).toBe("text/event-stream");
@@ -22,7 +22,7 @@ describe("sessions events route", () => {
   });
 
   it("pushes an initial snapshot containing the fetched sessions", async () => {
-    const req = new Request("http://localhost/api/sessions/events");
+    const req = new Request("http://localhost/my/api/sessions/events");
     const res = await GET(req);
     const reader = res.body!.getReader();
     const { value } = await reader.read();
