@@ -1,5 +1,6 @@
 import type { Session } from "../../web/my/sessions/SessionsApp.client";
 import type { SessionData } from "../../web/my/session/[name]/session-data";
+import type { Project } from "../../web/my/projects/ProjectsApp.client";
 
 /**
  * Single data channel for hydrated routes: page.tsx dehydrates its slice into
@@ -12,6 +13,13 @@ export interface ReactDataEnvelope {
   sessionView?: {
     name: string;
     initial: SessionData | null;
+  };
+  projects?: Project[];
+  projectExec?: {
+    name: string;
+  };
+  passkey?: {
+    hasCredentials: boolean;
   };
   // Future slices appended here as new hydrated routes are added.
 }

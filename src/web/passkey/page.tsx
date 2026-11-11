@@ -10,7 +10,13 @@ export interface PasskeyPageProps {
 export default function PasskeyPage(props: PasskeyPageProps) {
   const hasCredentials = !!props?.hasCredentials;
   const json = JSON.stringify(hasCredentials).replace(/</g, "\\u003c");
-  return <PasskeyApp initial={hasCredentials} payloadHtml={`window.__REACT_DATA__ = { passkey: { hasCredentials: ${json} } };`} />;
+  const payloadHtml = `window.__REACT_DATA__ = { passkey: { hasCredentials: ${json} } };`;
+  return (
+    <>
+      <script dangerouslySetInnerHTML={{ __html: payloadHtml }} />
+      <PasskeyApp initial={hasCredentials} />
+    </>
+  );
 }
 
 export async function loadData(args?: { request?: Request }) {

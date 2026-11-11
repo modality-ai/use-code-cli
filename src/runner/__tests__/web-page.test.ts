@@ -42,7 +42,7 @@ describe("web page SSR + client bundle injection", () => {
     const html = await getHtml("/my/sessions");
     // Payload assertions use the hydrated-node adjacency ("<div><script>") so
     // quoted mentions of these global names inside transcript text never match.
-    expect(html).toContain("<div><script>window.__REACT_DATA__ = { sessions:"); // consolidated channel only
+    expect(html).toContain("<script>window.__REACT_DATA__ = { sessions:"); // consolidated channel only
     expect(html).not.toContain("<div><script>window.__SESSIONS__"); // legacy emission removed (Phase B)
     expect(html).toMatch(/active sessions\.|\/session\//); // empty vs populated markup
   });
@@ -58,7 +58,13 @@ describe("web page SSR + client bundle injection", () => {
 
   it("emits the consolidated sessionView slice on the session route", async () => {
     const html = await getHtml("/my/session/use-code-cli-51");
-    expect(html).toContain('<div><script>window.__REACT_DATA__ = { sessionView: {"name":"use-code-cli-51"');
+    expect(html).toContain('<script>window.__REACT_DATA__ = { sessionView: {"name":"use-code-cli-51"');
     expect(html).not.toContain("<div><script>window.__SESSION_VIEW__"); // legacy emission removed (Phase B)
+  });
+
+  it("server-renders initial client component markup + hydration payload for projects", async () => {
+    const html = await getHtml("/my/projects");
+    expect(html).toContain("<script>window.__REACT_DATA__ = { projects:");
+    expect(html).toMatch(/\/my\/project\//);
   });
 });

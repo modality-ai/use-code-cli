@@ -105,6 +105,20 @@ export function isLocalhost(host: string | null): boolean {
   return h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "[::1]";
 }
 
+// CSRF check for state-changing requests: browsers attach an Origin header to
+// the POST/fetch requests they initiate (a few legacy flows omit it — the
+// SameSite=Lax session cookie covers those), and a cross-site attacker cannot
+// forge it. Same-origin (or tunneled) requests have Origin host == request
+// host. A missing Origin means a non-browser client (curl, tests) — allowed.
+export function isCsrfSafe(origin: string | null | undefined, requestUrl: string): boolean {
+  if (!origin) return true;
+  try {
+    return new URL(origin).host === new URL(requestUrl).host;
+  } catch {
+    return false;
+  }
+}
+
 export async function requireAuth(request: Request): Promise<{ ok: true; payload: SessionPayload } | { ok: false; response: Response }> {
   const cookies = parseCookies(request.headers.get("cookie"));
   const payload = await verifySession(cookies[SESSION_COOKIE]);

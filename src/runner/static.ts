@@ -30,7 +30,7 @@ const files: MiddlewareHandler = serveStatic({
 /** Pure classifier: should the static file server be skipped for this path?
  *  Extensionless paths and session routes are handled by the dynamic router. */
 export const shouldSkipStatic = (path: string): boolean =>
-  !path.includes(".") || path.startsWith("/my/session/") || path.startsWith("/my/sessions") || path.startsWith("/my/tunnel") || path.startsWith("/session/") || path.startsWith("/sessions");
+  !path.includes(".") || path.startsWith("/my/session/") || path.startsWith("/my/sessions") || path.startsWith("/my/projects") || path.startsWith("/my/project/") || path.startsWith("/my/tunnel") || path.startsWith("/session/") || path.startsWith("/sessions");
 
 export const staticHandler: MiddlewareHandler = async (c, next) => {
   if (c.req.method !== "GET" && c.req.method !== "HEAD") {

@@ -15,7 +15,12 @@ export default function SessionPage(props: SessionPageProps) {
   // Single data channel (Phase B): the consolidated __REACT_DATA__ slice only.
   const json = JSON.stringify({ name, initial: data }).replace(/</g, "\\u003c");
   const payloadHtml = `window.__REACT_DATA__ = { sessionView: ${json} };`;
-  return <SessionView name={name} initial={data} payload={payloadHtml} />;
+  return (
+    <>
+      <script dangerouslySetInnerHTML={{ __html: payloadHtml }} />
+      <SessionView name={name} initial={data} />
+    </>
+  );
 }
 
 export async function loadData(props?: { params?: Record<string, string>; name?: string }): Promise<SessionPageProps> {

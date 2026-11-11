@@ -12,11 +12,12 @@ export default function SessionsPage(props: SessionsPageProps) {
   // with identical data (props do not cross the bundle boundary on their own).
   // Single data channel (Phase B): the consolidated __REACT_DATA__ slice only.
   const json = JSON.stringify(sessions).replace(/</g, "\\u003c");
+  const payloadHtml = `window.__REACT_DATA__ = { sessions: ${json} };`;
   return (
-    <SessionsApp
-      initial={sessions}
-      payloadHtml={`window.__REACT_DATA__ = { sessions: ${json} };`}
-    />
+    <>
+      <script dangerouslySetInnerHTML={{ __html: payloadHtml }} />
+      <SessionsApp initial={sessions} />
+    </>
   );
 }
 

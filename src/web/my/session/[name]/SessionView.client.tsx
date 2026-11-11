@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import "../../../../lib/web/react-data";
 import type { SessionData } from "./session-data";
 import { onlineEmoji, statusEmoji } from "./store";
 import ChatInput from "./ChatInput";
@@ -191,11 +192,7 @@ function readBoot(props: BootProps): BootProps {
   return injected ?? props;
 }
 
-export default function SessionView(props: BootProps & { payload?: string }) {
-  // The payload script lives inside the hydrated node: React hydration never
-  // compares dangerouslySetInnerHTML content, so the server value survives
-  // while the client-side render supplies an empty peer.
-  const payloadHtml = props.payload ?? "";
+export default function SessionView(props: BootProps) {
   const boot = useRef<BootProps>(readBoot(props));
   const name = boot.current.name || "";
   const initial = boot.current.initial ?? null;
@@ -389,7 +386,16 @@ export default function SessionView(props: BootProps & { payload?: string }) {
       });
       const d = await r.json();
       if (d?.success) {
-        setChatStatus("stopped");
+        setChatStatus(d.paused === false ? "stop sent — session still working" : "paused");
+        // Refresh session status so the header reflects the return to idle.
+        // statusOnly=1: we only read online/status here — skip the transcript.
+        try {
+          const metaRes = await fetch("/my/api/session?statusOnly=1&name=" + encodeURIComponent(name));
+          const metaJson = await metaRes.json();
+          if (metaJson?.success) {
+            setMeta({ success: true, online: metaJson.data?.online !== false, status: (metaJson.data?.status as string | null) || "idle" });
+          }
+        } catch {}
       } else {
         setChatStatus("error: " + (d?.error || "failed"));
       }
@@ -404,8 +410,6 @@ export default function SessionView(props: BootProps & { payload?: string }) {
 
   return (
     <div>
-      <script suppressHydrationWarning dangerouslySetInnerHTML={{ __html: payloadHtml }} />
-
       <div className="flex items-center gap-3 mb-md">
         <a href="/my/sessions" className="text-xs text-accent-collaboration hover:underline">← Back to sessions</a>
         <h1 className="text-2xl font-semibold font-display">{name || "Session"}</h1>

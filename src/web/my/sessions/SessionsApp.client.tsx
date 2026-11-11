@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import "../../../lib/web/react-data";
 
 // Client-side enhancement for the sessions page, Next.js style: page.tsx
 // imports this 'use client' component. SSR renders the initial list, and the
@@ -26,10 +27,7 @@ function cleanPrompt(text: string): string {
 
 // Hydration data channel: page.tsx dehydrates the server-rendered sessions here.
 // On SSR (no window) falls back to the injected initial prop.
-export default function SessionsApp({ initial, payloadHtml }: { initial?: Session[]; payloadHtml?: string }) {
-  // Payload script lives inside the hydrated node; React hydration never
-  // compares dangerouslySetInnerHTML content, so hydration stays deterministic.
-  const payload = payloadHtml ?? "";
+export default function SessionsApp({ initial }: { initial?: Session[] }) {
   const [sessions, setSessions] = useState<Session[]>(() => {
     // Consolidated data channel (Phase B) with prop fallback for SSR.
     const dehydrated = typeof window !== "undefined" ? window.__REACT_DATA__?.sessions : undefined;
@@ -75,7 +73,6 @@ export default function SessionsApp({ initial, payloadHtml }: { initial?: Sessio
   if (rows.length === 0) return <p className="text-text-muted">No active sessions.</p>;
   return (
     <div>
-      <script dangerouslySetInnerHTML={{ __html: payload }} />
       <div className="flex items-center gap-2 mb-md">
         <h1 className="text-2xl font-semibold font-display">Sessions</h1>
         {lastUpdated > 0 && (

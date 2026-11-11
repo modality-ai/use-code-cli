@@ -1,16 +1,15 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import "../../lib/web/react-data";
 
 export interface PasskeyAppProps {
   initial?: boolean;
-  payloadHtml?: string;
 }
 
-export default function PasskeyApp({ initial, payloadHtml }: PasskeyAppProps = {}) {
+export default function PasskeyApp({ initial }: PasskeyAppProps = {}) {
   const dehydrated =
-    typeof window !== "undefined" ? (window as any).__REACT_DATA__?.passkey : undefined;
-  const payload = payloadHtml ?? "";
+    typeof window !== "undefined" ? window.__REACT_DATA__?.passkey : undefined;
   const [status, setStatus] = useState<string>("");
   const [hasCredentials, setHasCredentials] = useState<boolean>(() => {
     if (typeof dehydrated?.hasCredentials === "boolean") return dehydrated.hasCredentials;
@@ -84,7 +83,6 @@ export default function PasskeyApp({ initial, payloadHtml }: PasskeyAppProps = {
 
   return (
     <div className="max-w-3xl mx-auto my-6 p-4">
-      <script dangerouslySetInnerHTML={{ __html: payload }} />
       <h1 className="text-2xl font-semibold font-display mb-md">Passkey Login</h1>
       <p className="text-text-muted mb-md">Register or sign in with a passkey (WebAuthn).</p>
       <div className="flex gap-2 mb-md">

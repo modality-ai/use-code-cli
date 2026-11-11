@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { Hono } from "hono";
 import { staticHandler } from "./static";
 import { APP_NAME, REDIRECTS } from "../config/constants";
-import { requireAuth } from "../lib/web/auth";
+import { isCsrfSafe, requireAuth } from "../lib/web/auth";
 import React from "react";
 import { renderToString } from "react-dom/server";
 import RootLayout from "../web/layout";
@@ -79,6 +79,13 @@ export function start(options: StartOptions = {}): ReturnType<typeof Bun.serve> 
 
   // Gate everything under /my behind a valid session.
   app.use("/my/*", async (c, next) => {
+    // CSRF: browsers always send Origin on state-changing requests, so a
+    // cross-site attacker cannot pass this check; reject before auth runs.
+    const mutating = c.req.method !== "GET" && c.req.method !== "HEAD" && c.req.method !== "OPTIONS";
+    if (mutating && !isCsrfSafe(c.req.header("Origin"), c.req.url)) {
+      const msg = { success: false, error: "cross-origin request rejected" };
+      return c.req.path.startsWith("/my/api") ? c.json(msg, 403) : c.text(msg.error, 403);
+    }
     const auth = await requireAuth(c.req.raw);
     if (auth.ok) {
       await next();
