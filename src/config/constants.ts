@@ -19,5 +19,7 @@ export const APP_NAME = "use-code-cli";
 /** Route-to-route redirects served by the runner. */
 export const REDIRECTS: Record<string, string> = {
   "/": "/help",
+  "/my": "/help",
+  "/my/": "/help",
   "/login": "/passkey",
 };
