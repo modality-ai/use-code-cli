@@ -20,6 +20,5 @@ export const APP_NAME = "use-code-cli";
 export const REDIRECTS: Record<string, string> = {
   "/": "/help",
   "/my": "/help",
-  "/my/": "/help",
   "/login": "/passkey",
 };

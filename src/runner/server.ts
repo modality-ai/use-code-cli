@@ -140,9 +140,19 @@ export function start(options: StartOptions = {}): ReturnType<typeof Bun.serve> 
   }
 
   // Configurable redirects (see src/config/constants.ts REDIRECTS).
+  const registeredWildcards = new Set<string>();
   for (const [from, to] of Object.entries(REDIRECTS)) {
-    if (from === "/" && pageRoutes.has("/")) continue;
     app.get(from, (c) => c.redirect(to));
+    // A directory redirect also covers everything beneath it — but only when the
+    // source actually has child routes/pages (so we don't turn a simple
+    // redirect like /login -> /passkey into a catch-all /login/* -> /passkey).
+    const base = from.replace(/\/+$/, "");
+    const hasChildPages = [...pageRoutes.keys()].some((r) => r.startsWith(`${base}/`));
+    const wildcard = `${base}/*`;
+    if (from !== "/" && !from.includes("*") && hasChildPages && !registeredWildcards.has(wildcard)) {
+      registeredWildcards.add(wildcard);
+      app.get(wildcard, (c) => c.redirect(to));
+    }
   }
 
   app.notFound((c) => c.json({ success: false, error: "not found" }, 404));
