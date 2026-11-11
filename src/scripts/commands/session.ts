@@ -13,6 +13,7 @@ import {
   deleteSession,
   readTranscriptMeta,
   sessionLabel as label,
+  pauseSessionResult,
   setSessionName,
   transcriptPath,
   transcriptProjectCwd,
@@ -43,6 +44,13 @@ const SessionArgsSchema = z.object({
     .optional()
     .default(false)
     .describe("Kill the target session's process (online sessions only)"),
+  pause: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      "Interrupt (SIGINT) the target session's active turn without killing it — like Ctrl+C (online sessions only)",
+    ),
   delete: z
     .boolean()
     .optional()
@@ -244,6 +252,9 @@ async function session(args: SessionArgs) {
     return { success: true, message: lines.join("\n"), data: { sessionId: s.sessionId, deleted: true } };
   }
 
+  // Pause mode: interrupt the session's active turn (SIGINT) without killing it.
+  if (args.pause) return pauseSessionResult(s);
+
   // Stop mode: kill the session's process.
   if (args.stop) {
     if (!s.online) {
@@ -344,14 +355,15 @@ async function session(args: SessionArgs) {
 
 export const sessionCommand: CLICommand = {
   name: "session",
-  description: "Show one session's workspace, hero, cron jobs, and how to talk to it; --stop kills an active session",
+  description: "Show one session's workspace, hero, cron jobs, and how to talk to it; --pause interrupts the active turn, --stop kills the session",
   inputSchema: SessionArgsSchema,
   positionalKeys: ["target"],
   execute: session,
   examples: [
-    "use-code-cli session 49606 --json",
-    "use-code-cli session use-design-05 --rename fix-auth",
-    "use-code-cli session po-use-island --cwd /Volumes/GoldenSnake/git/use-island",
-    "use-code-cli session use-design-05 --stop",
+    "use-code-cli session 12345 --json",
+    "use-code-cli session design-tool-05 --rename fix-auth",
+    "use-code-cli session po-my-project --cwd /home/user/workspace/my-project",
+    "use-code-cli session design-tool-05 --stop",
+    "use-code-cli session 123e4567-e89b-42d3-a456-426614174000 --pause",
   ],
 };

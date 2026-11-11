@@ -1,6 +1,7 @@
-import { readSessions, findSessions, type SessionInfo } from "../../../../../lib/sessions";
+import { readSessions, findSessionsFuzzy, type SessionInfo } from "../../../../../lib/sessions";
 import { readJsonBody } from "../../../../../lib/web/request";
 import { pickBestSession, sessionStatusRank } from "../../../session/[name]/session-data";
+import { aiTool } from "../../../../../scripts/index";
 
 // Bounded wait for the session to actually return to idle after SIGINT.
 const PAUSE_VERIFY_TIMEOUT_MS = 3000;
@@ -18,10 +19,10 @@ export function hasReturnedToIdle(
 
 async function resolveSession(name: string): Promise<SessionInfo | null> {
   let all = await readSessions(false);
-  let matches = findSessions(all, name);
+  let matches = findSessionsFuzzy(all, name);
   if (matches.length === 0) {
     all = await readSessions(true);
-    matches = findSessions(all, name);
+    matches = findSessionsFuzzy(all, name);
   }
   return matches.length === 0 ? null : pickBestSession(matches);
 }
@@ -35,13 +36,17 @@ export async function POST(request: Request): Promise<Response> {
   if (!s) return Response.json({ success: false, error: "session not found" }, { status: 404 });
   if (!s.online) return Response.json({ success: false, error: "session is offline; cannot stop it" }, { status: 409 });
 
-  // Interrupt the current turn (like Ctrl+C) without killing the session.
+  // Interrupt the current turn (like Ctrl+C) without killing the session,
+  // via the shared `session --pause` command run in-process (no subprocess).
   // SIGINT is the standard interrupt signal; the session process handles it by
   // pausing the active work and returning to idle. We never SIGTERM/SIGKILL here.
-  try {
-    process.kill(s.pid, "SIGINT");
-  } catch (e) {
-    return Response.json({ success: false, error: String(e) }, { status: 500 });
+  const result = (await aiTool.execute({ command: "session", target: name, pause: true })) as {
+    success?: boolean;
+    message?: string;
+    data?: { pid?: number; name?: string };
+  };
+  if (!result?.success) {
+    return Response.json({ success: false, error: result?.message || "pause failed" }, { status: 500 });
   }
 
   // Verify instead of assuming: poll the session until it reports it left its
@@ -53,5 +58,11 @@ export async function POST(request: Request): Promise<Response> {
     current = await resolveSession(name);
   }
   const paused = hasReturnedToIdle(current);
-  return Response.json({ success: true, paused, pid: s.pid, name: s.name ?? name, status: current?.status || "idle" });
+  return Response.json({
+    success: true,
+    paused,
+    pid: result.data?.pid ?? s.pid,
+    name: result.data?.name ?? s.name ?? name,
+    status: current?.status || "idle",
+  });
 }

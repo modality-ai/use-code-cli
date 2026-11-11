@@ -20,17 +20,32 @@ export default function ChatInput({ chatOpen, chatRef, chatStatus, sending, busy
           type="text"
           className="flex-1 min-w-0 w-full px-3 py-2 rounded-sm border border-border bg-surface text-text-primary"
           placeholder="Send a message to this session..."
+          aria-label="Send a message to this session"
           onKeyDown={(ev) => {
             if (ev.key === "Enter") onSend();
           }}
         />
         {busy ? (
-          <button id="chat-stop" className="shrink-0 px-3 py-2 rounded-sm border border-border bg-surface text-text-primary cursor-pointer" onClick={onStop} disabled={sending}>Stop</button>
+          <button
+            id="chat-pause"
+            type="button"
+            className="shrink-0 px-3 py-2 rounded-sm border border-border bg-surface text-text-primary cursor-pointer"
+            onClick={onStop}
+            disabled={sending}
+            aria-label="Pause the session's active turn"
+          >⏸️</button>
         ) : (
-          <button id="chat-send" className="shrink-0 px-3 py-2 rounded-sm border border-border bg-surface text-text-primary cursor-pointer" onClick={onSend} disabled={sending}>Send</button>
+          <button
+            id="chat-send"
+            type="button"
+            className="shrink-0 px-3 py-2 rounded-sm border border-border bg-surface text-text-primary cursor-pointer"
+            onClick={onSend}
+            disabled={sending}
+            aria-label="Send message to the session"
+          >▶️</button>
         )}
       </div>
-      <div id="chat-status" className="text-xs text-text-muted mt-1">{chatStatus}</div>
+      <div id="chat-status" role="status" aria-live="polite" className="text-xs text-text-muted mt-1">{chatStatus}</div>
     </>
   );
 }

@@ -305,6 +305,52 @@ export function findSessions(sessions: SessionInfo[], target: string): SessionIn
   return sessions.filter((s) => s.name?.startsWith(target));
 }
 
+/**
+ * Forgiving variant for web page URLs: same exact/prefix matching, but when
+ * nothing matched it falls back to a case-insensitive substring match on the
+ * name. A session's URL slug goes stale when it is auto-titled later (e.g.
+ * /my/session/use-code-cli-d3 → "Pause button on use-code-cli-d3"); callers
+ * disambiguate multiple hits with pickBestSession.
+ */
+export function findSessionsFuzzy(sessions: SessionInfo[], target: string): SessionInfo[] {
+  const matches = findSessions(sessions, target);
+  if (matches.length > 0 || !target) return matches;
+  const lower = target.toLowerCase();
+  return sessions.filter((s) => (s.name ?? "").toLowerCase().includes(lower));
+}
+
+/**
+ * Pause decision for a resolved session: report the offline guard, send
+ * SIGINT (interrupt the active turn, never kill), and shape the result.
+ * `kill` is injectable so tests can stub signal delivery.
+ */
+export function pauseSessionResult(
+  s: SessionInfo,
+  kill: (pid: number, signal: NodeJS.Signals) => void = process.kill,
+): { success: boolean; message: string; data?: Record<string, unknown> } {
+  if (!s.online) {
+    return {
+      success: false,
+      message: `Session ${sessionLabel(s)} is offline; nothing to pause. (Only active sessions can be paused.)`,
+    };
+  }
+  try {
+    kill(s.pid, "SIGINT");
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    // EPERM etc. — fall back to reporting.
+    return {
+      success: false,
+      message: `Could not pause session ${sessionLabel(s)} (pid ${s.pid}): ${reason}.`,
+    };
+  }
+  return {
+    success: true,
+    message: `Sent interrupt to session ${sessionLabel(s)} (pid ${s.pid}) — its active turn should pause and return to idle.`,
+    data: { sessionId: s.sessionId, pid: s.pid, name: sessionLabel(s), pause: "sent" },
+  };
+}
+
 function isAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);

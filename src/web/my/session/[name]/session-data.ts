@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { findSessions, readSessions } from "../../../../lib/sessions";
+import { findSessionsFuzzy, readSessions } from "../../../../lib/sessions";
 import { parseTranscript } from "../../../../lib/transcript";
 import { aiTool } from "../../../../scripts/index";
 
@@ -62,10 +62,10 @@ export async function resolveSessionTarget(name: string): Promise<string | null>
   // Prefer the cheap live-only read; fall back to the full offline scan only
   // when no live session matches (avoids the ~2s cost on the hot path).
   let all = await readSessions(false);
-  let matches = findSessions(all, name);
+  let matches = findSessionsFuzzy(all, name);
   if (matches.length === 0) {
     all = await readSessions(true);
-    matches = findSessions(all, name);
+    matches = findSessionsFuzzy(all, name);
   }
   if (matches.length === 0) return null;
   const pick = pickBestSession(matches);
@@ -99,10 +99,10 @@ export async function fetchSessionData(name: string, options?: { includeEntries?
   if (!includeEntries) {
     const libs = await import("../../../../lib/sessions");
     let all = await libs.readSessions(false);
-    let matches = libs.findSessions(all, name);
+    let matches = libs.findSessionsFuzzy(all, name);
     if (matches.length === 0) {
       all = await libs.readSessions(true);
-      matches = libs.findSessions(all, name);
+      matches = libs.findSessionsFuzzy(all, name);
     }
     const s = pickBestSession(matches);
     if (!s) return { success: false, error: "session not found" };

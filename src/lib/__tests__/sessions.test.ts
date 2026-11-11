@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { applySessionNames, splitFilterTerms, matchesSessionFilter, describeSessionFilter, sessionLabel, findSessions, encodeProjectDir, parseTranscriptSessionName, trimValue, compressTranscript } from "../sessions";
+import { applySessionNames, splitFilterTerms, matchesSessionFilter, describeSessionFilter, sessionLabel, findSessions, findSessionsFuzzy, pauseSessionResult, encodeProjectDir, parseTranscriptSessionName, trimValue, compressTranscript } from "../sessions";
 
 describe("applySessionNames", () => {
   it("pins the custom name and marks nameSource=user when a registry entry exists", () => {
@@ -123,6 +123,77 @@ describe("findSessions", () => {
   });
   it("returns empty when no match", () => {
     expect(findSessions(sessions, "zzz")).toEqual([]);
+  });
+});
+
+describe("findSessionsFuzzy", () => {
+  const sessions = [
+    { sessionId: "s1", name: "alpha", pid: 10 } as any,
+    { sessionId: "s2", name: "Pause button on alpha", pid: 20 } as any,
+  ];
+  it("still matches exactly and by prefix like findSessions", () => {
+    expect(findSessionsFuzzy(sessions, "s1").map((x: any) => x.sessionId)).toEqual(["s1"]);
+    expect(findSessionsFuzzy(sessions, "alp").map((x: any) => x.sessionId)).toEqual(["s1"]);
+  });
+  it("falls back to substring match when the slug went stale after a rename", () => {
+    expect(findSessionsFuzzy(sessions, "on alpha").map((x: any) => x.sessionId)).toEqual(["s2"]);
+  });
+  it("matches case-insensitively", () => {
+    expect(findSessionsFuzzy(sessions, "pause button").map((x: any) => x.sessionId)).toEqual(["s2"]);
+  });
+  it("returns empty when nothing matches", () => {
+    expect(findSessionsFuzzy(sessions, "zzz")).toEqual([]);
+  });
+  it("returns multiple substring hits for callers to disambiguate", () => {
+    const many = [
+      { sessionId: "a", name: "Pause button on one", pid: 1 } as any,
+      { sessionId: "b", name: "Pause button on two", pid: 2 } as any,
+    ];
+    expect(findSessionsFuzzy(many, "pause button").map((x: any) => x.sessionId)).toEqual(["a", "b"]);
+  });
+  it("returns all named sessions for an empty target", () => {
+    expect(findSessionsFuzzy(sessions, "").map((x: any) => x.sessionId)).toEqual(["s1", "s2"]);
+  });
+});
+
+describe("pauseSessionResult", () => {
+  it("refuses to signal an offline session", () => {
+    const s = { sessionId: "s1", name: "alpha", pid: 10, online: false } as any;
+    const out = pauseSessionResult(s);
+    expect(out.success).toBe(false);
+    expect(out.message).toBe(
+      "Session alpha is offline; nothing to pause. (Only active sessions can be paused.)",
+    );
+  });
+
+  it("reports the failure when the interrupt cannot be delivered", () => {
+    const s = { sessionId: "s1", name: "alpha", pid: 10, online: true } as any;
+    const out = pauseSessionResult(s, () => {
+      throw new Error("EPERM");
+    });
+    expect(out.success).toBe(false);
+    expect(out.message).toBe("Could not pause session alpha (pid 10): EPERM.");
+  });
+
+  it("falls back to the raw error string for non-Error throws", () => {
+    const s = { sessionId: "s1", name: "alpha", pid: 10, online: true } as any;
+    const out = pauseSessionResult(s, () => {
+      throw "boom";
+    });
+    expect(out.success).toBe(false);
+    expect(out.message).toBe("Could not pause session alpha (pid 10): boom.");
+  });
+
+  it("sends SIGINT to the live pid and reports the pause", () => {
+    const s = { sessionId: "s1", name: "alpha", pid: 10, online: true } as any;
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const out = pauseSessionResult(s, (pid, signal) => signals.push({ pid, signal }));
+    expect(signals).toEqual([{ pid: 10, signal: "SIGINT" }]);
+    expect(out.success).toBe(true);
+    expect(out.message).toBe(
+      "Sent interrupt to session alpha (pid 10) — its active turn should pause and return to idle.",
+    );
+    expect(out.data).toEqual({ sessionId: "s1", pid: 10, name: "alpha", pause: "sent" });
   });
 });
 
