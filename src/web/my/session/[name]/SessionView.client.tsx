@@ -412,7 +412,7 @@ export default function SessionView(props: BootProps) {
     <div>
       <div className="flex items-center gap-3 mb-md">
         <a href="/my/sessions" className="text-xs text-accent-collaboration hover:underline">← Back to sessions</a>
-        <h1 className="text-2xl font-semibold font-display">{name || "Session"}</h1>
+        <h1 className="text-2xl font-semibold font-display">{(initial?.data?.name as string | undefined) || name || "Session"}</h1>
       </div>
       <div id="transcript" ref={scrollRef} className="border border-border rounded-sm p-3 bg-surface font-code text-sm max-h-2/3 overflow-auto">
         <div
