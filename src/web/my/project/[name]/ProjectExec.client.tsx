@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
+import { useState } from "react";
+import { stripAnsi } from "modality-cli-kit/strip-ansi";
 import "../../../../lib/web/react-data";
 
 export interface ProjectExecProps {
@@ -168,7 +169,7 @@ export default function ProjectExec({ name: initialName }: ProjectExecProps) {
       {error && <div className="text-red-500 text-sm mb-sm">{error}</div>}
       {output !== null && (
         <pre className="border border-border rounded-sm p-3 bg-surface font-code text-sm overflow-auto max-h-96 whitespace-pre-wrap">
-          {output}
+          {stripAnsi(output)}
         </pre>
       )}
     </div>

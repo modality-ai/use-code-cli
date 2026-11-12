@@ -1,13 +1,7 @@
 // Shared helpers for extracting a login URL from Claude Code's streamed output.
 // Kept in a separate module so they can be unit-tested without rendering React.
 
-// Strip ANSI/OSC escape sequences (including terminal hyperlink escapes).
-export function stripAnsi(s: string): string {
-  return s
-    // OSC sequences terminate with BEL (\x07) or ST (ESC \)
-    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
-    .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
-}
+import { stripAnsi } from "modality-cli-kit/strip-ansi";
 
 // Strip trailing punctuation that commonly trails a URL in prose.
 function trimTrailingPunctuation(url: string): string {

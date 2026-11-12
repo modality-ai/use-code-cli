@@ -1,4 +1,5 @@
 import React from "react";
+import { renderToString } from "react-dom/server";
 import { readFileSync } from "node:fs";
 
 export interface RootLayoutProps {
@@ -37,4 +38,11 @@ export default function RootLayout({ children, title = "use-code-cli", cssHref }
       </body>
     </html>
   );
+}
+
+// Full HTML document render including the DOCTYPE declaration.
+// React components cannot emit a top-level <!DOCTYPE html>, so the
+// document shell (including doctype) is owned here in layout.tsx.
+export function renderDocument({ title, children, cssHref }: RootLayoutProps): string {
+  return `<!DOCTYPE html>\n${renderToString(React.createElement(RootLayout, { title, children, cssHref }))}`;
 }

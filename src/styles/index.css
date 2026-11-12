@@ -21,6 +21,8 @@
   --spacing-lg: 24px;
   --spacing-xl: 32px;
   --spacing-section: 64px;
+  --max-height-transcript: 66.67vh;
+  --max-height-pinned: 50vh;
 }
 
 @media (prefers-color-scheme: dark) {

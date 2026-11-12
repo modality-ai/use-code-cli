@@ -1,4 +1,4 @@
-import { setupCommandExportValidation } from "modality-cli-kit";
+import { setupCommandExportValidation } from "modality-cli-kit/testing";
 
 // Every command module must export exactly one item: its `xxxCommand`.
 // The command object's `execute` is the single entry point — see the suite

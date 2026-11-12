@@ -5,9 +5,9 @@ import { Hono } from "hono";
 import { staticHandler } from "./static";
 import { APP_NAME, REDIRECTS } from "../config/constants";
 import { isCsrfSafe, requireAuth } from "../lib/web/auth";
+import { initTunnel } from "../lib/tunnel";
 import React from "react";
-import { renderToString } from "react-dom/server";
-import RootLayout from "../web/layout";
+import RootLayout, { renderDocument } from "../web/layout";
 
 export function routeSegment(name: string): string {
   return /^\[(.*)\]$/.test(name) ? `:${name.slice(1, -1)}` : name;
@@ -121,7 +121,7 @@ export function start(options: StartOptions = {}): ReturnType<typeof Bun.serve> 
       const data = await loadData({ params, name: params.name, request: c.req.raw });
       const pageEl = React.createElement(Page, data || {});
       const title = pageTitle(route, params);
-      const baseHtml = renderToString(React.createElement(RootLayout, { title, children: pageEl }));
+      const baseHtml = renderDocument({ title, children: pageEl });
       let html = baseHtml;
       if (clientScript) {
         const script = clientScript(data);
@@ -166,6 +166,8 @@ export function start(options: StartOptions = {}): ReturnType<typeof Bun.serve> 
     idleTimeout: 255,
   });
   console.log(`${APP_NAME} server listening on http://${host}:${port}`);
+  // Bootstrap tunnel recovery/auto-reconnect state without requiring a web request.
+  void initTunnel();
   return server;
 }
 

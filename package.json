@@ -20,22 +20,22 @@
     "@simplewebauthn/server": "^14.1.0",
     "@tailwindcss/typography": "^0.5.20",
     "diff": "^9.0.0",
-    "modality-cli-kit": "^0.16.1",
+    "modality-cli-kit": "^0.17.1",
     "modality-mcp-kit": "^2.1.0",
     "reshow-flux-base": "^1.1.13",
     "reshow-unit": "^0.19.3",
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@modality-counter/core": "^2.8.0",
-    "@tailwindcss/cli": "^4.3.4",
+    "@modality-counter/core": "^2.9.3",
+    "@tailwindcss/cli": "^4.3.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "happy-dom": "^21.0.4",
     "modality-bun-kit": "^1.4.4",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "tailwindcss": "^4.3.4"
+    "tailwindcss": "^4.3.5"
   },
   "exports": {
     "types": "./types/index.d.ts",

@@ -414,7 +414,7 @@ export default function SessionView(props: BootProps) {
         <a href="/my/sessions" className="text-xs text-accent-collaboration hover:underline">← Back to sessions</a>
         <h1 className="text-2xl font-semibold font-display">{(initial?.data?.name as string | undefined) || name || "Session"}</h1>
       </div>
-      <div id="transcript" ref={scrollRef} className="border border-border rounded-sm p-3 bg-surface font-code text-sm max-h-2/3 overflow-auto">
+      <div id="transcript" ref={scrollRef} className="border border-border rounded-sm p-3 bg-surface font-code text-sm max-h-transcript overflow-auto">
         <div
           id="context-bar"
           className="sticky -top-3 z-10 flex items-baseline gap-2 h-8 bg-surface text-sm cursor-pointer shadow-md"
@@ -427,7 +427,7 @@ export default function SessionView(props: BootProps) {
             /* Absolute overlay under the chip: opening never reflows the
                transcript, so the scroll position stays exactly where it is. */
             <div
-              className="absolute left-0 right-0 top-full z-20 mt-1 max-h-1/2 overflow-auto border border-border rounded-sm bg-surface p-3 shadow-md"
+              className="absolute left-0 right-0 top-full z-20 mt-1 max-h-pinned overflow-auto border border-border rounded-sm bg-surface p-3 shadow-md"
               onClick={(ev) => ev.stopPropagation()}
             >
               <div className="mb-1 text-xs text-text-muted uppercase tracking-wide">pinned message</div>

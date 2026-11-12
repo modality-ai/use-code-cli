@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { stripAnsi, parseLoginUrl } from "../login-url";
+import { parseLoginUrl } from "../login-url";
+import { stripAnsi } from "modality-cli-kit/strip-ansi";
 
 describe("stripAnsi", () => {
   it("returns input unchanged when no escapes", () => {
