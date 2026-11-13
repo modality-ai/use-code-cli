@@ -13,7 +13,7 @@ export interface ChatInputProps {
 export default function ChatInput({ chatOpen, chatRef, chatStatus, sending, busy, onSend, onStop }: ChatInputProps) {
   return (
     <>
-      <div className="flex gap-2 mt-3 w-full" style={{ display: chatOpen ? "flex" : "none" }}>
+      <div className={(chatOpen ? "flex" : "hidden") + " gap-2 w-full"} role="group" aria-label="Chat input">
         <input
           id="chat-input"
           ref={chatRef}
@@ -21,6 +21,7 @@ export default function ChatInput({ chatOpen, chatRef, chatStatus, sending, busy
           className="flex-1 min-w-0 w-full px-3 py-2 rounded-sm border border-border bg-surface text-text-primary"
           placeholder="Send a message to this session..."
           aria-label="Send a message to this session"
+          aria-describedby="chat-status"
           onKeyDown={(ev) => {
             if (ev.key === "Enter") onSend();
           }}

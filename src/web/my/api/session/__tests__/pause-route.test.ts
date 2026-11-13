@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { hasReturnedToIdle } from "../stop/route";
+import { hasReturnedToIdle } from "../pause/route";
 
 describe("hasReturnedToIdle", () => {
   it("returns true when the session is gone or offline", () => {

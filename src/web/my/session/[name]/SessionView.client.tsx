@@ -211,6 +211,8 @@ export default function SessionView(props: BootProps) {
   const [reconnecting, setReconnecting] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const bottomBarRef = useRef<HTMLDivElement>(null);
   const chatRef = useRef<HTMLInputElement>(null);
   const autoscrollRef = useRef<HTMLInputElement>(null);
   const [bar, setBar] = useState<BarState>(null);
@@ -298,9 +300,32 @@ export default function SessionView(props: BootProps) {
   useEffect(() => {
     const root = scrollRef.current;
     const onScroll = () => setBar((b) => updateBar(root, entriesRef.current, b));
-    root?.addEventListener("scroll", onScroll, { passive: true });
-    return () => root?.removeEventListener("scroll", onScroll);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Keep page content from being hidden behind the fixed bottom bar: measure
+  // the bar's rendered height and apply it as bottom padding to the content.
+  useEffect(() => {
+    const bar = bottomBarRef.current;
+    const content = contentRef.current;
+    if (!bar || !content) return;
+    const apply = () => {
+      content.style.paddingBottom = `${bar.offsetHeight + 8}px`;
+    };
+    apply();
+    if (typeof ResizeObserver !== "undefined") {
+      const ro = new ResizeObserver(apply);
+      ro.observe(bar);
+      // store for cleanup via closure
+      (content as any)._ro = ro;
+    }
+    window.addEventListener("resize", apply);
+    return () => {
+      if ((content as any)._ro) (content as any)._ro.disconnect();
+      window.removeEventListener("resize", apply);
+    };
   }, []);
 
   // First paint catch-up (SSE pushes full entries on connect too).
@@ -328,17 +353,11 @@ export default function SessionView(props: BootProps) {
     const sc = autoscrollRef.current;
     if (!root) return;
     if (sc?.checked) {
-      root.scrollTo({ top: root.scrollHeight });
+      window.scrollTo({ top: document.documentElement.scrollHeight });
       return;
     }
-    // Compute the bar fresh (barRef.current is stale on this entries change)
-    // so the re-anchor reflects the bar that will actually be painted.
-    const barNow = updateBar(root, entries, barRef.current);
-    if (!barNow) return;
-    const next = root.querySelectorAll(".entry").item(barNow.index + 1) as HTMLElement | null;
-    if (!next) return;
-    const delta = next.getBoundingClientRect().top - root.getBoundingClientRect().top - (parseFloat(getComputedStyle(root).paddingTop) || 0) - BAR_BAND;
-    if (delta > 0.5) root.scrollTop += delta;
+    // When not auto-scrolling, leave the viewport where it is (the page, not an
+    // inner container, now owns scrolling).
   }, [entries]);
 
   const stateText = reconnecting
@@ -379,7 +398,7 @@ export default function SessionView(props: BootProps) {
     setStopping(true);
     setChatStatus("stopping...");
     try {
-      const r = await fetch("/my/api/session/stop", {
+      const r = await fetch("/my/api/session/pause", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name }),
@@ -409,12 +428,12 @@ export default function SessionView(props: BootProps) {
   const barEntry: Entry | undefined = bar && barOpen === bar.index ? entries[bar.index] : undefined;
 
   return (
-    <div>
+    <div ref={contentRef}>
       <div className="flex items-center gap-3 mb-md">
         <a href="/my/sessions" className="text-xs text-accent-collaboration hover:underline">← Back to sessions</a>
         <h1 className="text-2xl font-semibold font-display">{(initial?.data?.name as string | undefined) || name || "Session"}</h1>
       </div>
-      <div id="transcript" ref={scrollRef} className="border border-border rounded-sm p-3 bg-surface font-code text-sm max-h-transcript overflow-auto">
+      <div id="transcript" ref={scrollRef} className="border border-border rounded-sm p-3 bg-surface font-code text-sm">
         <div
           id="context-bar"
           className="sticky -top-3 z-10 flex items-baseline gap-2 h-8 bg-surface text-sm cursor-pointer shadow-md"
@@ -441,7 +460,8 @@ export default function SessionView(props: BootProps) {
           entries.map((e, i) => <Entry key={i} e={e} sessionName={name} />)
         )}
       </div>
-      <div className="flex items-center gap-2 mt-2">
+      <div ref={bottomBarRef} className="flex flex-col gap-2 fixed bottom-0 left-0 right-0 z-20 bg-surface p-2" role="region" aria-label="Session controls">
+        <div className="flex items-center gap-2" role="toolbar" aria-label="Session scroll controls">
         <label className="flex items-center gap-1 text-xs text-text-muted cursor-pointer">
           <input
             id="autoscroll"
@@ -459,21 +479,23 @@ export default function SessionView(props: BootProps) {
         <button
           type="button"
           id="scroll-top"
+          aria-label="Scroll to top"
           className="text-xs text-text-muted border border-border rounded-sm px-2 py-0.5 cursor-pointer"
-          onClick={() => scrollRef.current && (scrollRef.current.scrollTop = 0)}
+          onClick={() => window.scrollTo({ top: 0 })}
         >
           ↑ Top
         </button>
         <button
           type="button"
           id="scroll-bottom"
+          aria-label="Scroll to bottom"
           className="text-xs text-text-muted border border-border rounded-sm px-2 py-0.5 cursor-pointer"
-          onClick={() => scrollRef.current && (scrollRef.current.scrollTop = scrollRef.current.scrollHeight)}
+          onClick={() => window.scrollTo({ top: document.documentElement.scrollHeight })}
         >
           ↓ Bottom
         </button>
-        <span id="session-state" className="text-xs text-text-muted ml-auto">{stateText}</span>
-      </div>
+        <span id="session-state" role="status" aria-live="polite" className="text-xs text-text-muted ml-auto">{stateText}</span>
+        </div>
       <ChatInput
         chatOpen={chatOpen}
         chatRef={chatRef}
@@ -483,6 +505,7 @@ export default function SessionView(props: BootProps) {
         onSend={send}
         onStop={stop}
       />
+    </div>
     </div>
   );
 }

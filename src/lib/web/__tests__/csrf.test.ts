@@ -3,7 +3,7 @@ import { isCsrfSafe } from "../auth";
 
 describe("isCsrfSafe", () => {
   it("allows requests with no Origin header (non-browser clients)", () => {
-    expect(isCsrfSafe(null, "http://127.0.0.1:3000/my/api/session/stop")).toBe(true);
+    expect(isCsrfSafe(null, "http://127.0.0.1:3000/my/api/session/pause")).toBe(true);
   });
 
   it("allows same-origin requests", () => {
@@ -12,7 +12,7 @@ describe("isCsrfSafe", () => {
   });
 
   it("rejects cross-origin requests", () => {
-    expect(isCsrfSafe("https://evil.example.com", "http://127.0.0.1:3000/my/api/session/stop")).toBe(false);
+    expect(isCsrfSafe("https://evil.example.com", "http://127.0.0.1:3000/my/api/session/pause")).toBe(false);
   });
 
   it("rejects garbage Origin values", () => {
