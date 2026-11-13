@@ -27,6 +27,8 @@ export default function ProjectsApp({ initial }: { initial?: Project[] }) {
   return (
     <div>
       <div className="flex items-center gap-2 mb-md">
+        <a href="/" className="text-xs text-accent-collaboration hover:underline">Home</a>
+        <span className="text-text-muted">/</span>
         <h1 className="text-2xl font-semibold font-display">Projects</h1>
       </div>
       {rows.map((p, i) => (

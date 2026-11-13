@@ -74,6 +74,8 @@ export default function SessionsApp({ initial }: { initial?: Session[] }) {
   return (
     <div>
       <div className="flex items-center gap-2 mb-md">
+        <a href="/" className="text-xs text-accent-collaboration hover:underline">Home</a>
+        <span className="text-text-muted">/</span>
         <h1 className="text-2xl font-semibold font-display">Sessions</h1>
         {lastUpdated > 0 && (
           <span className="text-xs text-text-muted font-mono tabular-nums min-w-36 inline-block text-left">
