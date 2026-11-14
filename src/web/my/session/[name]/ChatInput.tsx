@@ -2,28 +2,36 @@ import React from "react";
 
 export interface ChatInputProps {
   chatOpen: boolean;
-  chatRef: React.RefObject<HTMLInputElement | null>;
+  chatRef: React.RefObject<HTMLTextAreaElement | null>;
   chatStatus: string;
   sending: boolean;
   busy: boolean;
   onSend: () => void;
   onPause: () => void;
+  onResume: () => void;
 }
 
-export default function ChatInput({ chatOpen, chatRef, chatStatus, sending, busy, onSend, onPause }: ChatInputProps) {
+export default function ChatInput({ chatOpen, chatRef, chatStatus, sending, busy, onSend, onPause, onResume }: ChatInputProps) {
   return (
     <>
       <div className={(chatOpen ? "flex" : "hidden") + " gap-2 w-full"} role="group" aria-label="Chat input">
-        <input
+        <textarea
           id="chat-input"
           ref={chatRef}
-          type="text"
-          className="flex-1 min-w-0 w-full px-3 py-2 rounded-sm border border-border bg-surface text-text-primary"
+          className="flex-1 min-w-0 w-full px-3 py-2 rounded-sm border border-border bg-surface text-text-primary resize-none"
           placeholder="Send a message to this session..."
           aria-label="Send a message to this session"
           aria-describedby="chat-status"
-          onKeyDown={(ev) => {
-            if (ev.key === "Enter") onSend();
+          rows={1}
+          onKeyDown={(e) => {
+            const isTouchDevice =
+              typeof navigator !== "undefined" &&
+              typeof window !== "undefined" &&
+              (navigator.maxTouchPoints > 0 || "ontouchstart" in window);
+            if (e.key === "Enter" && !e.shiftKey && !isTouchDevice) {
+              e.preventDefault();
+              if (!sending) onSend();
+            }
           }}
         />
         {busy ? (
@@ -45,6 +53,14 @@ export default function ChatInput({ chatOpen, chatRef, chatStatus, sending, busy
             aria-label="Send message to the session"
           >▶️</button>
         )}
+        <button
+          id="chat-resume"
+          type="button"
+          className="shrink-0 px-3 py-2 rounded-sm border border-border bg-surface text-text-primary cursor-pointer"
+          onClick={onResume}
+          disabled={sending}
+          aria-label="Resume the session (SIGCONT)"
+        >▶️</button>
       </div>
       <div id="chat-status" role="status" aria-live="polite" className="text-xs text-text-muted mt-1">{chatStatus}</div>
     </>

@@ -37,6 +37,7 @@ export default function SessionsApp({ initial }: { initial?: Session[] }) {
   const [error, setError] = useState<string | null>(null);
   // 0 until the first live tick: keeps markup deterministic across SSR and hydration.
   const [lastUpdated, setLastUpdated] = useState(0);
+  const [stopping, setStopping] = useState<string | null>(null);
 
   useEffect(() => {
     let es: EventSource | null = null;
@@ -68,6 +69,23 @@ export default function SessionsApp({ initial }: { initial?: Session[] }) {
     };
   }, []);
 
+  const stopSession = async (s: Session) => {
+    const name = String(s.sessionId || s.name || "").trim();
+    if (!name || stopping) return;
+    setStopping(name);
+    try {
+      await fetch("/my/api/session/stop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+    } catch {
+      // ignore; SSE refresh will reflect state
+    } finally {
+      setStopping(null);
+    }
+  };
+
   const rows = Array.isArray(sessions) ? sessions : [];
   if (error) return <p className="text-text-primary">Error: {error}</p>;
   if (rows.length === 0) return <p className="text-text-muted">No active sessions.</p>;
@@ -91,8 +109,21 @@ export default function SessionsApp({ initial }: { initial?: Session[] }) {
           >
             {s.name || s.sessionId}
           </a>
-          <div className="font-code text-sm text-text-muted">
-            {(s.hero || "-") + " · " + (s.status || "-")}
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-code text-sm text-text-muted">
+              {(s.hero || "-") + " · " + (s.status || "-")}
+            </span>
+            <button
+              type="button"
+              className="px-3 py-1 rounded-sm border border-border bg-surface text-text-primary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={() => stopSession(s)}
+              disabled={stopping === (s.sessionId || s.name)}
+              aria-label="Stop the session"
+              aria-busy={stopping === (s.sessionId || s.name)}
+            >
+              {stopping === (s.sessionId || s.name) ? "Stopping…" : "Stop"}
+              {stopping === (s.sessionId || s.name) && <span className="sr-only">Stop...</span>}
+            </button>
           </div>
           <div className="text-text-muted">{s.cwd || "-"}</div>
           <div>{cleanPrompt(s.lastPrompt || "")}</div>

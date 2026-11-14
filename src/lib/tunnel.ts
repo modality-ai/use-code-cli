@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync, unlinkSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -32,7 +32,12 @@ export function reconnectDelay(attempt: number): number {
 const sessions = new Map<string, TunnelSession>();
 let tunnelUrl: string | null = null;
 let activeProc: Bun.Subprocess<"ignore", "pipe", "pipe"> | null = null;
-const TUNNEL_STATE_FILE = join(homedir(), ".use-code-cli-tunnel.json");
+function tunnelStateDir(): string {
+  return join(process.env.HOME || homedir(), ".use-code-cli");
+}
+function tunnelStateFile(): string {
+  return join(tunnelStateDir(), "tunnel.json");
+}
 
 let autoReconnectEnabled = false;
 let manualStop = false;
@@ -42,16 +47,23 @@ const MAX_RECONNECT_ATTEMPTS = 10;
 
 function readPersistedUrl(): string | null {
   try {
-    if (!existsSync(TUNNEL_STATE_FILE)) return null;
-    const v = JSON.parse(readFileSync(TUNNEL_STATE_FILE, "utf8"));
+    const file = tunnelStateFile();
+    if (!existsSync(file)) return null;
+    const v = JSON.parse(readFileSync(file, "utf8"));
     return typeof v?.url === "string" ? v.url : null;
   } catch { return null; }
 }
 function writePersistedUrl(url: string) {
-  try { writeFileSync(TUNNEL_STATE_FILE, JSON.stringify({ url }), "utf8"); } catch {}
+  try {
+    mkdirSync(tunnelStateDir(), { recursive: true });
+    writeFileSync(tunnelStateFile(), JSON.stringify({ url }), "utf8");
+  } catch {}
 }
 function clearPersistedUrl() {
-  try { if (existsSync(TUNNEL_STATE_FILE)) unlinkSync(TUNNEL_STATE_FILE); } catch {}
+  try {
+    const file = tunnelStateFile();
+    if (existsSync(file)) unlinkSync(file);
+  } catch {}
 }
 async function isUrlAlive(url: string): Promise<boolean> {
   try {

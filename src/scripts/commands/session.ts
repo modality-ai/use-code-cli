@@ -20,7 +20,7 @@ import {
   type SessionCron,
   type SessionInfo,
 } from "../../lib/sessions";
-import { deliver, liveSessions, pauseSession } from "../../lib/peer";
+import { deliver, liveSessions, pauseSession, resumeSession } from "../../lib/peer";
 
 const SessionArgsSchema = z.object({
   target: z
@@ -50,6 +50,13 @@ const SessionArgsSchema = z.object({
     .default(false)
     .describe(
       "Freeze (SIGSTOP) the target session's process without killing it — the session stays alive; resume with SIGCONT (online sessions only)",
+    ),
+  resume: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      "Resume (SIGCONT) a frozen (SIGSTOP'd) target session's process (online sessions only)",
     ),
   delete: z
     .boolean()
@@ -284,6 +291,9 @@ async function session(args: SessionArgs) {
   // Pause mode: freeze the process (SIGSTOP) without killing the session.
   if (args.pause) return pauseSession(s);
 
+  // Resume mode: wake a frozen (SIGSTOP'd) process with SIGCONT.
+  if (args.resume) return resumeSession(s);
+
   // Stop mode: kill the session's process.
   if (args.stop) {
     if (!s.online) {
@@ -403,7 +413,7 @@ async function session(args: SessionArgs) {
 
 export const sessionCommand: CLICommand = {
   name: "session",
-  description: "Show one session's workspace, hero, cron jobs, and how to talk to it; --pause freezes the process (SIGSTOP), --stop kills the session",
+  description: "Show one session's workspace, hero, cron jobs, and how to talk to it; --pause freezes the process (SIGSTOP), --resume wakes it (SIGCONT), --stop kills the session",
   inputSchema: SessionArgsSchema,
   positionalKeys: ["target"],
   execute: session,

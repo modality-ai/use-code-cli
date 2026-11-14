@@ -45,7 +45,7 @@ describe("SessionView client", () => {
 
   it("shows sent status after clicking send", async () => {
     const { container } = render(<SessionView name="Debug --init" initial={{ success: true, data: { name: "Debug --init", entries: [], online: true, status: "idle" } } as any} />);
-    const input = container.querySelector("#chat-input") as HTMLInputElement;
+    const input = container.querySelector("#chat-input") as HTMLTextAreaElement;
     input.value = "hello";
     const btn = container.querySelector("#chat-send") as HTMLButtonElement;
     const { act } = await import("reshow-unit");

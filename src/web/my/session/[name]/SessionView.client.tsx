@@ -208,12 +208,13 @@ export default function SessionView(props: BootProps) {
   const [chatStatus, setChatStatus] = useState(""); // send progress + SSE errors
   const [sending, setSending] = useState(false);
   const [pausing, setPausing] = useState(false);
+  const [resuming, setResuming] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const bottomBarRef = useRef<HTMLDivElement>(null);
-  const chatRef = useRef<HTMLInputElement>(null);
+  const chatRef = useRef<HTMLTextAreaElement>(null);
   const autoscrollRef = useRef<HTMLInputElement>(null);
   const [bar, setBar] = useState<BarState>(null);
   const [barOpen, setBarOpen] = useState<number | null>(null);
@@ -425,6 +426,29 @@ export default function SessionView(props: BootProps) {
     }
   };
 
+  const resume = async () => {
+    if (resuming) return;
+    setResuming(true);
+    setChatStatus("resuming...");
+    try {
+      const r = await fetch("/my/api/session/resume", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const d = await r.json();
+      if (d?.success) {
+        setChatStatus("resumed");
+      } else {
+        setChatStatus("error: " + (d?.error || "failed"));
+      }
+    } catch (e) {
+      setChatStatus("error: " + String(e));
+    } finally {
+      setResuming(false);
+    }
+  };
+
   const barEntry: Entry | undefined = bar && barOpen === bar.index ? entries[bar.index] : undefined;
 
   return (
@@ -504,6 +528,7 @@ export default function SessionView(props: BootProps) {
         busy={meta.status === "busy"}
         onSend={send}
         onPause={pause}
+        onResume={resume}
       />
     </div>
     </div>

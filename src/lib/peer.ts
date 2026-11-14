@@ -184,7 +184,9 @@ export async function pauseSession(
     kill?: (pid: number, signal: NodeJS.Signals) => void;
   } = {},
 ): Promise<{ success: boolean; message: string; data?: Record<string, unknown> }> {
+  console.log("[pause] pauseSession: session=%s pid=%d online=%s", sessionLabel(s), s.pid, s.online);
   if (!s.online) {
+    console.log("[pause] offline guard: session offline, nothing to pause");
     return {
       success: false,
       message: `Session ${sessionLabel(s)} is offline; nothing to pause. (Only active sessions can be paused.)`,
@@ -192,7 +194,9 @@ export async function pauseSession(
   }
   const kill = deps.kill ?? ((pid, signal) => process.kill(pid, signal));
   try {
+    console.log("[pause] sending SIGSTOP to pid %d", s.pid);
     kill(s.pid, "SIGSTOP");
+    console.log("[pause] SIGSTOP delivered to pid %d", s.pid);
     return {
       success: true,
       message: `Paused session ${sessionLabel(s)} (pid ${s.pid}) — process frozen; resume with SIGCONT.`,
@@ -200,6 +204,7 @@ export async function pauseSession(
     };
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
+    console.log("[pause] SIGSTOP failed for pid %d: %s", s.pid, reason);
     return {
       success: false,
       message: `Could not pause session ${sessionLabel(s)} (pid ${s.pid}): ${reason}.`,
@@ -214,7 +219,10 @@ export async function resumeSession(
   } = {},
 ): Promise<{ success: boolean; message: string; data?: Record<string, unknown> }> {
   if (!s.online) {
-    return { success: false, message: `Session ${sessionLabel(s)} is offline.` };
+    return {
+      success: false,
+      message: `Session ${sessionLabel(s)} is offline; nothing to resume. (Only active sessions can be resumed.)`,
+    };
   }
   const kill = deps.kill ?? ((pid, signal) => process.kill(pid, signal));
   try {

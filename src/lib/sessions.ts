@@ -441,16 +441,21 @@ export function pauseSessionResult(
   s: SessionInfo,
   kill: (pid: number, signal: NodeJS.Signals) => void = process.kill,
 ): { success: boolean; message: string; data?: Record<string, unknown> } {
+  console.log("[pause] pauseSessionResult: session=%s pid=%d online=%s", sessionLabel(s), s.pid, s.online);
   if (!s.online) {
+    console.log("[pause] offline guard: session offline, nothing to pause");
     return {
       success: false,
       message: `Session ${sessionLabel(s)} is offline; nothing to pause. (Only active sessions can be paused.)`,
     };
   }
   try {
-    kill(s.pid, "SIGINT");
+    console.log("[pause] sending SIGSTOP to pid %d", s.pid);
+    kill(s.pid, "SIGSTOP");
+    console.log("[pause] SIGSTOP delivered to pid %d", s.pid);
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
+    console.log("[pause] SIGSTOP failed for pid %d: %s", s.pid, reason);
     // EPERM etc. — fall back to reporting.
     return {
       success: false,
@@ -459,8 +464,39 @@ export function pauseSessionResult(
   }
   return {
     success: true,
-    message: `Sent interrupt to session ${sessionLabel(s)} (pid ${s.pid}) — its active turn should pause and return to idle.`,
-    data: { sessionId: s.sessionId, pid: s.pid, name: sessionLabel(s), pause: "sent" },
+    message: `Paused session ${sessionLabel(s)} (pid ${s.pid}) — process frozen; resume with SIGCONT.`,
+    data: { sessionId: s.sessionId, pid: s.pid, name: sessionLabel(s), pause: "sigstop" },
+  };
+}
+
+export function resumeSessionResult(
+  s: SessionInfo,
+  kill: (pid: number, signal: NodeJS.Signals) => void = process.kill,
+): { success: boolean; message: string; data?: Record<string, unknown> } {
+  console.log("[resume] resumeSessionResult: session=%s pid=%d online=%s", sessionLabel(s), s.pid, s.online);
+  if (!s.online) {
+    console.log("[resume] offline guard: session offline, nothing to resume");
+    return {
+      success: false,
+      message: `Session ${sessionLabel(s)} is offline; nothing to resume. (Only active sessions can be resumed.)`,
+    };
+  }
+  try {
+    console.log("[resume] sending SIGCONT to pid %d", s.pid);
+    kill(s.pid, "SIGCONT");
+    console.log("[resume] SIGCONT delivered to pid %d", s.pid);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    console.log("[resume] SIGCONT failed for pid %d: %s", s.pid, reason);
+    return {
+      success: false,
+      message: `Could not resume session ${sessionLabel(s)} (pid ${s.pid}): ${reason}.`,
+    };
+  }
+  return {
+    success: true,
+    message: `Resumed session ${sessionLabel(s)} (pid ${s.pid}).`,
+    data: { sessionId: s.sessionId, pid: s.pid, name: sessionLabel(s), resume: "sigcont" },
   };
 }
 

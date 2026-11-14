@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
-import { pauseSession, interruptFrame } from "../peer";
+import { pauseSession, resumeSession, interruptFrame } from "../peer";
 import { promptFromLine } from "../sessions";
-import { applySessionNames, splitFilterTerms, matchesSessionFilter, describeSessionFilter, sessionLabel, findSessions, findSessionsFuzzy, pauseSessionResult, encodeProjectDir, parseTranscriptSessionName, trimValue, compressTranscript, isStopped, liveSessionStatus, duplicateSession, readSessionNames, PROJECTS_DIR, SESSIONS_DIR } from "../sessions";
+import { applySessionNames, splitFilterTerms, matchesSessionFilter, describeSessionFilter, sessionLabel, findSessions, findSessionsFuzzy, pauseSessionResult, resumeSessionResult, encodeProjectDir, parseTranscriptSessionName, trimValue, compressTranscript, isStopped, liveSessionStatus, duplicateSession, readSessionNames, PROJECTS_DIR, SESSIONS_DIR } from "../sessions";
 
 describe("applySessionNames", () => {
   it("pins the custom name and marks nameSource=user when a registry entry exists", () => {
@@ -186,16 +186,55 @@ describe("pauseSessionResult", () => {
     expect(out.message).toBe("Could not pause session alpha (pid 10): boom.");
   });
 
-  it("sends SIGINT to the live pid and reports the pause", () => {
+  it("sends SIGSTOP to the live pid and reports the pause", () => {
     const s = { sessionId: "s1", name: "alpha", pid: 10, online: true } as any;
     const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
     const out = pauseSessionResult(s, (pid, signal) => signals.push({ pid, signal }));
-    expect(signals).toEqual([{ pid: 10, signal: "SIGINT" }]);
+    expect(signals).toEqual([{ pid: 10, signal: "SIGSTOP" }]);
     expect(out.success).toBe(true);
     expect(out.message).toBe(
-      "Sent interrupt to session alpha (pid 10) — its active turn should pause and return to idle.",
+      "Paused session alpha (pid 10) — process frozen; resume with SIGCONT.",
     );
-    expect(out.data).toEqual({ sessionId: "s1", pid: 10, name: "alpha", pause: "sent" });
+    expect(out.data).toEqual({ sessionId: "s1", pid: 10, name: "alpha", pause: "sigstop" });
+  });
+});
+
+describe("resumeSessionResult", () => {
+  it("refuses to signal an offline session", () => {
+    const s = { sessionId: "s1", name: "alpha", pid: 10, online: false } as any;
+    const out = resumeSessionResult(s);
+    expect(out.success).toBe(false);
+    expect(out.message).toBe(
+      "Session alpha is offline; nothing to resume. (Only active sessions can be resumed.)",
+    );
+  });
+
+  it("reports the failure when the signal cannot be delivered", () => {
+    const s = { sessionId: "s1", name: "alpha", pid: 10, online: true } as any;
+    const out = resumeSessionResult(s, () => {
+      throw new Error("EPERM");
+    });
+    expect(out.success).toBe(false);
+    expect(out.message).toBe("Could not resume session alpha (pid 10): EPERM.");
+  });
+
+  it("falls back to the raw error string for non-Error throws", () => {
+    const s = { sessionId: "s1", name: "alpha", pid: 10, online: true } as any;
+    const out = resumeSessionResult(s, () => {
+      throw "boom";
+    });
+    expect(out.success).toBe(false);
+    expect(out.message).toBe("Could not resume session alpha (pid 10): boom.");
+  });
+
+  it("sends SIGCONT to the live pid and reports the resume", () => {
+    const s = { sessionId: "s1", name: "alpha", pid: 10, online: true } as any;
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const out = resumeSessionResult(s, (pid, signal) => signals.push({ pid, signal }));
+    expect(signals).toEqual([{ pid: 10, signal: "SIGCONT" }]);
+    expect(out.success).toBe(true);
+    expect(out.message).toBe("Resumed session alpha (pid 10).");
+    expect(out.data).toEqual({ sessionId: "s1", pid: 10, name: "alpha", resume: "sigcont" });
   });
 });
 
@@ -237,6 +276,67 @@ describe("pauseSession", () => {
     });
     expect(out.success).toBe(false);
     expect(out.message).toBe("Could not pause session alpha (pid 10): EPERM.");
+  });
+
+  it("falls back to the raw error string for non-Error throws", async () => {
+    const s = { sessionId: "s1", name: "alpha", pid: 10, online: true } as any;
+    const out = await pauseSession(s, {
+      kill: () => {
+        throw "boom";
+      },
+    });
+    expect(out.success).toBe(false);
+    expect(out.message).toBe("Could not pause session alpha (pid 10): boom.");
+  });
+});
+
+describe("resumeSession", () => {
+  it("refuses to resume an offline session", async () => {
+    const s = { sessionId: "s1", name: "alpha", pid: 10, online: false } as any;
+    const out = await resumeSession(s);
+    expect(out.success).toBe(false);
+    expect(out.message).toBe(
+      "Session alpha is offline; nothing to resume. (Only active sessions can be resumed.)",
+    );
+  });
+
+  it("sends SIGCONT to the process and reports the resume", async () => {
+    const s = { sessionId: "s1", name: "alpha", pid: 10, online: true } as any;
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const out = await resumeSession(s, {
+      kill: (pid, signal) => signals.push({ pid, signal }),
+    });
+    expect(signals).toEqual([{ pid: 10, signal: "SIGCONT" }]);
+    expect(out.success).toBe(true);
+    expect(out.message).toBe("Resumed session alpha (pid 10).");
+    expect(out.data).toEqual({
+      sessionId: "s1",
+      pid: 10,
+      name: "alpha",
+      resume: "sigcont",
+    });
+  });
+
+  it("propagates a failed resume", async () => {
+    const s = { sessionId: "s1", name: "alpha", pid: 10, online: true } as any;
+    const out = await resumeSession(s, {
+      kill: () => {
+        throw new Error("EPERM");
+      },
+    });
+    expect(out.success).toBe(false);
+    expect(out.message).toBe("Could not resume session alpha (pid 10): EPERM.");
+  });
+
+  it("falls back to the raw error string for non-Error throws", async () => {
+    const s = { sessionId: "s1", name: "alpha", pid: 10, online: true } as any;
+    const out = await resumeSession(s, {
+      kill: () => {
+        throw "boom";
+      },
+    });
+    expect(out.success).toBe(false);
+    expect(out.message).toBe("Could not resume session alpha (pid 10): boom.");
   });
 });
 
