@@ -69,10 +69,13 @@ export function isAutoReply(message: string): boolean {
  *
  * It carries `--one-way` on purpose: the peer's answer is terminal, so the
  * peer answering it produces no new instruction to answer. That single flag is
- * what keeps a two-session conversation from bouncing forever.
+ * what keeps a two-session conversation from bouncing forever. When a msgId is
+ * supplied it also carries `--in-reply-to <msg_id>`, so the peer's answer is
+ * attributed to this message instead of starting an unattributed chain.
  */
-export function replyInstruction(senderName: string): string {
-  return `When you're done, report back with ${'`'}${REPLY_COMMAND} ${senderName} "<your answer>" --one-way${'`'}`;
+export function replyInstruction(senderName: string, msgId?: string): string {
+  const inReplyTo = msgId ? ` --in-reply-to ${msgId}` : "";
+  return `When you're done, report back with ${'`'}${REPLY_COMMAND} ${senderName} "<your answer>"${inReplyTo} --one-way${'`'}`;
 }
 
 /**
@@ -115,5 +118,5 @@ export function appendReplyInstruction(
   const meta = parseReplyMeta(message);
   const base = meta ? stripReplyMarkers(message) : message;
   const summary = base.length > 120 ? `${base.slice(0, 119)}…` : base;
-  return `${summary}\n\n${replyInstruction(senderName)}\n${replyMarker(MAX_REPLY_HOP, options)}`;
+  return `${summary}\n\n${replyInstruction(senderName, options.msgId)}\n${replyMarker(MAX_REPLY_HOP, options)}`;
 }

@@ -3,6 +3,14 @@ import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync } from "
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+export interface PersistedTunnelState {
+  url: string | null;
+  autoReconnect?: boolean;
+  active?: boolean;
+  port?: string;
+  lastAliveAt?: string; // ISO timestamp of the last time the tunnel was confirmed alive
+}
+
 interface TunnelSession {
   id: string;
   proc: Bun.Subprocess<"ignore", "pipe", "pipe">;
@@ -45,20 +53,38 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
 
-function readPersistedUrl(): string | null {
+export function readPersistedState(): PersistedTunnelState | null {
   try {
     const file = tunnelStateFile();
     if (!existsSync(file)) return null;
     const v = JSON.parse(readFileSync(file, "utf8"));
-    return typeof v?.url === "string" ? v.url : null;
+    if (!v || typeof v !== "object") return null;
+    return {
+      url: typeof v.url === "string" ? v.url : null,
+      autoReconnect: typeof v.autoReconnect === "boolean" ? v.autoReconnect : undefined,
+      active: typeof v.active === "boolean" ? v.active : undefined,
+      port: typeof v.port === "string" ? v.port : undefined,
+      lastAliveAt: typeof v.lastAliveAt === "string" ? v.lastAliveAt : undefined,
+    };
   } catch { return null; }
 }
+
 function writePersistedUrl(url: string) {
+  writePersistedState({
+    url,
+    autoReconnect: true,
+    active: true,
+    port: tunnelPortFromEnv(process.env.PORT),
+    lastAliveAt: new Date().toISOString(),
+  });
+}
+export function writePersistedState(state: PersistedTunnelState) {
   try {
     mkdirSync(tunnelStateDir(), { recursive: true });
-    writeFileSync(tunnelStateFile(), JSON.stringify({ url }), "utf8");
+    writeFileSync(tunnelStateFile(), JSON.stringify(state), "utf8");
   } catch {}
 }
+
 function clearPersistedUrl() {
   try {
     const file = tunnelStateFile();
@@ -182,9 +208,19 @@ export function getTunnelStatus() {
 
 export async function recoverPersistedUrl() {
   if (!tunnelUrl) {
-    const persisted = readPersistedUrl();
+    const state = readPersistedState();
+    const persisted = state?.url ?? null;
     if (persisted && await isUrlAlive(persisted)) {
       tunnelUrl = persisted;
+      if (typeof state?.autoReconnect === "boolean") autoReconnectEnabled = state.autoReconnect;
+      // Refresh lastAliveAt since we just confirmed liveness.
+      writePersistedState({
+        url: persisted,
+        autoReconnect: autoReconnectEnabled,
+        active: state?.active ?? true,
+        port: state?.port,
+        lastAliveAt: new Date().toISOString(),
+      });
     } else if (persisted) {
       clearPersistedUrl();
     }
@@ -221,7 +257,14 @@ export async function stopTunnel() {
 // Server-side bootstrap entry: ensure module loaded and recover any persisted
 // tunnel URL so status is accurate without requiring a web request.
 export async function initTunnel() {
+  const state = readPersistedState();
   await recoverPersistedUrl();
+  // On server restart/dev the cloudflared process is gone. If a tunnel was
+  // previously active and its URL is no longer usable, relaunch automatically
+  // instead of leaving the tunnel down until a manual click.
+  if (state?.active && !tunnelUrl && !isTunnelAlive() && !manualStop) {
+    await launchTunnel();
+  }
 }
 
 export async function checkCloudflared(): Promise<{ success: boolean; version?: string; error?: string }> {

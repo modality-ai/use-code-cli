@@ -18,9 +18,7 @@ function resolveCssHref(): string {
   }
 }
 
-const themeVars = `:root { --paper:#fbf7ef; --surface:#fffdf8; --border:#d8d4cb; --text-primary:#23262b; --text-muted:#5b5f66; --accent:#1f6f78; }
-@media (prefers-color-scheme: dark) { :root { --paper:#1a1b1e; --surface:#22252a; --border:#3a3e44; --text-primary:#e8e6e1; --text-muted:#a6a9ae; --accent:#4dacb2; } }
-body { margin:0; }`;
+const themeVars = `body { margin: 0; }`;
 
 export default function RootLayout({ children, title = "use-code-cli", cssHref }: RootLayoutProps) {
   const href = cssHref ?? resolveCssHref();

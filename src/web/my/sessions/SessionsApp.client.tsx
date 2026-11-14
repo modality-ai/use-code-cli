@@ -12,6 +12,7 @@ export interface Session {
   sessionId?: string;
   hero?: string;
   status?: string;
+  waitingFor?: string;
   cwd?: string;
   lastPrompt?: string;
 }
@@ -111,7 +112,7 @@ export default function SessionsApp({ initial }: { initial?: Session[] }) {
           </a>
           <div className="flex items-center justify-between gap-2">
             <span className="font-code text-sm text-text-muted">
-              {(s.hero || "-") + " · " + (s.status || "-")}
+              {(s.hero || "-") + " · " + (s.status || "-") + (s.status === "waiting" && s.waitingFor ? " — " + s.waitingFor : "")}
             </span>
             <button
               type="button"

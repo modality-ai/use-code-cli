@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { cleanup } from "@testing-library/react";
 import React from "react";
-import { render } from "reshow-unit";
+import { render, act } from "reshow-unit";
 import SessionsApp from "../SessionsApp.client";
 
 let capturedUrl: string | null = null;
@@ -35,5 +35,23 @@ describe("SessionsApp client", () => {
   it("renders empty state", () => {
     const { container } = render(<SessionsApp initial={[]} />);
     expect(container.textContent).toContain("No active sessions");
+  });
+
+  it("shows the waiting reason next to a waiting session", () => {
+    (window as any).__REACT_DATA__ = {
+      sessions: [{ name: "alpha", sessionId: "sid-1", status: "waiting", waitingFor: "permission prompt" }],
+    };
+    const { container } = render(<SessionsApp initial={[]} />);
+    expect(container.textContent).toContain("waiting — permission prompt");
+  });
+
+  it("omits the waiting reason when the status is not waiting", () => {
+    (window as any).__REACT_DATA__ = {
+      sessions: [{ name: "alpha", sessionId: "sid-1", status: "busy", waitingFor: "permission prompt" }],
+    };
+    const { container } = render(<SessionsApp initial={[]} />);
+    act();
+    expect(container.textContent).toContain("busy");
+    expect(container.textContent).not.toContain("permission prompt");
   });
 });

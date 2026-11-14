@@ -220,8 +220,8 @@ describe("talk", () => {
 
     expect(res.code).toBe(0);
     expect(res.received()).toContain("run the tests");
-    expect(lastContent(res.received())).toContain(
-      "When you're done, report back with `!use-code-cli talk caller \"<your answer>\" --one-way`",
+    expect(lastContent(res.received())).toMatch(
+      /When you're done, report back with `!use-code-cli talk caller "<your answer>" --in-reply-to [0-9a-f-]{36} --one-way`/,
     );
   });
 

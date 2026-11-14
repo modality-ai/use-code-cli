@@ -1,24 +1,15 @@
 import { readFileSync } from "node:fs";
+import { sessionStatusRank } from "../../../../lib/status";
 import { findSessionsFuzzy, readSessions } from "../../../../lib/sessions";
 import { parseTranscript } from "../../../../lib/transcript";
 import { aiTool } from "../../../../scripts/index";
 
 /**
  * When a name is ambiguous (multiple sessions share it), pick the best candidate
- * instead of failing. Prefer live sessions, then "busy"/"active" over "shell",
- * then the most recently updated. Returns a unique target (sessionId or pid)
+ * instead of failing. Prefer live sessions, then "busy"/"waiting"/"active" over
+ * "shell", then the most recently updated. Returns a unique target (sessionId or pid)
  * that the `session` command can resolve unambiguously, or null if none.
  */
-/** Rank a session status for tie-breaking (higher = more active). */
-export function sessionStatusRank(status: string | undefined): number {
-  const v = (status || "").toLowerCase();
-  if (v === "busy") return 4;
-  if (v === "active") return 3;
-  if (v === "idle") return 2;
-  if (v === "shell") return 1;
-  return 0;
-}
-
 /** Pick the best candidate from a list of sessions (pure). */
 export function pickBestSession<T extends { online?: boolean; status?: string; updatedAt?: number }>(matches: T[]): T | null {
   if (matches.length === 0) return null;
@@ -82,6 +73,8 @@ export interface SessionData {
     entries?: any[];
     online?: boolean;
     status?: string | null;
+    waitingFor?: string | null;
+    stopped?: boolean;
   };
   message?: string;
 }
@@ -114,6 +107,8 @@ export async function fetchSessionData(name: string, options?: { includeEntries?
         entries: [],
         online: s.online ?? false,
         status: s.status ?? null,
+        waitingFor: s.waitingFor ?? null,
+        stopped: s.stopped ?? false,
       },
     };
   }
@@ -121,7 +116,7 @@ export async function fetchSessionData(name: string, options?: { includeEntries?
   const target = (await resolveSessionTarget(name)) ?? name;
   const result = (await aiTool.execute({ command: "session", target })) as {
     success?: boolean;
-    data?: { transcriptPath?: string | null; name?: string | null; online?: boolean; status?: string | null };
+    data?: { transcriptPath?: string | null; name?: string | null; online?: boolean; status?: string | null; waitingFor?: string | null; stopped?: boolean };
     message?: string;
   };
 
@@ -141,6 +136,8 @@ export async function fetchSessionData(name: string, options?: { includeEntries?
         entries: [],
         online: result.data?.online ?? false,
         status: result.data?.status ?? null,
+        waitingFor: result.data?.waitingFor ?? null,
+        stopped: result.data?.stopped ?? false,
       },
     };
   }
@@ -159,6 +156,8 @@ export async function fetchSessionData(name: string, options?: { includeEntries?
         entries,
         online: result.data?.online ?? false,
         status: result.data?.status ?? null,
+        waitingFor: result.data?.waitingFor ?? null,
+        stopped: result.data?.stopped ?? false,
       },
     };
   } catch {

@@ -22,7 +22,7 @@ method:
         required: false
     examples:
       - "*use-code-cli watch three agents → build the tick commands and run one tick"
-      - "*use-code-cli who is stuck → list sessions, classify busy/idle, and report blockers"
+      - "*use-code-cli who is stuck → list sessions, classify busy/waiting/idle, and report blockers"
   agent_compatibility:
     - "✅ JAMES (Full Stack Developer) - CLI orchestration"
     - "✅ SARAH (Product Owner) - multi-agent supervision and escalation"
@@ -31,7 +31,7 @@ methodology:
   purpose: "Turn a Monitor tick into disciplined supervision of other Claude Code sessions by reading their state, diffing their work, and acting only on a real condition."
   expected_output:
     - "The exact use-code-cli commands run this tick, in a fenced block, with flags spelled out."
-    - "Per-session state read from sessions: name, hero, status (busy or idle), and last prompt."
+    - "Per-session state read from sessions: name, hero, status (busy, waiting, or idle), and last prompt."
     - "Objective evidence of progress since the previous tick, such as git status or key file mtimes."
     - "Every nudge sent, with its msg_id, or an explicit statement that no nudge was warranted."
     - "The stop condition met this tick, or a one-line reason the loop should keep running."

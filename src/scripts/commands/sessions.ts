@@ -68,6 +68,7 @@ interface Row {
   branch?: string | null;
   hero?: string | null;
   lastPrompt?: string | null;
+  waitingFor?: string | null;
   matches?: number;
   line?: number;
   snippet?: string;
@@ -92,6 +93,7 @@ function baseRow(s: SessionInfo, meta: TranscriptMeta = {}): Row {
     pid: s.pid,
     name: s.name ?? "",
     status: s.status ?? "",
+    waitingFor: s.waitingFor ?? null,
     cwd: s.cwd,
     sessionId: s.sessionId,
     version: s.version ?? "",
@@ -213,6 +215,9 @@ async function sessions(args: SessionsArgs) {
         largeLines.push(`${r.name || r.sessionId}:`);
         if (r.lastPrompt) {
           largeLines.push(`  last: "${oneLine(r.lastPrompt, 1000)}"`);
+        }
+        if (r.status === "waiting" && r.waitingFor) {
+          largeLines.push(`  waiting: "${oneLine(r.waitingFor, 1000)}"`);
         }
         largeLines.push(`  id:   ${r.sessionId}`);
         largeLines.push(`  cwd:  ${r.cwd}`);

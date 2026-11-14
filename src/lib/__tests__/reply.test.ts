@@ -5,6 +5,7 @@ import {
   hasReplyInstruction,
   isAutoReply,
   parseReplyMeta,
+  replyInstruction,
   replyMarker,
   stripReplyMarkers,
 } from "../reply";
@@ -12,7 +13,25 @@ import {
 describe("reply instruction", () => {
   it("appends a terminal instruction and a marker naming the sender", () => {
     expect(appendReplyInstruction("ping", "caller", { msgId: "msg-1" })).toBe(
-      "ping\n\nWhen you're done, report back with `!use-code-cli talk caller \"<your answer>\" --one-way`\n<!-- use-code-cli:auto-reply hop=1 id=msg-1 -->",
+      "ping\n\nWhen you're done, report back with `!use-code-cli talk caller \"<your answer>\" --in-reply-to msg-1 --one-way`\n<!-- use-code-cli:auto-reply hop=1 id=msg-1 -->",
+    );
+  });
+
+  it("includes --in-reply-to with the msg_id when one is provided", () => {
+    expect(appendReplyInstruction("ping", "caller", { msgId: "msg-9" })).toContain(
+      "--in-reply-to msg-9",
+    );
+  });
+
+  it("omits --in-reply-to when no msg_id is provided", () => {
+    expect(replyInstruction("caller")).toBe(
+      "When you're done, report back with `!use-code-cli talk caller \"<your answer>\" --one-way`",
+    );
+  });
+
+  it("includes --in-reply-to when a msg_id is provided", () => {
+    expect(replyInstruction("caller", "msg-1")).toBe(
+      "When you're done, report back with `!use-code-cli talk caller \"<your answer>\" --in-reply-to msg-1 --one-way`",
     );
   });
 
@@ -62,7 +81,7 @@ describe("reply instruction", () => {
       { msgId: "new" },
     );
     expect(out).toBe(
-      "please run it\n\nWhen you're done, report back with `!use-code-cli talk caller \"<your answer>\" --one-way`\n<!-- use-code-cli:auto-reply hop=1 id=new -->",
+      "please run it\n\nWhen you're done, report back with `!use-code-cli talk caller \"<your answer>\" --in-reply-to new --one-way`\n<!-- use-code-cli:auto-reply hop=1 id=new -->",
     );
   });
 });

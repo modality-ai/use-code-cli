@@ -16,6 +16,7 @@ export interface LiveSession {
   sessionId?: string;
   hero?: string;
   status?: string;
+  waitingFor?: string;
   cwd?: string;
   lastPrompt?: string;
 }

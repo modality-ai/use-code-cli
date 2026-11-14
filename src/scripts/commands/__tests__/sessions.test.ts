@@ -32,6 +32,7 @@ function setup() {
     status: string,
     updatedAt = Date.now(),
     cwd = `/w/${name}`,
+    waitingFor?: string,
   ) {
     const proc = Bun.spawn(["sleep", "30"]);
     sleeps.push(proc);
@@ -44,6 +45,7 @@ function setup() {
         name,
         cwd,
         status,
+        ...(waitingFor !== undefined ? { waitingFor } : {}),
         startedAt: updatedAt - 60_000,
         updatedAt,
       }),
@@ -108,6 +110,16 @@ describe("sessions", () => {
     expect(res.code).toBe(0);
     expect(res.out).toContain("alpha");
     expect(res.out).toContain("beta");
+  });
+
+  it("shows the waiting reason for a waiting session", async () => {
+    const h = setup();
+    h.addSession("alpha", "waiting", Date.now(), "/w/alpha", "permission prompt");
+
+    const res = await h.run("sessions");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toContain('waiting: "permission prompt"');
   });
 
   it("--filter-status keeps only sessions in that status", async () => {

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import { pauseSession, resumeSession, interruptFrame } from "../peer";
 import { promptFromLine } from "../sessions";
-import { applySessionNames, splitFilterTerms, matchesSessionFilter, describeSessionFilter, sessionLabel, findSessions, findSessionsFuzzy, pauseSessionResult, resumeSessionResult, encodeProjectDir, parseTranscriptSessionName, trimValue, compressTranscript, isStopped, liveSessionStatus, duplicateSession, readSessionNames, PROJECTS_DIR, SESSIONS_DIR } from "../sessions";
+import { applySessionNames, splitFilterTerms, matchesSessionFilter, describeSessionFilter, sessionLabel, findSessions, findSessionsFuzzy, pauseSessionResult, resumeSessionResult, encodeProjectDir, parseTranscriptSessionName, trimValue, compressTranscript, isStopped, duplicateSession, readSessionNames, PROJECTS_DIR, SESSIONS_DIR } from "../sessions";
+import { liveSessionStatus, liveSessionWaitingFor } from "../status";
 
 describe("applySessionNames", () => {
   it("pins the custom name and marks nameSource=user when a registry entry exists", () => {
@@ -469,6 +470,20 @@ describe("liveSessionStatus", () => {
 
   it("keeps undefined when not stopped and status was undefined", () => {
     expect(liveSessionStatus(false, undefined)).toBeUndefined();
+  });
+});
+
+describe("liveSessionWaitingFor", () => {
+  it("clears the reason when the session is stopped", () => {
+    expect(liveSessionWaitingFor(true, "permission prompt")).toBeUndefined();
+  });
+
+  it("keeps the reason when not stopped", () => {
+    expect(liveSessionWaitingFor(false, "permission prompt")).toBe("permission prompt");
+  });
+
+  it("keeps undefined when not stopped and reason was undefined", () => {
+    expect(liveSessionWaitingFor(false, undefined)).toBeUndefined();
   });
 });
 

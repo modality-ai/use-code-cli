@@ -1,10 +1,11 @@
 import { readSessions, findSessionsFuzzy, type SessionInfo } from "../../../../../lib/sessions";
 import { readJsonBody } from "../../../../../lib/web/request";
-import { pickBestSession, sessionStatusRank } from "../../../session/[name]/session-data";
+import { pickBestSession } from "../../../session/[name]/session-data";
+import { sessionStatusRank } from "../../../../../lib/status";
 import { aiTool } from "../../../../../scripts/index";
 
 // Pure predicate: a session has returned to idle when it went offline or its
-// status dropped below "active" (rank >= 3 means busy/active work in flight).
+// status dropped below "active" (rank >= 3 means busy/waiting/active work in flight).
 // Typed over the fields it reads so tests can pass minimal stand-ins.
 export function hasReturnedToIdle(
   session: { online?: boolean; status?: string | null } | null,

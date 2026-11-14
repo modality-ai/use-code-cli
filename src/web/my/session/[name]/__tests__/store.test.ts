@@ -48,6 +48,9 @@ describe("statusEmoji", () => {
   it("maps busy", () => {
     expect(statusEmoji("busy")).toBe("💻");
   });
+  it("maps waiting", () => {
+    expect(statusEmoji("waiting")).toBe("⏳");
+  });
   it("maps active", () => {
     expect(statusEmoji("active")).toBe("🟢");
   });
@@ -66,7 +69,7 @@ describe("onlineEmoji", () => {
 });
 
 describe("STATUS_EMOJI", () => {
-  it("has three entries", () => {
-    expect(Object.keys(STATUS_EMOJI).length).toBe(3);
+  it("has four entries", () => {
+    expect(Object.keys(STATUS_EMOJI).length).toBe(4);
   });
 });

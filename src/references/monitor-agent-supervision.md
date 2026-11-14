@@ -24,12 +24,12 @@ description: How to run a Monitor that supervises other Claude Code sessions wit
 
 | Command | What it gives you |
 |---|---|
-| `use-code-cli sessions [--all] [--filter-status busy,idle] [--filter-name a,b] [--recent N] [--search text]` | every active session: name, hero, status, cwd, last prompt |
+| `use-code-cli sessions [--all] [--filter-status busy,waiting,idle] [--filter-name a,b] [--recent N] [--search text]` | every active session: name, hero, status, cwd, last prompt |
 | `use-code-cli session <target> --json` | one session: workspace, hero, transcript path |
 | `use-code-cli prompts [target] [search] [--limit N]` | what each session was asked, in order |
 | `use-code-cli talk [target] --- <message> [--one-way] [--in-reply-to <msg_id>]` | deliver a message; `---` or stdin keeps the text literal |
 | `use-code-cli talk-hero <hero> "message" [--one-way] [--in-reply-to <msg_id>]` | deliver a message to the first active session in this project whose deployed hero matches the keyword |
-| `use-code-cli talk-to-all <message> [--filter-name a,b] [--filter-status busy,idle] [--self]` | one message to many sessions |
+| `use-code-cli talk-to-all <message> [--filter-name a,b] [--filter-status busy,waiting,idle] [--self]` | one message to many sessions |
 | `use-code-cli talk-permit [accept\|hold\|refuse\|unset]` | cross-session inbound policy |
 
 `talk <session> "<text>"` (quoted, no `---`) appends a reply instruction, so the agent may answer back. Use `---` or `--one-way` when the text must arrive exactly as written.

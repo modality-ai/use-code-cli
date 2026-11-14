@@ -3,6 +3,7 @@ import { basename, dirname, join } from "node:path";
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { appendFile, mkdir, open, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { liveSessionStatus, liveSessionWaitingFor } from "./status";
 import { prettyJsonFile } from "./output/json";
 
 export const SESSIONS_DIR = join(homedir(), ".claude", "sessions");
@@ -21,12 +22,15 @@ export interface SessionFile {
   name?: string;
   nameSource?: string;
   status?: string;
+  waitingFor?: string;
   updatedAt?: number;
   messagingSocketPath?: string;
 }
 
 export interface SessionInfo extends SessionFile {
   online: boolean;
+  /** True when the live process is frozen (SIGSTOP); reported as idle. */
+  stopped?: boolean;
   /**
    * Folder the session ended in, when a transcript shows it `cd`'d away from
    * where it launched. Offline sessions only; `--filter-project` matches both.
@@ -41,9 +45,6 @@ export interface SessionFilter {
   filterHero?: string;
   filterProject?: string;
 }
-
-/** The values `--filter-status` accepts. */
-export const SESSION_STATUSES = ["busy", "idle"] as const;
 
 /** ~/.claude/sessions/names.json — the names the user set, keyed by sessionId. */
 export const NAMES_FILE = join(SESSIONS_DIR, "names.json");
@@ -500,15 +501,6 @@ export function resumeSessionResult(
   };
 }
 
-/**
- * Adjust a session's reported status for a live (online) session: a process that
- * has been SIGSTOP'd is frozen and will never update its transcript, so report
- * it as idle instead of its stale last status.
- */
-export function liveSessionStatus(stopped: boolean, originalStatus: string | undefined): string | undefined {
-  return stopped ? "idle" : originalStatus;
-}
-
 function isAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -586,7 +578,7 @@ export async function readSessionsLive(): Promise<SessionInfo[]> {
       ) as SessionFile;
       const online = isAlive(data.pid);
       const stopped = online && isStopped(data.pid);
-      sessions.push({ ...data, online, status: liveSessionStatus(stopped, data.status) });
+      sessions.push({ ...data, online, stopped, status: liveSessionStatus(stopped, data.status), waitingFor: liveSessionWaitingFor(stopped, data.waitingFor) });
     } catch {
       // Skip unreadable or malformed session files.
     }

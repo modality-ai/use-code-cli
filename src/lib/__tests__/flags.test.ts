@@ -17,6 +17,13 @@ describe("filterStatusField", () => {
     expect(filterStatusField.safeParse("busy, idle").success).toBe(true);
   });
 
+  it("accepts the waiting status", () => {
+    expect(filterStatusField.safeParse("waiting")).toEqual({
+      success: true,
+      data: "waiting",
+    });
+  });
+
   it("rejects an unknown status", () => {
     expect(filterStatusField.safeParse("bogus").success).toBe(false);
   });

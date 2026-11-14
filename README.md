@@ -83,7 +83,7 @@ An empty message — nothing after `---` and empty stdin, or a terminal on stdin
 Deliver **one message to every matching session** in a single command. This is what a plain `claude` CLI cannot do.
 
 ```bash
-use-code-cli talk-to-all <message> [--filter-name a,b] [--filter-status busy,idle] [--self]
+use-code-cli talk-to-all <message> [--filter-name a,b] [--filter-status busy,waiting,idle] [--self]
 ```
 
 One invocation, N recipients. Filter by name or status; add `--self` to include the sender. Ideal for dispatching a task, a nudge, or a status request across a whole team of agents at once.
@@ -125,7 +125,7 @@ use-code-cli session <target>
 List active (and offline) sessions.
 
 ```bash
-use-code-cli sessions [--all] [--filter-status busy,idle] [--filter-name a,b] [--recent N] [--search text]
+use-code-cli sessions [--all] [--filter-status busy,waiting,idle] [--filter-name a,b] [--recent N] [--search text]
 ```
 
 ---

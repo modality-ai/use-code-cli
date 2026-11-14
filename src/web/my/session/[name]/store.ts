@@ -15,7 +15,7 @@ export function reducer(state: SessionState, action: Partial<SessionState> & { t
 }
 
 // Pure mapping helpers used by the session client to render state.
-export const STATUS_EMOJI: Record<string, string> = { idle: "💤", busy: "💻", active: "🟢" };
+export const STATUS_EMOJI: Record<string, string> = { idle: "💤", busy: "💻", waiting: "⏳", active: "🟢" };
 export const onlineEmoji = (online: boolean): string => (online ? "🟢" : "🔴");
 export const statusEmoji = (status: string): string => STATUS_EMOJI[status] || "⚪";
 

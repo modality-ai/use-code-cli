@@ -1,9 +1,11 @@
 import { describe, expect, it } from "bun:test";
-import { sessionStatusRank, pickBestSession, stripToolResults, findToolById } from "../session-data";
+import { pickBestSession, stripToolResults, findToolById } from "../session-data";
+import { sessionStatusRank } from "../../../../../lib/status";
 
 describe("sessionStatusRank", () => {
   it("ranks statuses", () => {
     expect(sessionStatusRank("busy")).toBe(4);
+    expect(sessionStatusRank("waiting")).toBe(3);
     expect(sessionStatusRank("active")).toBe(3);
     expect(sessionStatusRank("idle")).toBe(2);
     expect(sessionStatusRank("shell")).toBe(1);

@@ -1,10 +1,15 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   tunnelPortFromEnv,
   extractTunnelUrl,
   reconnectDelay,
   getTunnelStatus,
   getSession,
+  readPersistedState,
+  writePersistedState,
 } from "../tunnel";
 
 describe("tunnelPortFromEnv", () => {
@@ -99,5 +104,56 @@ describe("getTunnelStatus", () => {
 describe("getSession", () => {
   it("returns undefined for unknown id", () => {
     expect(getSession("does-not-exist")).toBeUndefined();
+  });
+});
+
+describe("readPersistedState / writePersistedState", () => {
+  let originalHome: string | undefined;
+  let tmpHome: string;
+
+  beforeEach(() => {
+    originalHome = process.env.HOME;
+    tmpHome = mkdtempSync(join(tmpdir(), "use-code-cli-tunnel-"));
+    process.env.HOME = tmpHome;
+  });
+
+  afterEach(() => {
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("returns null when no persisted file exists", () => {
+    expect(readPersistedState()).toBeNull();
+  });
+
+  it("round-trips a persisted state", () => {
+    const state = { url: "https://x.trycloudflare.com", active: true, autoReconnect: true, port: "3000", lastAliveAt: "2026-01-01T00:00:00.000Z" };
+    writePersistedState(state);
+    expect(readPersistedState()).toEqual(state);
+  });
+
+  it("returns null for malformed JSON", () => {
+    mkdirSync(join(tmpHome, ".use-code-cli"), { recursive: true });
+    writeFileSync(join(tmpHome, ".use-code-cli", "tunnel.json"), "{not json", "utf8");
+    expect(readPersistedState()).toBeNull();
+  });
+
+  it("returns null for a non-object value", () => {
+    mkdirSync(join(tmpHome, ".use-code-cli"), { recursive: true });
+    writeFileSync(join(tmpHome, ".use-code-cli", "tunnel.json"), JSON.stringify("just a string"), "utf8");
+    expect(readPersistedState()).toBeNull();
+  });
+
+  it("normalizes missing/invalid fields to undefined or null", () => {
+    mkdirSync(join(tmpHome, ".use-code-cli"), { recursive: true });
+    writeFileSync(join(tmpHome, ".use-code-cli", "tunnel.json"), JSON.stringify({ url: 42, autoReconnect: "yes", active: 1 }), "utf8");
+    expect(readPersistedState()).toEqual({
+      url: null,
+      autoReconnect: undefined,
+      active: undefined,
+      port: undefined,
+      lastAliveAt: undefined,
+    });
   });
 });

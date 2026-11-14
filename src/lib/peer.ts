@@ -14,8 +14,10 @@ export interface LiveSession {
   pid: number;
   sessionId: string;
   name?: string;
-  /** "busy" | "idle" while the session is running. */
+  /** "busy" | "waiting" | "idle" while the session is running. */
   status?: string;
+  /** Human-readable reason when status === "waiting". */
+  waitingFor?: string;
   cwd: string;
   messagingSocketPath?: string;
 }

@@ -200,15 +200,18 @@ export default function SessionView(props: BootProps) {
   const [entries, setEntries] = useState<Entry[]>(() =>
     initial?.success && Array.isArray(initial.data?.entries) ? initial.data.entries : [],
   );
-  const [meta, setMeta] = useState<{ success: boolean; online: boolean; status: string | null }>(() =>
+  const [meta, setMeta] = useState<{ success: boolean; online: boolean; status: string | null; waitingFor?: string | null }>(() =>
     initial?.success
-      ? { success: true, online: initial.data?.online !== false, status: (initial.data?.status as string | null) || "idle" }
-      : { success: false, online: false, status: "idle" },
+      ? { success: true, online: initial.data?.online !== false, status: (initial.data?.status as string | null) || "idle", waitingFor: (initial.data?.waitingFor as string | null) || null }
+      : { success: false, online: false, status: "idle", waitingFor: null },
   );
   const [chatStatus, setChatStatus] = useState(""); // send progress + SSE errors
   const [sending, setSending] = useState(false);
   const [pausing, setPausing] = useState(false);
   const [resuming, setResuming] = useState(false);
+  // A SIGSTOP'd session is reported as idle by the server; seed the paused
+  // flag from that so the resume control survives a page reload.
+  const [paused, setPaused] = useState(() => !!initial?.success && initial.data?.stopped === true);
   const [reconnecting, setReconnecting] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -233,7 +236,10 @@ export default function SessionView(props: BootProps) {
 
   const applyMeta = (d: any) => {
     setReconnecting(false);
-    setMeta(d.success ? { success: true, online: d.data?.online !== false, status: (d.data?.status as string | null) || "idle" } : { success: false, online: false, status: "idle" });
+    // Only the session API carries `stopped`; SSE pushes omit it, so leave the
+    // paused flag alone when the field is absent.
+    if (typeof d.data?.stopped === "boolean") setPaused(d.data.stopped);
+    setMeta(d.success ? { success: true, online: d.data?.online !== false, status: (d.data?.status as string | null) || "idle", waitingFor: (d.data?.waitingFor as string | null) || null } : { success: false, online: false, status: "idle", waitingFor: null });
   };
 
   const applyEntries = (d: any) => {
@@ -365,8 +371,13 @@ export default function SessionView(props: BootProps) {
     ? "🔄 reconnecting…"
     : !meta.success
     ? "⚠️ unavailable"
-    : `${statusEmoji(meta.status || "idle")} ${meta.status || "idle"} · ${onlineEmoji(meta.online)} ${meta.online ? "active" : "offline"}`;
+    : `${statusEmoji(meta.status || "idle")} ${meta.status || "idle"}${meta.status === "waiting" && meta.waitingFor ? " — " + meta.waitingFor : ""} · ${onlineEmoji(meta.online)} ${meta.online ? "active" : "offline"}`;
   const chatOpen = meta.success && meta.online;
+
+  // A session that becomes busy/waiting again is no longer in the paused state.
+  useEffect(() => {
+    if (meta.status === "busy" || meta.status === "waiting") setPaused(false);
+  }, [meta.status]);
 
   const send = async () => {
     const input = chatRef.current;
@@ -406,6 +417,7 @@ export default function SessionView(props: BootProps) {
       });
       const d = await r.json();
       if (d?.success) {
+        setPaused(true);
         setChatStatus("paused (frozen)");
         // Refresh session status so the header reflects the return to idle.
         // statusOnly=1: we only read online/status here — skip the transcript.
@@ -413,7 +425,8 @@ export default function SessionView(props: BootProps) {
           const metaRes = await fetch("/my/api/session?statusOnly=1&name=" + encodeURIComponent(name));
           const metaJson = await metaRes.json();
           if (metaJson?.success) {
-            setMeta({ success: true, online: metaJson.data?.online !== false, status: (metaJson.data?.status as string | null) || "idle" });
+            setMeta({ success: true, online: metaJson.data?.online !== false, status: (metaJson.data?.status as string | null) || "idle", waitingFor: (metaJson.data?.waitingFor as string | null) || null });
+            setPaused(metaJson.data?.stopped === true);
           }
         } catch {}
       } else {
@@ -438,6 +451,7 @@ export default function SessionView(props: BootProps) {
       });
       const d = await r.json();
       if (d?.success) {
+        setPaused(false);
         setChatStatus("resumed");
       } else {
         setChatStatus("error: " + (d?.error || "failed"));
@@ -526,6 +540,7 @@ export default function SessionView(props: BootProps) {
         chatStatus={chatStatus}
         sending={sending}
         busy={meta.status === "busy"}
+        paused={paused}
         onSend={send}
         onPause={pause}
         onResume={resume}

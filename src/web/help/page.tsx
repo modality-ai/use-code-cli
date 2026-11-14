@@ -19,7 +19,7 @@ export default function HelpPage() {
       </ul>
       <h2>API</h2>
       <ul>
-        <li><code>GET /my/api/session?name=</code> - transcript entries, online status, busy/idle state</li>
+        <li><code>GET /my/api/session?name=</code> - transcript entries, online status, busy/waiting/idle state</li>
         <li><code>GET /my/api/tunnel</code> - cloudflared availability + current tunnel URL</li>
         <li><code>POST /my/api/tunnel</code> - start a cloudflared tunnel</li>
         <li><code>DELETE /my/api/tunnel</code> - stop the running tunnel</li>

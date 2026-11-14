@@ -56,6 +56,7 @@ export async function GET(request: Request): Promise<Response> {
           entries,
           online: statusResult.data?.online ?? false,
           status: statusResult.data?.status ?? null,
+          waitingFor: statusResult.data?.waitingFor ?? null,
         },
       };
     },

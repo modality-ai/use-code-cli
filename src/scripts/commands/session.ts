@@ -347,7 +347,7 @@ async function session(args: SessionArgs) {
   const monitors = await readMonitors(s);
   const name = label(s);
 
-  const state = s.online ? `${s.status ?? "unknown"} · active` : "offline";
+  const state = s.online ? `${s.status ?? "unknown"}${s.status === "waiting" && s.waitingFor ? " — " + s.waitingFor : ""} · active` : "offline";
   const lines = [
     name,
     row("state", state),
@@ -378,6 +378,8 @@ async function session(args: SessionArgs) {
       name: s.name ?? null,
       online: s.online,
       status: s.status ?? null,
+      waitingFor: s.waitingFor ?? null,
+      stopped: s.stopped ?? false,
       pid: s.pid,
       sessionId: s.sessionId,
       transcriptPath: rawFile ?? null,
