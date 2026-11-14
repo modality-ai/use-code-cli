@@ -333,6 +333,42 @@ export function sessionLabel(s: { name?: string; sessionId: string }): string {
 }
 
 /**
+ * Fork a session's transcript into a new session id, copying the transcript
+ * verbatim and pinning the original's name to the new session. Returns the new
+ * sessionId and the path of the forked transcript (if any).
+ */
+export async function duplicateSession(
+  s: SessionInfo,
+): Promise<{ newSessionId: string; transcriptPath?: string; pinnedName?: string }> {
+  const src = await transcriptPath(s);
+  const newSessionId = crypto.randomUUID();
+
+  const destDir = src
+    ? dirname(src)
+    : join(PROJECTS_DIR, encodeProjectDir(s.cwd));
+  await mkdir(destDir, { recursive: true });
+  const dest = join(destDir, `${newSessionId}.jsonl`);
+
+  if (src) {
+    const { copyFile } = await import("node:fs/promises");
+    await copyFile(src, dest);
+  } else {
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(dest, "", "utf8");
+  }
+
+  // Pin the original's effective name to the new session id so the fork keeps
+  // the session's identity (and any pinned name carries over).
+  await setSessionName(newSessionId, sessionLabel(s));
+
+  return {
+    newSessionId,
+    transcriptPath: src ? dest : undefined,
+    pinnedName: sessionLabel(s),
+  };
+}
+
+/**
  * Delete a session: remove its transcript file and its pinned name from the
  * registry. Returns whether a transcript was actually removed.
  */

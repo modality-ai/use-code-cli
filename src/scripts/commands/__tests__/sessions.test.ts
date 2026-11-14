@@ -682,3 +682,20 @@ describe("sessions — --search", () => {
     expect(res.out).toContain("(searched 1)");
   });
 });
+
+describe("session — --duplicate", () => {
+  it("forks the session's transcript and pins the original name", async () => {
+    const h = setup();
+    const { sessionId, cwd, pid } = h.addSession("alpha", "busy");
+    h.addTranscript(cwd, sessionId, [{ type: "user", message: { role: "user", content: "hi" } }]);
+
+    const res = await h.run("session", String(pid), "--duplicate");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toContain(`Duplicated session alpha`);
+    expect(res.out).toContain("Transcript:");
+    expect(res.out).toContain("Pinned name: alpha");
+    expect(res.out).toContain("Resume in Claude Code:");
+  });
+
+});

@@ -11,6 +11,7 @@ import {
   type SessionMonitor,
   readSessions,
   deleteSession,
+  duplicateSession,
   readTranscriptMeta,
   sessionLabel as label,
   setSessionName,
@@ -65,6 +66,11 @@ const SessionArgsSchema = z.object({
     .optional()
     .default(false)
     .describe("Allow deleting an online session's transcript (implies --delete)"),
+  duplicate: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe("Fork the session's transcript (and pinned name) into a new session"),
 });
 
 type SessionArgs = z.infer<typeof SessionArgsSchema>;
@@ -249,6 +255,30 @@ async function session(args: SessionArgs) {
     lines.push(transcriptRemoved ? "Transcript removed." : "No transcript found; nothing to remove.");
     lines.push("Pinned name cleared from the registry (if present).");
     return { success: true, message: lines.join("\n"), data: { sessionId: s.sessionId, deleted: true } };
+  }
+
+  // Duplicate mode: fork the session's transcript (and pinned name) into a new session.
+  if (args.duplicate) {
+    const dup = await duplicateSession(s);
+    const resumeDir = await transcriptProjectCwd(s);
+    const name = dup.pinnedName ?? label(s);
+    const lines = [`Duplicated session ${label(s)} → ${dup.newSessionId}`];
+    if (dup.transcriptPath) lines.push(`Transcript: ${dup.transcriptPath}`);
+    lines.push(`Pinned name: ${name}`);
+    lines.push(`Resume in Claude Code: cd ${resumeDir ?? s.cwd} && claude --resume ${name}`);
+    lines.push(
+      ` (Claude Code searches the current project by default; from another directory, run the cd above.)`,
+    );
+    return {
+      success: true,
+      message: lines.join("\n"),
+      data: {
+        originalSessionId: s.sessionId,
+        newSessionId: dup.newSessionId,
+        transcriptPath: dup.transcriptPath ?? null,
+        pinnedName: name,
+      },
+    };
   }
 
   // Pause mode: freeze the process (SIGSTOP) without killing the session.

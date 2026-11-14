@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { pauseSession, interruptFrame } from "../peer";
 import { promptFromLine } from "../sessions";
-import { applySessionNames, splitFilterTerms, matchesSessionFilter, describeSessionFilter, sessionLabel, findSessions, findSessionsFuzzy, pauseSessionResult, encodeProjectDir, parseTranscriptSessionName, trimValue, compressTranscript, isStopped, liveSessionStatus } from "../sessions";
+import { applySessionNames, splitFilterTerms, matchesSessionFilter, describeSessionFilter, sessionLabel, findSessions, findSessionsFuzzy, pauseSessionResult, encodeProjectDir, parseTranscriptSessionName, trimValue, compressTranscript, isStopped, liveSessionStatus, duplicateSession, readSessionNames, PROJECTS_DIR, SESSIONS_DIR } from "../sessions";
 
 describe("applySessionNames", () => {
   it("pins the custom name and marks nameSource=user when a registry entry exists", () => {
@@ -437,5 +437,71 @@ describe("promptFromLine", () => {
       message: { role: "user", content: "<cross-session-message from-name=\"po\"></cross-session-message>" },
     });
     expect(promptFromLine(raw, 7)).toBeUndefined();
+  });
+});
+
+describe("duplicateSession", () => {
+  it("copies an existing transcript verbatim and pins the original name", async () => {
+    const { mkdir, writeFile, readFile, rm } = await import("node:fs/promises");
+    const { randomUUID } = await import("node:crypto");
+    const { join } = await import("node:path");
+    const cwd = `/tmp/dup-test-${randomUUID()}`;
+    const sessionId = randomUUID();
+    const projectDir = encodeProjectDir(cwd);
+    const dir = join(PROJECTS_DIR, projectDir);
+    await mkdir(dir, { recursive: true });
+    const srcPath = join(dir, `${sessionId}.jsonl`);
+    const content = JSON.stringify({ type: "user", message: { role: "user", content: "hi" } }) + "\n";
+    await writeFile(srcPath, content, "utf8");
+
+    const beforeNames = await readSessionNames();
+    const s = { sessionId, cwd, name: "my-session", online: false } as any;
+    const result = await duplicateSession(s);
+
+    try {
+      expect(typeof result.newSessionId).toBe("string");
+      expect(result.newSessionId).not.toBe(sessionId);
+      expect(result.transcriptPath).toBe(join(dir, `${result.newSessionId}.jsonl`));
+      expect(result.pinnedName).toBe("my-session");
+      const copied = await readFile(result.transcriptPath!, "utf8");
+      expect(copied).toBe(content);
+      const names = await readSessionNames();
+      expect(names[result.newSessionId]).toBe("my-session");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      await mkdir(SESSIONS_DIR, { recursive: true });
+      await writeFile(join(SESSIONS_DIR, "names.json"), JSON.stringify(beforeNames), "utf8");
+    }
+  });
+
+  it("creates an empty transcript file and returns no transcriptPath when source is missing", async () => {
+    const { mkdir, writeFile, readFile, rm } = await import("node:fs/promises");
+    const { randomUUID } = await import("node:crypto");
+    const { join } = await import("node:path");
+    const cwd = `/tmp/dup-test-${randomUUID()}`;
+    const sessionId = randomUUID();
+    // ensure no transcript file exists
+    const projectDir = encodeProjectDir(cwd);
+    const dir = join(PROJECTS_DIR, projectDir);
+
+    const beforeNames = await readSessionNames();
+    const s = { sessionId, cwd, online: false } as any;
+    const result = await duplicateSession(s);
+
+    try {
+      expect(typeof result.newSessionId).toBe("string");
+      expect(result.transcriptPath).toBeUndefined();
+      expect(result.pinnedName).toBe(sessionId); // sessionLabel falls back to sessionId
+      // empty file should have been created
+      const dest = join(dir, `${result.newSessionId}.jsonl`);
+      const content = await readFile(dest, "utf8");
+      expect(content).toBe("");
+      const names = await readSessionNames();
+      expect(names[result.newSessionId]).toBe(sessionId);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      await mkdir(SESSIONS_DIR, { recursive: true });
+      await writeFile(join(SESSIONS_DIR, "names.json"), JSON.stringify(beforeNames), "utf8");
+    }
   });
 });
