@@ -148,6 +148,7 @@ export function parseTranscript(lines: string[]): TranscriptEntry[] {
     } catch {
       continue;
     }
+    if (obj?.promptHistoryOnly) continue;
     if (obj.type === "user" && obj.message) {
       const content = obj.message.content;
       if (Array.isArray(content) && content.some((b: any) => b?.type === "tool_result")) {

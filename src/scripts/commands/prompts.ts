@@ -6,6 +6,7 @@ import {
   describeSessionFilter,
   findSessions,
   matchesSessionFilter,
+  appendPrompt,
   readPrompts,
   readSessions,
   sessionLabel,
@@ -46,6 +47,11 @@ const PromptsArgsSchema = z.object({
     .refine((v) => /^L?\d+$/i.test(v) && Number(v.replace(/^L/i, "")) > 0, "must be a prompt line number, e.g. --show 389")
     .optional()
     .describe("Print one prompt's full text, addressed by its line number"),
+  add: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Record this prompt in a session's transcript so it appears in `prompts` listings"),
 });
 
 type PromptsArgs = z.infer<typeof PromptsArgsSchema>;
@@ -96,6 +102,68 @@ async function prompts(args: PromptsArgs) {
     filterStatus: args["filter-status"],
   };
   const term = args.search?.toLowerCase();
+
+  // --add records a prompt into a session's transcript so it appears in this
+  // command's listings.
+  if (args.add !== undefined) {
+    const rows = (list: SessionInfo[]) =>
+      list.map((s) => `  ${sessionLabel(s)}  pid=${s.pid}  ${s.cwd}`).join("\n");
+    const all = await readSessions(true);
+    let matches: SessionInfo[] = [];
+    if (args.target !== undefined) {
+      matches = findSessions(all, args.target);
+    } else {
+      const filtered = all.filter((s) => matchesSessionFilter(s, filter));
+      if (filtered.length === 1) matches = filtered;
+      else if (filtered.length === 0) matches = [];
+      else {
+        return {
+          success: false,
+          message: `Multiple sessions match; specify a target:\n${rows(filtered)}`,
+        };
+      }
+    }
+
+    if (matches.length === 0) {
+      return {
+        success: false,
+        message: args.target !== undefined
+          ? `No session matches "${args.target}". Try: use-code-cli sessions --all`
+          : "No session matches. Pass a target: use-code-cli prompts <session> --add \"...\"",
+      };
+    }
+    if (matches.length > 1) {
+      return {
+        success: false,
+        message: `"${args.target}" is ambiguous; use a full name, sessionId, or pid:\n${rows(matches)}`,
+      };
+    }
+    const s = matches[0]!;
+    const line = await appendPrompt(s, args.add);
+    if (line === undefined) {
+      return {
+        success: false,
+        message: `Could not write prompt to transcript for ${sessionLabel(s)}.`,
+      };
+    }
+    const now = new Date().toISOString();
+    return {
+      success: true,
+      message: `Added prompt to ${sessionLabel(s)} (L${line}).`,
+      data: [
+        {
+          name: sessionLabel(s),
+          sessionId: s.sessionId,
+          cwd: s.cwd,
+          kind: "typed" as const,
+          timestamp: now,
+          line,
+          text: args.add,
+        },
+      ],
+    };
+  }
+
   // Prompts are historical, so offline sessions are searched too. Listing shows
   // the newest 20 by default; a search shows every match unless --limit is set.
   const limit = args.limit ? Number(args.limit) : term === undefined ? 20 : undefined;
@@ -214,7 +282,7 @@ export const promptsCommand: CLICommand = {
     "List the prompts sessions received; search only prompts with --search, or limit to one session with a target",
   inputSchema: PromptsArgsSchema,
   usage: [
-    "use-code-cli prompts [target] [search] [--filter-name <names>] [--filter-status <statuses>] [--limit <n>] [--show <line>]",
+    "use-code-cli prompts [target] [search] [--filter-name <names>] [--filter-status <statuses>] [--limit <n>] [--show <line>] [--add <text>]",
   ],
   positionalKeys: ["target", "search"],
   execute: prompts,
@@ -222,6 +290,7 @@ export const promptsCommand: CLICommand = {
     "use-code-cli prompts",
     "use-code-cli prompts --limit 5",
     "use-code-cli prompts --show 389",
+    'use-code-cli prompts <session> --add "new prompt"',
     'use-code-cli prompts --search "deploy"',
     'use-code-cli prompts use-design-da "deploy"',
     "use-code-cli prompts 6385fd14-5baa-402e-a032-d11792946b19 deploy",

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { pauseSession, interruptFrame } from "../peer";
+import { promptFromLine } from "../sessions";
 import { applySessionNames, splitFilterTerms, matchesSessionFilter, describeSessionFilter, sessionLabel, findSessions, findSessionsFuzzy, pauseSessionResult, encodeProjectDir, parseTranscriptSessionName, trimValue, compressTranscript, isStopped, liveSessionStatus } from "../sessions";
 
 describe("applySessionNames", () => {
@@ -378,5 +379,63 @@ describe("isStopped", () => {
 
   it("returns false for the current process (not stopped)", () => {
     expect(isStopped(process.pid)).toBe(false);
+  });
+});
+
+describe("promptFromLine", () => {
+  const humanEntry = JSON.stringify({
+    type: "user",
+    message: { role: "user", content: "run the tests" },
+    origin: { kind: "human" },
+    turnOrigin: "human",
+    timestamp: new Date().toISOString(),
+  });
+
+  it("treats a human-origin entry as a typed prompt", () => {
+    const p = promptFromLine(humanEntry, 1);
+    expect(p?.kind).toBe("typed");
+    expect(p?.text).toBe("run the tests");
+    expect(p?.line).toBe(1);
+  });
+
+  it("recognizes a peer message by envelope even without an origin marker", () => {
+    const raw = JSON.stringify({
+      type: "user",
+      message: { role: "user", content: "Another Claude session sent a message:\nhi" },
+    });
+    const p = promptFromLine(raw, 2);
+    expect(p?.kind).toBe("peer");
+    expect(p?.text).toBe("hi");
+  });
+
+  it("recognizes a cross-session-message envelope as a peer prompt", () => {
+    const raw = JSON.stringify({
+      type: "user",
+      message: { role: "user", content: '<cross-session-message from-name="po">hi</cross-session-message>' },
+    });
+    const p = promptFromLine(raw, 3);
+    expect(p?.kind).toBe("peer");
+    expect(p?.text).toBe("hi");
+  });
+
+  it("returns undefined for a plain user entry with no origin marker", () => {
+    const raw = JSON.stringify({ type: "user", message: { role: "user", content: "tool-ish content" } });
+    expect(promptFromLine(raw, 4)).toBeUndefined();
+  });
+
+  it("skips sidechain and tool-result user entries even with markers", () => {
+    const sidechain = JSON.stringify({ type: "user", isSidechain: true, origin: { kind: "human" }, message: { role: "user", content: "x" } });
+    const toolResult = JSON.stringify({ type: "user", toolUseResult: {}, origin: { kind: "human" }, message: { role: "user", content: "x" } });
+    expect(promptFromLine(sidechain, 5)).toBeUndefined();
+    expect(promptFromLine(toolResult, 6)).toBeUndefined();
+  });
+
+  it("skips entries whose cleaned text is empty", () => {
+    const raw = JSON.stringify({
+      type: "user",
+      origin: { kind: "peer" },
+      message: { role: "user", content: "<cross-session-message from-name=\"po\"></cross-session-message>" },
+    });
+    expect(promptFromLine(raw, 7)).toBeUndefined();
   });
 });

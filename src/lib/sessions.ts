@@ -7,6 +7,7 @@ import { prettyJsonFile } from "./output/json";
 
 export const SESSIONS_DIR = join(homedir(), ".claude", "sessions");
 export const PROJECTS_DIR = join(homedir(), ".claude", "projects");
+const HISTORY_FILE = join(homedir(), ".claude", "history.jsonl");
 
 /** One live Claude Code session, as written to ~/.claude/sessions/<pid>.json. */
 export interface SessionFile {
@@ -98,6 +99,76 @@ export async function appendSessionTitle(s: SessionInfo, name: string): Promise<
   } catch {
     // Best-effort: the registry is the primary store; a transcript write
     // failure shouldn't fail the rename (e.g. read-only or missing file).
+  }
+}
+
+/**
+ * Append a prompt the user (or this CLI) wants recorded, as a human-typed
+ * entry marked promptHistoryOnly, so it shows up in `prompts` listings
+ * without re-rendering in the chat window. Returns the 1-based line number
+ * the new entry landed on, or undefined if the transcript could not be
+ * written.
+ */
+export async function appendPrompt(s: SessionInfo, text: string): Promise<number | undefined> {
+  let path = await transcriptPath(s);
+  if (!path) {
+    const dir = join(PROJECTS_DIR, encodeProjectDir(s.cwd));
+    try {
+      await mkdir(dir, { recursive: true });
+    } catch {
+      return undefined;
+    }
+    path = join(dir, `${s.sessionId}.jsonl`);
+  }
+
+  let lineCount = 0;
+  try {
+    const content = await readFile(path, "utf8");
+    lineCount = content.split(/\n/).filter((l) => l.trim() !== "").length;
+  } catch {
+    lineCount = 0;
+  }
+
+  const entry = {
+    type: "user",
+    message: { role: "user", content: text },
+    origin: { kind: "human" },
+    promptSource: "typed",
+    turnOrigin: "human",
+    timestamp: new Date().toISOString(),
+    cwd: s.cwd,
+    promptHistoryOnly: true,
+  };
+
+  try {
+    await appendFile(path, JSON.stringify(entry) + "\n", "utf8");
+  } catch {
+    return undefined;
+  }
+  return lineCount + 1;
+}
+
+/**
+ * Record a prompt in Claude Code's own prompt history store
+ * (~/.claude/history.jsonl) so it appears in the CLI's up-arrow history for
+ * the target session. This does NOT touch the session transcript, so it cannot
+ * create a duplicate entry in the chat window. Returns whether the write
+ * succeeded.
+ */
+export async function appendPromptHistory(s: SessionInfo, text: string): Promise<boolean> {
+  const entry = {
+    display: text,
+    pastedContents: {},
+    timestamp: Date.now(),
+    project: s.cwd,
+    sessionId: s.sessionId,
+  };
+  try {
+    await mkdir(dirname(HISTORY_FILE), { recursive: true });
+    await appendFile(HISTORY_FILE, JSON.stringify(entry) + "\n", "utf8");
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -790,7 +861,7 @@ function contentText(content: unknown): string {
  * Tool results and system-injected entries also have `type: "user"`, so the
  * human/peer origin marker is what separates a real prompt from them.
  */
-function promptFromLine(raw: string, line: number): SessionPrompt | undefined {
+export function promptFromLine(raw: string, line: number): SessionPrompt | undefined {
   let entry: TranscriptUserEntry;
   try {
     entry = JSON.parse(raw) as TranscriptUserEntry;
@@ -801,7 +872,17 @@ function promptFromLine(raw: string, line: number): SessionPrompt | undefined {
     return undefined;
   }
 
-  const kind = entry.origin?.kind ?? entry.turnOrigin;
+  // Claude Code records a message another session delivered as a plain user
+  // entry whose content is wrapped in the cross-session envelope, without an
+  // origin/turnOrigin marker. Recognise those as peer prompts so they show up
+  // in prompt history instead of being silently dropped.
+  let kind = entry.origin?.kind ?? entry.turnOrigin;
+  if (kind !== "human" && kind !== "peer") {
+    const text = contentText(entry.message?.content);
+    if (/Another Claude session sent a message:/.test(text) || /<cross-session-message/i.test(text)) {
+      kind = "peer";
+    }
+  }
   if (kind !== "human" && kind !== "peer") return undefined;
 
   const text = contentText(entry.message?.content);

@@ -354,3 +354,34 @@ describe("parseTranscript tool id capture", () => {
     expect(tool.result).toBe("ok");
   });
 });
+
+describe("parseTranscript promptHistoryOnly entries", () => {
+  const promptOnly = JSON.stringify({
+    type: "user",
+    message: { role: "user", content: "test hi James" },
+    origin: { kind: "human" },
+    turnOrigin: "human",
+    promptHistoryOnly: true,
+  });
+  const peerEntry = JSON.stringify({
+    type: "user",
+    message: { role: "user", content: "test hi James" },
+    origin: { kind: "peer", verifiedPeerPid: 1234 },
+  });
+
+  it("skips promptHistoryOnly user entries instead of rendering them twice", () => {
+    const out = parseTranscript([peerEntry, promptOnly]);
+    const users = out.filter((e) => e.role === "user");
+    expect(users.length).toBe(1);
+  });
+
+  it("keeps user entries without the marker", () => {
+    const out = parseTranscript([peerEntry]);
+    expect(out.filter((e) => e.role === "user").length).toBe(1);
+  });
+
+  it("does not swallow neighbouring entries when skipping", () => {
+    const out = parseTranscript([promptOnly, JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "ok" }] } })]);
+    expect(out.map((e) => e.role)).toEqual(["assistant"]);
+  });
+});
