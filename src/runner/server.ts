@@ -5,7 +5,7 @@ import { Hono } from "hono";
 import { staticHandler } from "./static";
 import { APP_NAME, REDIRECTS } from "../config/constants";
 import { isCsrfSafe, requireAuth } from "../lib/web/auth";
-import { initTunnel } from "../lib/tunnel";
+import { initTunnel, registerLocalServer } from "../lib/tunnel";
 import React from "react";
 import RootLayout, { renderDocument } from "../web/layout";
 
@@ -165,6 +165,9 @@ export function start(options: StartOptions = {}): ReturnType<typeof Bun.serve> 
     // default 10s idle timeout so they aren't cut mid-chunk.
     idleTimeout: 255,
   });
+  // Register the live instance so the tunnel forwards to this exact bind
+  // address (getHonoUrl pattern: the runtime bind, not an env-derived guess).
+  registerLocalServer(server);
   console.log(`${APP_NAME} server listening on http://${host}:${port}`);
   // Bootstrap tunnel recovery/auto-reconnect state without requiring a web request.
   void initTunnel();

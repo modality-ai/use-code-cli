@@ -3,48 +3,19 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  tunnelPortFromEnv,
   extractTunnelUrl,
   reconnectDelay,
   getTunnelStatus,
   getSession,
   readPersistedState,
   writePersistedState,
+  prunePersistedUrl,
+  isRecentlyAlive,
+  shouldReplacePersistedUrl,
+  watchdogAction,
+  recoverPersistedUrl,
+  stopTunnel,
 } from "../tunnel";
-
-describe("tunnelPortFromEnv", () => {
-  it("returns 3000 when undefined", () => {
-    expect(tunnelPortFromEnv(undefined)).toBe("3000");
-  });
-
-  it("returns 3000 when empty string", () => {
-    expect(tunnelPortFromEnv("")).toBe("3000");
-  });
-
-  it("returns the port for a valid number", () => {
-    expect(tunnelPortFromEnv("8080")).toBe("8080");
-  });
-
-  it("returns 3000 for non-numeric input", () => {
-    expect(tunnelPortFromEnv("abc")).toBe("3000");
-  });
-
-  it("returns 3000 for out-of-range (0)", () => {
-    expect(tunnelPortFromEnv("0")).toBe("3000");
-  });
-
-  it("returns 3000 for out-of-range (65536)", () => {
-    expect(tunnelPortFromEnv("65536")).toBe("3000");
-  });
-
-  it("accepts boundary 65535", () => {
-    expect(tunnelPortFromEnv("65535")).toBe("65535");
-  });
-
-  it("accepts boundary 1", () => {
-    expect(tunnelPortFromEnv("1")).toBe("1");
-  });
-});
 
 describe("extractTunnelUrl", () => {
   it("returns null when no url present", () => {
@@ -107,6 +78,103 @@ describe("getSession", () => {
   });
 });
 
+describe("shouldReplacePersistedUrl", () => {
+  const NEW = "https://new.trycloudflare.com";
+  const OLD = "https://old.trycloudflare.com";
+  const state = (url: string | null, lastAliveAt?: string) => ({ url, lastAliveAt });
+
+  it("replaces when no state exists", () => {
+    expect(shouldReplacePersistedUrl(null, NEW)).toBe(true);
+  });
+
+  it("replaces when the persisted url is null", () => {
+    expect(shouldReplacePersistedUrl(state(null), NEW)).toBe(true);
+  });
+
+  it("replaces the same url so its marker can be refreshed", () => {
+    expect(shouldReplacePersistedUrl(state(NEW, new Date().toISOString()), NEW)).toBe(true);
+  });
+
+  it("keeps a different url whose liveness marker is still fresh", () => {
+    expect(shouldReplacePersistedUrl(state(OLD, new Date().toISOString()), NEW)).toBe(false);
+  });
+
+  it("replaces a different url once its marker times out", () => {
+    expect(shouldReplacePersistedUrl(state(OLD, new Date(Date.now() - 120_000).toISOString()), NEW)).toBe(true);
+  });
+
+  it("replaces a different url with no liveness marker", () => {
+    expect(shouldReplacePersistedUrl(state(OLD, undefined), NEW)).toBe(true);
+  });
+});
+
+describe("watchdogAction", () => {
+  const base = {
+    manualStop: false,
+    processAlive: true,
+    hasUrl: true,
+    backoffPending: false,
+    autoReconnect: true,
+    attempts: 0,
+    maxAttempts: 10,
+  };
+
+  it("stops on manual stop", () => {
+    expect(watchdogAction({ ...base, manualStop: true })).toBe("stop");
+  });
+
+  it("touches the marker while the tunnel runs with a URL", () => {
+    expect(watchdogAction(base)).toBe("touch");
+  });
+
+  it("waits while launching before a URL arrives", () => {
+    expect(watchdogAction({ ...base, hasUrl: false })).toBe("wait");
+  });
+
+  it("relaunches a hung launch that never produced a URL", () => {
+    expect(watchdogAction({ ...base, processAlive: true, hasUrl: false, launchTimedOut: true })).toBe("relaunch");
+  });
+
+  it("stops when hung-launch retries hit the attempts cap", () => {
+    expect(watchdogAction({ ...base, processAlive: true, hasUrl: false, launchTimedOut: true, attempts: 10 })).toBe("stop");
+  });
+
+  it("waits while a backoff relaunch is already scheduled", () => {
+    expect(watchdogAction({ ...base, processAlive: false, backoffPending: true })).toBe("wait");
+  });
+
+  it("relaunches when the exit event was missed", () => {
+    expect(watchdogAction({ ...base, processAlive: false })).toBe("relaunch");
+  });
+
+  it("stops after the attempts cap", () => {
+    expect(watchdogAction({ ...base, processAlive: false, attempts: 10 })).toBe("stop");
+  });
+
+  it("stops when auto-reconnect is off", () => {
+    expect(watchdogAction({ ...base, processAlive: false, autoReconnect: false })).toBe("stop");
+  });
+});
+
+describe("isRecentlyAlive", () => {
+  it("is true for a timestamp inside the grace window", () => {
+    expect(isRecentlyAlive(new Date(Date.now() - 10_000).toISOString())).toBe(true);
+  });
+
+  it("is false for a timestamp older than the grace window", () => {
+    expect(isRecentlyAlive(new Date(Date.now() - 120_000).toISOString())).toBe(false);
+  });
+
+  it("is false for undefined or invalid timestamps", () => {
+    expect(isRecentlyAlive(undefined)).toBe(false);
+    expect(isRecentlyAlive("not a date")).toBe(false);
+  });
+
+  it("honours a custom grace window", () => {
+    expect(isRecentlyAlive(new Date(Date.now() - 5_000).toISOString(), 1_000)).toBe(false);
+  });
+});
+
 describe("readPersistedState / writePersistedState", () => {
   let originalHome: string | undefined;
   let tmpHome: string;
@@ -154,6 +222,149 @@ describe("readPersistedState / writePersistedState", () => {
       active: undefined,
       port: undefined,
       lastAliveAt: undefined,
+    });
+  });
+
+  it("keeps recently-alive state when the liveness probe fails", async () => {
+    writePersistedState({ url: "https://x.trycloudflare.com", active: true, lastAliveAt: new Date().toISOString() });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => { throw new Error("down"); }) as any;
+    try {
+      expect(await prunePersistedUrl()).toBe(false);
+      expect(readPersistedState()?.url).toBe("https://x.trycloudflare.com");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("removes state when the liveness marker is stale", async () => {
+    writePersistedState({ url: "https://x.trycloudflare.com", active: true, lastAliveAt: new Date(Date.now() - 120_000).toISOString() });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => { throw new Error("down"); }) as any;
+    try {
+      expect(await prunePersistedUrl()).toBe(true);
+      expect(readPersistedState()).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("keeps state when the endpoint answers with an origin error behind a live tunnel (502)", async () => {
+    writePersistedState({ url: "https://x.trycloudflare.com", active: true, lastAliveAt: new Date(Date.now() - 120_000).toISOString() });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => ({ ok: false, status: 502 })) as any;
+    try {
+      expect(await prunePersistedUrl()).toBe(false);
+      expect(readPersistedState()?.url).toBe("https://x.trycloudflare.com");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("removes state when Cloudflare edge reports the tunnel is unreachable (530)", async () => {
+    writePersistedState({ url: "https://x.trycloudflare.com", active: true, lastAliveAt: new Date(Date.now() - 120_000).toISOString() });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => ({ ok: false, status: 530 })) as any;
+    try {
+      expect(await prunePersistedUrl()).toBe(true);
+      expect(readPersistedState()).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("removes state with a non-trycloudflare URL without probing it", async () => {
+    writePersistedState({ url: "https://evil.example.com", active: true, lastAliveAt: new Date().toISOString() });
+    const originalFetch = globalThis.fetch;
+    let fetched = false;
+    globalThis.fetch = (async () => { fetched = true; return { ok: true, status: 200 }; }) as any;
+    try {
+      expect(await prunePersistedUrl()).toBe(true);
+      expect(readPersistedState()).toBeNull();
+      expect(fetched).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("serializes concurrent prunes without deadlock", async () => {
+    writePersistedState({ url: "https://x.trycloudflare.com", active: true, lastAliveAt: new Date(Date.now() - 120_000).toISOString() });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => { throw new Error("down"); }) as any;
+    try {
+      const results = await Promise.all([prunePersistedUrl(), prunePersistedUrl(), prunePersistedUrl()]);
+      expect(results).toEqual([true, true, true]);
+      expect(readPersistedState()).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe("recoverPersistedUrl", () => {
+  let originalHome: string | undefined;
+  let tmpHome: string;
+  const TUNNEL_URL = "https://live.trycloudflare.com";
+
+  /** Run `fn` with a stubbed global fetch, restoring it afterwards. */
+  async function withFetch(impl: any, fn: () => Promise<void>) {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = impl;
+    try { await fn(); } finally { globalThis.fetch = originalFetch; }
+  }
+
+  beforeEach(() => {
+    originalHome = process.env.HOME;
+    tmpHome = mkdtempSync(join(tmpdir(), "use-code-cli-tunnel-"));
+    process.env.HOME = tmpHome;
+    // Reset module state (tunnelUrl, manualStop): other test files exercise the
+    // tunnel route with the real $HOME and can leave a live URL in memory,
+    // which would make recoverPersistedUrl() short-circuit before our fixture.
+    stopTunnel();
+  });
+
+  afterEach(() => {
+    // Reset module state (tunnelUrl, manualStop) so tests stay independent.
+    stopTunnel();
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("keeps a recently-alive tunnel but clears a stale one when the probe fails", async () => {
+    await withFetch((async () => { throw new Error("down"); }), async () => {
+      writePersistedState({ url: TUNNEL_URL, active: true, lastAliveAt: new Date().toISOString() });
+      expect(await recoverPersistedUrl()).toBeNull();
+      expect(readPersistedState()?.url).toBe(TUNNEL_URL);
+
+      writePersistedState({ url: TUNNEL_URL, active: true, lastAliveAt: new Date(Date.now() - 120_000).toISOString() });
+      expect(await recoverPersistedUrl()).toBeNull();
+      expect(readPersistedState()).toBeNull();
+    });
+  });
+
+  it("adopts a still-served persisted URL", async () => {
+    await withFetch((async () => ({ ok: true, status: 200 })), async () => {
+      writePersistedState({ url: TUNNEL_URL, active: true, autoReconnect: true, lastAliveAt: "2026-01-01T00:00:00.000Z" });
+      expect(await recoverPersistedUrl()).toBe(TUNNEL_URL);
+      expect(getTunnelStatus().autoReconnectEnabled).toBe(true);
+      expect(readPersistedState()?.url).toBe(TUNNEL_URL);
+    });
+  });
+
+  it("adopts a persisted URL whose endpoint answers with an origin error (502)", async () => {
+    await withFetch((async () => ({ ok: false, status: 502 })), async () => {
+      writePersistedState({ url: TUNNEL_URL, active: true, autoReconnect: true, lastAliveAt: "2026-01-01T00:00:00.000Z" });
+      expect(await recoverPersistedUrl()).toBe(TUNNEL_URL);
+    });
+  });
+
+  it("refreshes the liveness marker when the tunnel URL still answers", async () => {
+    await withFetch((async () => ({ ok: true, status: 200 })), async () => {
+      writePersistedState({ url: TUNNEL_URL, active: true, lastAliveAt: "2026-01-01T00:00:00.000Z" });
+      expect(await prunePersistedUrl()).toBe(false);
+      expect(readPersistedState()?.url).toBe(TUNNEL_URL);
+      expect(readPersistedState()?.lastAliveAt).not.toBe("2026-01-01T00:00:00.000Z");
     });
   });
 });

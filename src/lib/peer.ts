@@ -89,19 +89,41 @@ async function peerToken(pid: number): Promise<string | undefined> {
   return undefined;
 }
 
+/** Cap on one socket delivery — an absolute deadline is required because the
+ * socket's idle timeout alone would never fire against a peer that streams
+ * non-stop. */
+const DELIVER_TIMEOUT_MS = 5000;
+
+/**
+ * Write `payload` to a Unix socket and resolve once the kernel has accepted
+ * every byte — the peer's read speed and whether it ever closes no longer
+ * gate the sender. An absolute deadline caps the whole exchange and rejects
+ * with a clear error when the bytes cannot be handed over in time.
+ */
 function writeLine(sock: string, payload: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const c = createConnection({ path: sock });
-    c.setTimeout(5000, () => {
-      c.destroy();
-      reject(new Error(`Timed out sending to ${sock}`));
-    });
-    c.on("error", reject);
+    let settled = false;
+    const settle = (err?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      try { c.destroy(); } catch { /* already gone */ }
+      if (err) reject(err); else resolve();
+    };
+    const deadline = setTimeout(
+      () => settle(new Error(`Timed out sending to ${sock} after ${DELIVER_TIMEOUT_MS}ms`)),
+      DELIVER_TIMEOUT_MS,
+    );
+    c.on("error", (e) => settle(e));
     c.on("connect", () => {
-      c.write(payload);
-      setTimeout(() => c.end(), 150);
+      // The write callback fires when the socket buffer accepted the whole
+      // payload — the peer can still read every byte after we destroy.
+      c.write(payload, (err) => {
+        if (err) settle(err);
+        else settle();
+      });
     });
-    c.on("close", () => resolve());
   });
 }
 
@@ -144,6 +166,7 @@ export async function interrupt(s: LiveSession, reason?: string): Promise<string
     const settle = () => {
       if (settled) return;
       settled = true;
+      clearTimeout(deadline);
       try { c.destroy(); } catch { /* already gone */ }
       resolve();
     };

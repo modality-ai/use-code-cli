@@ -3,7 +3,7 @@ import { createServer } from "node:net";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { interrupt } from "../peer";
+import { deliver, interrupt } from "../peer";
 
 const SESSIONS_DIR = join(homedir(), ".claude", "sessions");
 
@@ -191,4 +191,58 @@ describe("interrupt", () => {
       await rm(keyPath, { force: true });
     }
   });
+});
+
+describe("deliver", () => {
+  it("resolves while the peer streams non-stop and never closes, even for a long payload", async () => {
+    const pid = 99999991;
+    await mkdir(SESSIONS_DIR, { recursive: true });
+    const keyPath = join(SESSIONS_DIR, `${pid}.test.key`);
+    await writeFile(keyPath, JSON.stringify({ peerToken: "tok-xyz" }), "utf8");
+
+    const sock = join(tmpdir(), `peer-stream-${Date.now()}.sock`);
+    const server = createServer((conn) => {
+      conn.on("data", () => {}); // read and discard
+      // A session relaying output (e.g. tunnel logs) writes continuously and
+      // never closes — the old close-wait would hang on exactly this.
+      const noise = setInterval(() => conn.write("ping\n"), 20);
+      conn.on("close", () => clearInterval(noise));
+    });
+    await new Promise<void>((resolve) => server.listen(sock, resolve));
+
+    try {
+      const s = { pid, sessionId: "s1", cwd: "/tmp", messagingSocketPath: sock } as any;
+      const msgId = await deliver(s, "word ".repeat(200_000), "msg-1");
+      expect(msgId).toBe("msg-1");
+    } finally {
+      server.close();
+      await rm(sock, { force: true });
+      await rm(keyPath, { force: true });
+    }
+  });
+
+  it("rejects with a clear timeout error when the peer never reads a large payload", async () => {
+    const pid = 99999990;
+    await mkdir(SESSIONS_DIR, { recursive: true });
+    const keyPath = join(SESSIONS_DIR, `${pid}.test.key`);
+    await writeFile(keyPath, JSON.stringify({ peerToken: "tok-xyz" }), "utf8");
+
+    const sock = join(tmpdir(), `peer-stall-${Date.now()}.sock`);
+    const server = createServer(() => {
+      // Accept the connection and never read it — the socket buffer fills
+      // and the payload cannot be handed over.
+    });
+    await new Promise<void>((resolve) => server.listen(sock, resolve));
+
+    try {
+      const s = { pid, sessionId: "s1", cwd: "/tmp", messagingSocketPath: sock } as any;
+      await expect(
+        deliver(s, "word ".repeat(200_000), "msg-2"),
+      ).rejects.toThrow("Timed out sending to");
+    } finally {
+      server.close();
+      await rm(sock, { force: true });
+      await rm(keyPath, { force: true });
+    }
+  }, 8000);
 });

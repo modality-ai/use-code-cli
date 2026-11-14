@@ -1,3 +1,5 @@
+import type { Readable } from "node:stream";
+
 /** The command this preprocessor applies to. */
 export const TALK_COMMAND_NAME = "talk";
 export const TALK_HERO_COMMAND_NAME = "talk-hero";
@@ -5,18 +7,43 @@ export const TALK_HERO_COMMAND_NAME = "talk-hero";
 /** The token that ends the CLI arguments and starts the literal message. */
 export const MESSAGE_SEPARATOR = "---";
 
+/** Cap on the piped-stdin read — a pipe held open by an unrelated process
+ * (sharing the captured fd, e.g. a tunnel) must not hang the CLI forever. */
+const STDIN_READ_TIMEOUT_MS = 10_000;
+
 export interface PreprocessedArgv {
   argv: string[];
   error?: string;
 }
 
-async function readStdinMessage(): Promise<string | undefined> {
-  // No piped input: reading would block on the user's terminal forever.
-  if (process.stdin.isTTY) return undefined;
-  let text = "";
-  for await (const chunk of process.stdin) text += String(chunk);
-  // A heredoc adds exactly one trailing newline; keep the rest verbatim.
-  return text.replace(/\r?\n$/, "");
+/**
+ * Read the whole piped stdin as the message text. Undefined without piped
+ * input: reading would block on the user's terminal forever. Rejects when
+ * stdin never closes — a concurrent process holding the same fd would keep
+ * the stream open indefinitely.
+ */
+export async function readStdinMessage(
+  input: Readable & { isTTY?: boolean } = process.stdin,
+  timeoutMs: number = STDIN_READ_TIMEOUT_MS,
+): Promise<string | undefined> {
+  if (input.isTTY) return undefined;
+  return new Promise<string>((resolve, reject) => {
+    let text = "";
+    const timer = setTimeout(() => {
+      input.destroy();
+      reject(new Error(`stdin did not close within ${timeoutMs}ms.`));
+    }, timeoutMs);
+    const finish = (fn: () => void) => {
+      clearTimeout(timer);
+      fn();
+    };
+    input.on("data", (chunk) => { text += String(chunk); });
+    input.on("end", () => finish(() => resolve(text)));
+    input.on("error", (err) => finish(() => reject(err)));
+  }).then((text) => {
+    // A heredoc adds exactly one trailing newline; keep the rest verbatim.
+    return text.replace(/\r?\n$/, "");
+  });
 }
 
 /**
@@ -29,7 +56,10 @@ async function readStdinMessage(): Promise<string | undefined> {
  * With nothing after the separator the message is read from stdin, which lets
  * heredocs and file redirects bypass shell parsing altogether.
  */
-export async function preprocessTalkArgv(argv: string[]): Promise<PreprocessedArgv> {
+export async function preprocessTalkArgv(
+  argv: string[],
+  stdinTimeoutMs: number = STDIN_READ_TIMEOUT_MS,
+): Promise<PreprocessedArgv> {
   if (argv[0] !== TALK_COMMAND_NAME && argv[0] !== TALK_HERO_COMMAND_NAME) return { argv };
 
   const at = argv.indexOf(MESSAGE_SEPARATOR, 1);
@@ -40,7 +70,15 @@ export async function preprocessTalkArgv(argv: string[]): Promise<PreprocessedAr
   let message = tokens.join(" ");
 
   if (tokens.length === 0) {
-    const stdin = await readStdinMessage();
+    let stdin: string | undefined;
+    try {
+      stdin = await readStdinMessage(undefined, stdinTimeoutMs);
+    } catch (err) {
+      return {
+        argv,
+        error: `Could not read the message from stdin (${(err as Error).message}). Pipe or redirect the text, or write it after the separator.`,
+      };
+    }
     if (stdin === undefined) {
       return {
         argv,

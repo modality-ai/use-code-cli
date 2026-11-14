@@ -3,6 +3,7 @@ import {
   getSession,
   clearStaleTunnelUrl,
   getTunnelStatus,
+  getLocalProjectUrl,
   recoverPersistedUrl,
   startTunnel,
   stopTunnel,
@@ -59,13 +60,19 @@ export async function GET(request: Request): Promise<Response> {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  const res = await startTunnel();
-  if (!res) {
-    return Response.json({ success: false, error: "failed to spawn cloudflared" }, { status: 500 });
+  try {
+    const res = await startTunnel();
+    if (!res) {
+      return Response.json({ success: false, error: "failed to spawn cloudflared" }, { status: 500 });
+    }
+    const { id } = res;
+    const status = getTunnelStatus();
+    return Response.json({ success: true, sessionId: id, projectUrl: getLocalProjectUrl(), url: status.tunnelUrl });
+  } catch (err) {
+    // A mis-wired registration (getLocalProjectUrl throws) or a spawn failure
+    // surfaces as a structured error, not an unhandled 500.
+    return Response.json({ success: false, error: (err as Error).message }, { status: 500 });
   }
-  const { id } = res;
-  const status = getTunnelStatus();
-  return Response.json({ success: true, sessionId: id, projectUrl: `http://127.0.0.1:${process.env.PORT || "3000"}`, url: status.tunnelUrl });
 }
 
 export async function DELETE(request: Request): Promise<Response> {
