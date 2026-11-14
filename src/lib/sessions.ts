@@ -295,11 +295,15 @@ export async function deleteSession(s: SessionInfo): Promise<{ transcriptRemoved
  * prefix, so `session use-design` finds `use-design-05`.
  */
 export function findSessions(sessions: SessionInfo[], target: string): SessionInfo[] {
+  // A numeric target is always treated as a pid: match only that pid, never
+  // fall back to a shared name/sessionId that would resolve to a different
+  // process and stop the wrong one.
+  if (/^\d+$/.test(target)) {
+    const exact = sessions.filter((s) => s.pid !== 0 && String(s.pid) === target);
+    return exact;
+  }
   const exact = sessions.filter(
-    (s) =>
-      s.name === target ||
-      s.sessionId === target ||
-      (s.pid !== 0 && String(s.pid) === target),
+    (s) => s.name === target || s.sessionId === target,
   );
   if (exact.length > 0) return exact;
   return sessions.filter((s) => s.name?.startsWith(target));
@@ -320,9 +324,11 @@ export function findSessionsFuzzy(sessions: SessionInfo[], target: string): Sess
 }
 
 /**
- * Pause decision for a resolved session: report the offline guard, send
- * SIGINT (interrupt the active turn, never kill), and shape the result.
- * `kill` is injectable so tests can stub signal delivery.
+ * Legacy SIGINT-based pause: report the offline guard, signal the pid
+ * (interrupt the active turn, never kill), and shape the result. Not wired
+ * into the CLI today — the active `--pause` path is `pauseSession` in peer.ts,
+ * which freezes the process with SIGSTOP. `kill` is injectable so tests can
+ * stub signal delivery.
  */
 export function pauseSessionResult(
   s: SessionInfo,
@@ -351,6 +357,15 @@ export function pauseSessionResult(
   };
 }
 
+/**
+ * Adjust a session's reported status for a live (online) session: a process that
+ * has been SIGSTOP'd is frozen and will never update its transcript, so report
+ * it as idle instead of its stale last status.
+ */
+export function liveSessionStatus(stopped: boolean, originalStatus: string | undefined): string | undefined {
+  return stopped ? "idle" : originalStatus;
+}
+
 function isAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -358,6 +373,17 @@ function isAlive(pid: number): boolean {
   } catch (err) {
     // EPERM means the process exists but we lack permission to signal it.
     return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+export function isStopped(pid: number): boolean {
+  try {
+    // Read process state via ps; "T" means stopped (e.g. SIGSTOP).
+    const out = Bun.spawnSync(["ps", "-o", "state=", "-p", String(pid)]);
+    const state = new TextDecoder().decode(out.stdout).trim();
+    return state.startsWith("T");
+  } catch {
+    return false;
   }
 }
 
@@ -415,7 +441,9 @@ export async function readSessionsLive(): Promise<SessionInfo[]> {
       const data = JSON.parse(
         await readFile(join(SESSIONS_DIR, file), "utf8"),
       ) as SessionFile;
-      sessions.push({ ...data, online: isAlive(data.pid) });
+      const online = isAlive(data.pid);
+      const stopped = online && isStopped(data.pid);
+      sessions.push({ ...data, online, status: liveSessionStatus(stopped, data.status) });
     } catch {
       // Skip unreadable or malformed session files.
     }

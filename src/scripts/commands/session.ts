@@ -13,14 +13,13 @@ import {
   deleteSession,
   readTranscriptMeta,
   sessionLabel as label,
-  pauseSessionResult,
   setSessionName,
   transcriptPath,
   transcriptProjectCwd,
   type SessionCron,
   type SessionInfo,
 } from "../../lib/sessions";
-import { deliver, liveSessions } from "../../lib/peer";
+import { deliver, liveSessions, pauseSession } from "../../lib/peer";
 
 const SessionArgsSchema = z.object({
   target: z
@@ -49,7 +48,7 @@ const SessionArgsSchema = z.object({
     .optional()
     .default(false)
     .describe(
-      "Interrupt (SIGINT) the target session's active turn without killing it — like Ctrl+C (online sessions only)",
+      "Freeze (SIGSTOP) the target session's process without killing it — the session stays alive; resume with SIGCONT (online sessions only)",
     ),
   delete: z
     .boolean()
@@ -252,8 +251,8 @@ async function session(args: SessionArgs) {
     return { success: true, message: lines.join("\n"), data: { sessionId: s.sessionId, deleted: true } };
   }
 
-  // Pause mode: interrupt the session's active turn (SIGINT) without killing it.
-  if (args.pause) return pauseSessionResult(s);
+  // Pause mode: freeze the process (SIGSTOP) without killing the session.
+  if (args.pause) return pauseSession(s);
 
   // Stop mode: kill the session's process.
   if (args.stop) {
@@ -264,10 +263,29 @@ async function session(args: SessionArgs) {
       };
     }
     try {
-      process.kill(s.pid, "SIGTERM");
+      // Wake a stopped (SIGSTOP'd) process so the terminate signal is delivered.
+      try { process.kill(s.pid, "SIGCONT"); } catch { /* ignore */ }
+      let termErr: string | undefined;
+      try {
+        process.kill(s.pid, "SIGTERM");
+      } catch (err) {
+        // EPERM etc. — the signal never landed; report it instead of faking success.
+        termErr = err instanceof Error ? err.message : String(err);
+      }
+      if (termErr !== undefined) {
+        return {
+          success: false,
+          message: `Could not stop session ${label(s)} (pid ${s.pid}): ${termErr}.`,
+        };
+      }
+      // Give it a moment to exit gracefully; escalate to SIGKILL if needed.
+      for (let i = 0; i < 10; i++) {
+        try { process.kill(s.pid, 0); } catch { break; }
+        Bun.sleepSync(50);
+      }
+      try { process.kill(s.pid, "SIGKILL"); } catch { /* ignore */ }
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
-      // EPERM etc. — fall back to reporting.
       return {
         success: false,
         message: `Could not stop session ${label(s)} (pid ${s.pid}): ${reason}.`,
@@ -355,7 +373,7 @@ async function session(args: SessionArgs) {
 
 export const sessionCommand: CLICommand = {
   name: "session",
-  description: "Show one session's workspace, hero, cron jobs, and how to talk to it; --pause interrupts the active turn, --stop kills the session",
+  description: "Show one session's workspace, hero, cron jobs, and how to talk to it; --pause freezes the process (SIGSTOP), --stop kills the session",
   inputSchema: SessionArgsSchema,
   positionalKeys: ["target"],
   execute: session,

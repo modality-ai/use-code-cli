@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { applySessionNames, splitFilterTerms, matchesSessionFilter, describeSessionFilter, sessionLabel, findSessions, findSessionsFuzzy, pauseSessionResult, encodeProjectDir, parseTranscriptSessionName, trimValue, compressTranscript } from "../sessions";
+import { pauseSession, interruptFrame } from "../peer";
+import { applySessionNames, splitFilterTerms, matchesSessionFilter, describeSessionFilter, sessionLabel, findSessions, findSessionsFuzzy, pauseSessionResult, encodeProjectDir, parseTranscriptSessionName, trimValue, compressTranscript, isStopped, liveSessionStatus } from "../sessions";
 
 describe("applySessionNames", () => {
   it("pins the custom name and marks nameSource=user when a registry entry exists", () => {
@@ -197,6 +198,71 @@ describe("pauseSessionResult", () => {
   });
 });
 
+describe("pauseSession", () => {
+  it("refuses to pause an offline session", async () => {
+    const s = { sessionId: "s1", name: "alpha", pid: 10, online: false } as any;
+    const out = await pauseSession(s);
+    expect(out.success).toBe(false);
+    expect(out.message).toBe(
+      "Session alpha is offline; nothing to pause. (Only active sessions can be paused.)",
+    );
+  });
+
+  it("sends SIGSTOP to the process and reports the pause", async () => {
+    const s = { sessionId: "s1", name: "alpha", pid: 10, online: true } as any;
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const out = await pauseSession(s, {
+      kill: (pid, signal) => signals.push({ pid, signal }),
+    });
+    expect(signals).toEqual([{ pid: 10, signal: "SIGSTOP" }]);
+    expect(out.success).toBe(true);
+    expect(out.message).toBe(
+      "Paused session alpha (pid 10) — process frozen; resume with SIGCONT.",
+    );
+    expect(out.data).toEqual({
+      sessionId: "s1",
+      pid: 10,
+      name: "alpha",
+      pause: "sigstop",
+    });
+  });
+
+  it("propagates a failed pause", async () => {
+    const s = { sessionId: "s1", name: "alpha", pid: 10, online: true } as any;
+    const out = await pauseSession(s, {
+      kill: () => {
+        throw new Error("EPERM");
+      },
+    });
+    expect(out.success).toBe(false);
+    expect(out.message).toBe("Could not pause session alpha (pid 10): EPERM.");
+  });
+});
+
+describe("interruptFrame", () => {
+  it("builds the control-protocol interrupt request", () => {
+    const parsed = JSON.parse(interruptFrame("req-1", "user-cancel"));
+    expect(parsed).toEqual({
+      type: "control_request",
+      request_id: "req-1",
+      request: { subtype: "interrupt", reason: "user-cancel" },
+    });
+  });
+
+  it("uses a custom reason when provided", () => {
+    const parsed = JSON.parse(interruptFrame("req-2", "timeout"));
+    expect(parsed.request.reason).toBe("timeout");
+    expect(parsed.request_id).toBe("req-2");
+  });
+
+  it("generates a request id when none is given", () => {
+    const parsed = JSON.parse(interruptFrame());
+    expect(typeof parsed.request_id).toBe("string");
+    expect(parsed.request_id.length).toBeGreaterThan(0);
+    expect(parsed.request.subtype).toBe("interrupt");
+  });
+});
+
 describe("encodeProjectDir", () => {
   it("encodes a path", () => {
     const out = encodeProjectDir("/tmp/foo");
@@ -287,5 +353,30 @@ describe("compressTranscript", () => {
     expect(out).toContain("compact_boundary");
     expect(out).toContain("summary text");
     await rm(dir, { recursive: true });
+  });
+});
+
+describe("liveSessionStatus", () => {
+  it("reports idle when the session is stopped", () => {
+    expect(liveSessionStatus(true, "busy")).toBe("idle");
+  });
+
+  it("keeps the original status when not stopped", () => {
+    expect(liveSessionStatus(false, "busy")).toBe("busy");
+    expect(liveSessionStatus(false, "idle")).toBe("idle");
+  });
+
+  it("keeps undefined when not stopped and status was undefined", () => {
+    expect(liveSessionStatus(false, undefined)).toBeUndefined();
+  });
+});
+
+describe("isStopped", () => {
+  it("returns false for a non-existent pid", () => {
+    expect(isStopped(999999999)).toBe(false);
+  });
+
+  it("returns false for the current process (not stopped)", () => {
+    expect(isStopped(process.pid)).toBe(false);
   });
 });

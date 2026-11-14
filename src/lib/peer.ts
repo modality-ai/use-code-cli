@@ -3,7 +3,12 @@ import { join } from "node:path";
 import { createConnection } from "node:net";
 import { execFileSync } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
-import { readSessionsLive, SESSIONS_DIR } from "./sessions";
+import {
+  readSessionsLive,
+  SESSIONS_DIR,
+  sessionLabel,
+  type SessionInfo,
+} from "./sessions";
 
 export interface LiveSession {
   pid: number;
@@ -96,6 +101,133 @@ function writeLine(sock: string, payload: string): Promise<void> {
     });
     c.on("close", () => resolve());
   });
+}
+
+/**
+ * The socket's control-protocol interrupt frame: it stops the session's active
+ * turn while leaving the process, the session, and any queued prompts alive.
+ * This is the same request the SDK's `interrupt()` sends on the CLI's stdin.
+ */
+export function interruptFrame(requestId: string = randomUUID(), reason = "user-cancel"): string {
+  return JSON.stringify({
+    type: "control_request",
+    request_id: requestId,
+    request: { subtype: "interrupt", reason },
+  });
+}
+
+/**
+ * Stop a live session's active turn over its messaging socket, without a
+ * signal. Fire-and-forget: the frame is written and the socket is closed
+ * without reading a response; the request id is returned for callers that
+ * track it out of band. Throws when the session has no socket or the frame
+ * cannot be written.
+ */
+export async function interrupt(s: LiveSession, reason?: string): Promise<string> {
+  if (!s.messagingSocketPath) throw new Error(`Session ${s.pid} has no messaging socket.`);
+  const token = await peerToken(s.pid);
+  if (!token) throw new Error(`No peer token found for pid ${s.pid}.`);
+
+  const requestId = randomUUID();
+  const frame = interruptFrame(requestId, reason) + "\n";
+
+  // Use a single connection: send auth first, drain queued bytes, then send the
+  // interrupt frame on the same socket so the control_request is not stalled by
+  // a full receive buffer. An absolute deadline caps the whole exchange — the
+  // idle timeout alone would never fire against a peer that streams non-stop.
+  await new Promise<void>((resolve, reject) => {
+    const c = createConnection({ path: s.messagingSocketPath! });
+    let sent = false;
+    let settled = false;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      try { c.destroy(); } catch { /* already gone */ }
+      resolve();
+    };
+    const deadline = setTimeout(settle, 900);
+    c.setTimeout(700, () => {
+      if (!sent) {
+        sent = true;
+        try { c.write(frame); } catch { /* socket may already be gone */ }
+      }
+      setTimeout(settle, 150);
+    });
+    c.on("error", (e) => {
+      clearTimeout(deadline);
+      c.destroy();
+      reject(e);
+    });
+    c.on("data", () => {
+      // discard queued bytes
+    });
+    c.on("connect", () => {
+      c.write(JSON.stringify({ type: "auth", token }) + "\n");
+    });
+    c.on("close", () => {
+      clearTimeout(deadline);
+      settle();
+    });
+  });
+
+  return requestId;
+}
+
+/**
+ * Pause a resolved session by freezing its process (SIGSTOP). The session
+ * stays alive and can be resumed with SIGCONT.
+ */
+export async function pauseSession(
+  s: SessionInfo,
+  deps: {
+    /** Signal delivery; injectable so tests can stub. */
+    kill?: (pid: number, signal: NodeJS.Signals) => void;
+  } = {},
+): Promise<{ success: boolean; message: string; data?: Record<string, unknown> }> {
+  if (!s.online) {
+    return {
+      success: false,
+      message: `Session ${sessionLabel(s)} is offline; nothing to pause. (Only active sessions can be paused.)`,
+    };
+  }
+  const kill = deps.kill ?? ((pid, signal) => process.kill(pid, signal));
+  try {
+    kill(s.pid, "SIGSTOP");
+    return {
+      success: true,
+      message: `Paused session ${sessionLabel(s)} (pid ${s.pid}) — process frozen; resume with SIGCONT.`,
+      data: { sessionId: s.sessionId, pid: s.pid, name: sessionLabel(s), pause: "sigstop" },
+    };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    return {
+      success: false,
+      message: `Could not pause session ${sessionLabel(s)} (pid ${s.pid}): ${reason}.`,
+    };
+  }
+}
+
+export async function resumeSession(
+  s: SessionInfo,
+  deps: {
+    kill?: (pid: number, signal: NodeJS.Signals) => void;
+  } = {},
+): Promise<{ success: boolean; message: string; data?: Record<string, unknown> }> {
+  if (!s.online) {
+    return { success: false, message: `Session ${sessionLabel(s)} is offline.` };
+  }
+  const kill = deps.kill ?? ((pid, signal) => process.kill(pid, signal));
+  try {
+    kill(s.pid, "SIGCONT");
+    return {
+      success: true,
+      message: `Resumed session ${sessionLabel(s)} (pid ${s.pid}).`,
+      data: { sessionId: s.sessionId, pid: s.pid, name: sessionLabel(s), resume: "sigcont" },
+    };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    return { success: false, message: `Could not resume session ${sessionLabel(s)} (pid ${s.pid}): ${reason}.` };
+  }
 }
 
 /**

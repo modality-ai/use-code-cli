@@ -21,7 +21,8 @@ function setup() {
 
   const sleeps: Bun.Subprocess[] = [];
   cleanups.push(() => {
-    for (const p of sleeps) p.kill();
+    // SIGKILL also reaches a SIGSTOP'd process, which SIGTERM never would.
+    for (const p of sleeps) p.kill("SIGKILL");
     rmSync(home, { recursive: true, force: true });
   });
 
@@ -47,7 +48,7 @@ function setup() {
         updatedAt,
       }),
     );
-    return { sessionId, cwd };
+    return { sessionId, cwd, pid: proc.pid };
   }
 
   /** Write the .jsonl that carries a session's branch, hero, and last prompt. */
@@ -476,6 +477,49 @@ describe("sessions — --recent", () => {
     const text = await h.run("sessions", "--recent", "abc");
     expect(text.code).toBe(1);
     expect(text.err).toContain("must be a positive integer");
+  });
+});
+
+describe("session — --stop", () => {
+  /** Poll until a pid is gone, so a never-delivered signal fails the test. */
+  function dead(pid: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      const started = Date.now();
+      const tick = () => {
+        try {
+          process.kill(pid, 0);
+          if (Date.now() - started > 3000) resolve(false);
+          else setTimeout(tick, 100);
+        } catch {
+          resolve(true);
+        }
+      };
+      tick();
+    });
+  }
+
+  it("kills a live session's process", async () => {
+    const h = setup();
+    const { pid } = h.addSession("alpha", "busy");
+
+    const res = await h.run("session", String(pid), "--stop");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toContain(`Killed session alpha (pid ${pid})`);
+    await expect(dead(pid)).resolves.toBe(true);
+  });
+
+  it("wakes a SIGSTOP'd session before terminating it", async () => {
+    const h = setup();
+    const { pid } = h.addSession("frozen", "busy");
+    process.kill(pid, "SIGSTOP");
+
+    const res = await h.run("session", String(pid), "--stop");
+
+    expect(res.code).toBe(0);
+    expect(res.out).toContain(`Killed session frozen (pid ${pid})`);
+    // SIGSTOP alone would swallow the SIGTERM; the CLI must wake it first.
+    await expect(dead(pid)).resolves.toBe(true);
   });
 });
 

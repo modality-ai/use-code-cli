@@ -7,10 +7,10 @@ export interface ChatInputProps {
   sending: boolean;
   busy: boolean;
   onSend: () => void;
-  onStop: () => void;
+  onPause: () => void;
 }
 
-export default function ChatInput({ chatOpen, chatRef, chatStatus, sending, busy, onSend, onStop }: ChatInputProps) {
+export default function ChatInput({ chatOpen, chatRef, chatStatus, sending, busy, onSend, onPause }: ChatInputProps) {
   return (
     <>
       <div className={(chatOpen ? "flex" : "hidden") + " gap-2 w-full"} role="group" aria-label="Chat input">
@@ -31,9 +31,9 @@ export default function ChatInput({ chatOpen, chatRef, chatStatus, sending, busy
             id="chat-pause"
             type="button"
             className="shrink-0 px-3 py-2 rounded-sm border border-border bg-surface text-text-primary cursor-pointer"
-            onClick={onStop}
+            onClick={onPause}
             disabled={sending}
-            aria-label="Pause the session's active turn"
+            aria-label="Pause the session (freeze its process)"
           >⏸️</button>
         ) : (
           <button

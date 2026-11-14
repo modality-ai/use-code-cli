@@ -207,7 +207,7 @@ export default function SessionView(props: BootProps) {
   );
   const [chatStatus, setChatStatus] = useState(""); // send progress + SSE errors
   const [sending, setSending] = useState(false);
-  const [stopping, setStopping] = useState(false);
+  const [pausing, setPausing] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -393,10 +393,10 @@ export default function SessionView(props: BootProps) {
     }
   };
 
-  const stop = async () => {
-    if (stopping) return;
-    setStopping(true);
-    setChatStatus("stopping...");
+  const pause = async () => {
+    if (pausing) return;
+    setPausing(true);
+    setChatStatus("pausing...");
     try {
       const r = await fetch("/my/api/session/pause", {
         method: "POST",
@@ -405,7 +405,7 @@ export default function SessionView(props: BootProps) {
       });
       const d = await r.json();
       if (d?.success) {
-        setChatStatus(d.paused === false ? "stop sent — session still working" : "paused");
+        setChatStatus("paused (frozen)");
         // Refresh session status so the header reflects the return to idle.
         // statusOnly=1: we only read online/status here — skip the transcript.
         try {
@@ -421,7 +421,7 @@ export default function SessionView(props: BootProps) {
     } catch (e) {
       setChatStatus("error: " + String(e));
     } finally {
-      setStopping(false);
+      setPausing(false);
     }
   };
 
@@ -503,7 +503,7 @@ export default function SessionView(props: BootProps) {
         sending={sending}
         busy={meta.status === "busy"}
         onSend={send}
-        onStop={stop}
+        onPause={pause}
       />
     </div>
     </div>
