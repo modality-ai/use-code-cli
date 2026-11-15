@@ -117,6 +117,7 @@ export function appendReplyInstruction(
   // keeps exactly one marker on the wire.
   const meta = parseReplyMeta(message);
   const base = meta ? stripReplyMarkers(message) : message;
-  const summary = base.length > 120 ? `${base.slice(0, 119)}…` : base;
-  return `${summary}\n\n${replyInstruction(senderName, options.msgId)}\n${replyMarker(MAX_REPLY_HOP, options)}`;
+  // Keep the full message — truncating it loses the user's actual content and
+  // forces the receiver to ask for clarification.
+  return `${base}\n\n${replyInstruction(senderName, options.msgId)}\n${replyMarker(MAX_REPLY_HOP, options)}`;
 }

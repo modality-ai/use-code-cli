@@ -104,8 +104,11 @@ describe("launchTunnel (detached)", () => {
       expect(readPersistedState()?.url).toBe(url);
     } finally {
       await stopTunnel();
-      if (ORIG_BIN === undefined) delete process.env.CLOUDFLARED_BIN;
-      else process.env.CLOUDFLARED_BIN = ORIG_BIN;
+      // Restore the module fake, not ORIG_BIN: ORIG_BIN is the pre-beforeAll
+      // value (usually unset), so deleting it here silently pointed every
+      // later launch at the real cloudflared on PATH — hitting the real
+      // Cloudflare API and failing on its 429 rate limit.
+      process.env.CLOUDFLARED_BIN = join(binDir, "cloudflared");
     }
   }, 10000);
 
@@ -163,9 +166,11 @@ describe("launchTunnel (detached)", () => {
     }
   }, 10000);
 
-  it("does not kill a decoy that mentions cloudflared but points elsewhere", async () => {
-    // Carries the signature words, but the URL is not our local server — the
-    // exact spawn signature is what distinguishes an adopted orphan from noise.
+  it("stops the recorded daemon even when its target is not the current origin", async () => {
+    // An explicit stop intends to stop the tunnel: whatever the pid file
+    // records is stopped, as long as the process still runs cloudflared —
+    // the pid file is the stop authority, so a daemon targeting another
+    // origin goes down with the rest.
     writeFileSync(join(binDir, "cloudflared-lookalike"), "#!/bin/sh\nexec sleep 300\n");
     chmodSync(join(binDir, "cloudflared-lookalike"), 0o755);
     const decoy = Bun.spawn(
@@ -177,12 +182,122 @@ describe("launchTunnel (detached)", () => {
       writeFileSync(pidFile, String(decoy.pid));
       await stopTunnel();
       await new Promise((r) => setTimeout(r, 200));
-      let alive = false;
-      try { process.kill(decoy.pid, 0); alive = true; } catch {}
-      expect(alive).toBe(true);
+      expect(() => process.kill(decoy.pid, 0)).toThrow();
+      expect(existsSync(pidFile)).toBe(false);
     } finally {
       try { decoy.kill(); } catch {}
     }
+  }, 10000);
+
+  it("launch sweeps stale untracked cloudflared processes, sparing decoys", async () => {
+    // ⚠️ The sweep matches any host process carrying the loopback cloudflared
+    // signature — a real tunnel running on this machine during `bun test`
+    // will be SIGTERMed too.
+    // An orphan with our spawn signature but no pid file / activeProc tracking:
+    // the sweep must find it via the process list and stop it. No exec here —
+    // exec would rename the process to `sleep` mid-test and drop the signature
+    // from the command line the sweep matches on.
+    // Each fake is launched through a parent shell that exits immediately, so
+    // the fake reparents to launchd (ppid 1) — the sweep's orphan
+    // fingerprint. A fake whose parent (this test) stays alive would be
+    // spared: sparing live instances' tunnels is what keeps two coexisting
+    // instances from killing each other in a loop.
+    function spawnReparented(name: string, script: string, args: string): void {
+      writeFileSync(join(binDir, name), script);
+      chmodSync(join(binDir, name), 0o755);
+      const parent = join(binDir, name + "-parent");
+      writeFileSync(parent, [
+        "#!/bin/sh",
+        `${join(binDir, name)} ${args} &`,
+        "sleep 0.1",
+        "",
+      ].join("\n"));
+      chmodSync(parent, 0o755);
+      Bun.spawn([parent], { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+    }
+    spawnReparented("cloudflared-stale", "#!/bin/sh\necho stale\nwhile :; do sleep 1; done\n", "tunnel --url http://127.0.0.1:59998");
+    // A decoy carrying the signature words but a remote target must survive
+    // the sweep (same policy as stopTunnel's pid verification).
+    spawnReparented("cloudflared-lookalike", "#!/bin/sh\nwhile :; do sleep 1; done\n", "cloudflared tunnel --url https://elsewhere.example.com");
+    // Declared above the try: the finally must kill both fakes even when the
+    // try body fails mid-test. Declaring inside the try puts them out of the
+    // finally's scope — the ReferenceError is swallowed by the inner catch
+    // and the decoy (spared by the sweep by design) leaks onto the host.
+    let staleFakePid = NaN;
+    let lookalikeFakePid = NaN;
+    let orphanPid = NaN;
+    let decoyPid = NaN;
+    try {
+      // Wait for both fakes to surface in the process list AND reparent
+      // (ppid 1) — bun's spawn startup latency means a fixed sleep races the
+      // parent shells, so poll until the sweep's precondition holds.
+      const findPid = (pattern: string): number => {
+        try {
+          return Number.parseInt(execFileSync("pgrep", ["-f", pattern], { encoding: "utf8" }).split("\n")[0].trim(), 10);
+        } catch { return Number.NaN; } // pgrep exits non-zero when nothing matches
+      };
+      const ppidOf = (pid: number): number => {
+        try {
+          return Number.parseInt(execFileSync("ps", ["-o", "ppid=", "-p", String(pid)], { encoding: "utf8" }).trim(), 10);
+        } catch { return Number.NaN; }
+      };
+      const orphanReparented = (): boolean => {
+        const pid = findPid("cloudflared-stale.*tunnel --url");
+        return Number.isInteger(pid) && ppidOf(pid) === 1 ? (staleFakePid = pid, true) : false;
+      };
+      const decoyReparented = (): boolean => {
+        const pid = findPid("cloudflared-lookalike.*tunnel --url");
+        return Number.isInteger(pid) && ppidOf(pid) === 1 ? (lookalikeFakePid = pid, true) : false;
+      };
+      for (let i = 0; i < 30 && !(staleFakePid > 0 && lookalikeFakePid > 0); i++) {
+        await new Promise((r) => setTimeout(r, 100));
+        if (!(staleFakePid > 0)) orphanReparented();
+        if (!(lookalikeFakePid > 0)) decoyReparented();
+      }
+      orphanPid = staleFakePid;
+      decoyPid = lookalikeFakePid;
+      expect(Number.isInteger(orphanPid)).toBe(true);
+      expect(Number.isInteger(decoyPid)).toBe(true);
+      const res = await startTunnel();
+      expect(res).not.toBeNull();
+      await new Promise((r) => setTimeout(r, 300));
+      let orphanAlive = false;
+      try { process.kill(orphanPid, 0); orphanAlive = true; } catch {}
+      expect(orphanAlive).toBe(false);
+      let decoyAlive = false;
+      try { process.kill(decoyPid, 0); decoyAlive = true; } catch {}
+      expect(decoyAlive).toBe(true);
+    } finally {
+      try { process.kill(orphanPid, "SIGKILL"); } catch {}
+      try { process.kill(decoyPid, "SIGKILL"); } catch {}
+      await stopTunnel();
+    }
+  }, 10000);
+
+  it("launch truncates an oversized tunnel.log, so a stale URL cannot win", async () => {
+    // The log is append-only across launches now, so it needs the size cap:
+    // seed it past the cap with a stale URL — the launch must start fresh
+    // (truncating the seed) instead of letting that URL surface.
+    const stateDir = join(tmpHome, ".use-code-cli");
+    mkdirSync(stateDir, { recursive: true });
+    const logFile = join(stateDir, "tunnel.log");
+    const staleUrl = "https://stale-" + Date.now() + ".trycloudflare.com";
+    writeFileSync(logFile, ("# padding\n").repeat(200_000) + "your url is " + staleUrl + "\n");
+    const res = await startTunnel();
+    expect(res).not.toBeNull();
+    let url: string | null = null;
+    for (let i = 0; i < 40 && !url; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      url = getTunnelStatus().tunnelUrl;
+    }
+    expect(url).toMatch(/trycloudflare\.com$/);
+    expect(url).not.toContain("stale-");
+    expect(readPersistedState()?.url).toBe(url);
+    // The oversized log was truncated at this launch: the stale URL is gone.
+    const logNow = readFileSync(logFile, "utf8");
+    expect(logNow.length).toBeLessThan(2_000_000);
+    expect(logNow).not.toContain("stale-");
+    await stopTunnel();
   }, 10000);
 
   it("forwards cloudflared to the registered local server address", async () => {

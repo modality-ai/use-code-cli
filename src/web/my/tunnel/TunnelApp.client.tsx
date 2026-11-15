@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { TUNNEL_BTN, TUNNEL_OUTPUT, TUNNEL_STATUS, TUNNEL_URL, UNLINK_BTN, COPY_BTN } from "./dom-ids";
 
 export interface TunnelPageProps {
@@ -9,6 +9,8 @@ export interface TunnelPageProps {
 
 export default function TunnelApp({ url }: TunnelPageProps = {}) {
   const [hasUrl, setHasUrl] = useState<boolean>(!!url);
+  const [lastAliveAt, setLastAliveAt] = useState<string | null>(null);
+  const redirectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   function updateActionButtons(u: boolean) {
     setHasUrl(u);
     const copyBtn = document.getElementById(COPY_BTN) as HTMLButtonElement | null;
@@ -101,23 +103,53 @@ export default function TunnelApp({ url }: TunnelPageProps = {}) {
     const statusEl = document.getElementById(TUNNEL_STATUS);
     function refreshTunnelStatus() {
       fetch("/my/api/tunnel")
-        .then((r) => r.json())
-        .then((d) => {
+        .then(async (r) => {
+          const d = await r.json();
+          // A 401 is an auth problem, not a cloudflared one: show the real
+          // state, then send the tab to the sign-in page instead of leaving a
+          // broken-looking tunnel form. The ref guard keeps repeated 401
+          // polls from stacking redirect timers.
+          if (r.status === 401) {
+            if (statusEl) statusEl.textContent = "Not signed in — redirecting to sign in…";
+            if (!redirectTimer.current) {
+              // Give the user a moment to read the message (same pacing as
+              // the passkey sign-in redirect).
+              redirectTimer.current = setTimeout(() => { window.location.href = "/passkey"; }, 1500);
+            }
+            setUrlSection(null);
+            setLastAliveAt(null);
+            return;
+          }
+          // The session recovered inside the redirect window: cancel the
+          // pending 401 navigation so a recovered user is not sent to sign in.
+          if (redirectTimer.current) {
+            clearTimeout(redirectTimer.current);
+            redirectTimer.current = undefined;
+          }
           if (statusEl) statusEl.textContent = d.success ? "cloudflared: " + (d.version || "ready") : "cloudflared not found — install first";
           if (d.url) setUrlSection(d.url);
           else setUrlSection(null);
+          if (typeof d.lastAliveAt === "string") setLastAliveAt(d.lastAliveAt);
+          else setLastAliveAt(null);
         })
         .catch((e) => { if (statusEl) statusEl.textContent = "status error: " + String(e); });
     }
     refreshTunnelStatus();
     const intervalId = setInterval(refreshTunnelStatus, 2000);
     if (url) setUrlSection(url);
-    return () => clearInterval(intervalId);
+    return () => {
+      clearInterval(intervalId);
+      clearTimeout(redirectTimer.current);
+    };
   }, []);
 
   return (
     <div className="max-w-3xl mx-auto my-6 p-4">
-      <h1>Tunnel (cloudflared)</h1>
+      <div className="flex items-center gap-2 mb-md">
+        <a href="/" className="text-xs text-accent-collaboration hover:underline">Home</a>
+        <span className="text-text-muted">/</span>
+        <h1 className="text-2xl font-semibold font-display">Tunnel (cloudflared)</h1>
+      </div>
       <p>Cloudflare Tunnel client (formerly Argo Tunnel). Integrates the use-code-cli web server with Cloudflare so it can be reached from anywhere.</p>
       <p>Source: <a href="https://formulae.brew.sh/formula/cloudflared" className="text-accent-collaboration hover:underline">https://formulae.brew.sh/formula/cloudflared</a></p>
       <h2>1. Install</h2>
@@ -128,6 +160,7 @@ export default function TunnelApp({ url }: TunnelPageProps = {}) {
       <p>One click creates the tunnel and links it to this project web url.</p>
       <button id={TUNNEL_BTN} onClick={createAndLink} className="px-3 py-2 rounded-sm bg-accent-collaboration text-white font-semibold cursor-pointer">Create &amp; Link tunnel</button>
       <h2>Tunnel URL</h2>
+      <p className="text-xs text-text-muted mb-1">Last alive: <span id="tunnel-last-alive">{lastAliveAt || "—"}</span></p>
       <div className="flex items-center gap-2">
         <div id={TUNNEL_URL} className="flex-1 border border-border rounded-sm p-3 bg-surface font-code text-sm break-all">{url || "—"}</div>
         <button id={COPY_BTN} onClick={copy} disabled={!hasUrl} className="px-3 py-2 rounded-sm border border-border cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Copy</button>

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   extractTunnelUrl,
+  redactTunnelUrl,
   reconnectDelay,
   getTunnelStatus,
   getSession,
@@ -12,6 +13,7 @@ import {
   prunePersistedUrl,
   isRecentlyAlive,
   shouldReplacePersistedUrl,
+  isCloudflaredSpawnSignature,
   watchdogAction,
   recoverPersistedUrl,
   stopTunnel,
@@ -38,6 +40,29 @@ describe("extractTunnelUrl", () => {
   it("returns first match", () => {
     const chunk = "https://a.trycloudflare.com and https://b.trycloudflare.com";
     expect(extractTunnelUrl(chunk)).toBe("https://a.trycloudflare.com");
+  });
+});
+
+describe("redactTunnelUrl", () => {
+  it("makes a diagnostic quoting tunnel URLs non-extractable (a stale URL must not resurrect tunnel.json)", () => {
+    // A real diagnostic line quoting two URLs — every occurrence must be
+    // mangled while the subdomain stays readable for debugging.
+    const line = "not replacing persisted URL https://old.trycloudflare.com with https://new.trycloudflare.com: lastAliveAt still inside the grace window (HTTPS://UPPER.TRYCLOUDFLARE.COM)";
+    const redacted = redactTunnelUrl(line);
+    expect(extractTunnelUrl(redacted)).toBeNull();
+    expect(redacted).toContain("old.trycloudflare<redacted>");
+  });
+});
+
+describe("isCloudflaredSpawnSignature", () => {
+  it("matches a cloudflared process targeting a loopback URL", () => {
+    expect(isCloudflaredSpawnSignature("cloudflared tunnel --url http://127.0.0.1:59998")).toBe(true);
+  });
+  it("rejects a decoy whose target is remote (the sweep kills only loopback tunnels)", () => {
+    expect(isCloudflaredSpawnSignature("cloudflared tunnel --url https://elsewhere.example.com")).toBe(false);
+  });
+  it("rejects a line without the cloudflared binary name", () => {
+    expect(isCloudflaredSpawnSignature("sleep 300")).toBe(false);
   });
 });
 
@@ -69,6 +94,21 @@ describe("getTunnelStatus", () => {
     expect(s).toHaveProperty("tunnelUrl");
     expect(s).toHaveProperty("autoReconnectEnabled");
     expect(s).toHaveProperty("isTunnelAlive");
+  });
+
+  it("hides lastAliveAt when no tunnel URL is running (stale persisted marker must not read as current)", () => {
+    const origHome = process.env.HOME;
+    const tmpHome = mkdtempSync(join(tmpdir(), "use-code-cli-status-"));
+    process.env.HOME = tmpHome;
+    try {
+      writePersistedState({ url: "https://x.trycloudflare.com", active: true, lastAliveAt: new Date().toISOString() });
+      // nobody running; it must not read as current liveness.
+      expect(getTunnelStatus().lastAliveAt).toBeNull();
+    } finally {
+      if (origHome === undefined) delete process.env.HOME;
+      else process.env.HOME = origHome;
+      rmSync(tmpHome, { recursive: true, force: true });
+    }
   });
 });
 
@@ -313,19 +353,23 @@ describe("recoverPersistedUrl", () => {
     try { await fn(); } finally { globalThis.fetch = originalFetch; }
   }
 
-  beforeEach(() => {
+  beforeEach(async () => {
     originalHome = process.env.HOME;
     tmpHome = mkdtempSync(join(tmpdir(), "use-code-cli-tunnel-"));
     process.env.HOME = tmpHome;
     // Reset module state (tunnelUrl, manualStop): other test files exercise the
     // tunnel route with the real $HOME and can leave a live URL in memory,
     // which would make recoverPersistedUrl() short-circuit before our fixture.
-    stopTunnel();
+    // Awaited: a stop whose locked removal lands after HOME is restored would
+    // delete the REAL tunnel.json instead of this fixture's.
+    await stopTunnel();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     // Reset module state (tunnelUrl, manualStop) so tests stay independent.
-    stopTunnel();
+    // Awaited while HOME still points at the fixture — the removal must not
+    // outlive it.
+    await stopTunnel();
     if (originalHome === undefined) delete process.env.HOME;
     else process.env.HOME = originalHome;
     rmSync(tmpHome, { recursive: true, force: true });

@@ -56,7 +56,7 @@ export async function GET(request: Request): Promise<Response> {
   await recoverPersistedUrl();
   const status = getTunnelStatus();
   const cloud = await checkCloudflared();
-  return Response.json({ success: cloud.success, version: cloud.version, url: status.tunnelUrl, autoReconnect: status.autoReconnectEnabled, error: cloud.error });
+  return Response.json({ success: cloud.success, version: cloud.version, url: status.tunnelUrl, autoReconnect: status.autoReconnectEnabled, lastAliveAt: status.lastAliveAt, error: cloud.error });
 }
 
 export async function POST(request: Request): Promise<Response> {

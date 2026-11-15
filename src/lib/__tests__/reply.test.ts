@@ -47,6 +47,15 @@ describe("reply instruction", () => {
     expect(appendReplyInstruction("ping", undefined)).toBe("ping");
   });
 
+  it("keeps a long message whole — truncation used to cut the payload tail", () => {
+    // A >120-char message whose distinctive tail is exactly what truncation
+    // (slice(0, 119)) would have dropped: the full body must survive verbatim.
+    const message =
+      "check the tunnel: the persisted URL https://old.trycloudflare.com was deleted at 13:02 and the relaunch produced https://new.trycloudflare.com — report both";
+    const out = appendReplyInstruction(message, "caller", { msgId: "msg-2" });
+    expect(out).toContain(message);
+  });
+
   it("does not duplicate an instruction the message already carries", () => {
     const message = "done. use-code-cli talk someone --one-way";
     expect(hasReplyInstruction(message)).toBe(true);

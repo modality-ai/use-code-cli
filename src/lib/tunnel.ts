@@ -3,11 +3,13 @@ import { execFileSync } from "node:child_process";
 import {
   readFileSync,
   writeFileSync,
+  appendFileSync,
   unlinkSync,
   existsSync,
   mkdirSync,
   openSync,
   closeSync,
+  statSync,
 } from "node:fs";
 import { open, stat } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -23,6 +25,35 @@ function tunnelStateFile(): string {
 function tunnelLogFile(): string {
   return join(tunnelStateDir(), "tunnel.log");
 }
+
+// The URL extractor scans this log's tail, so a diagnostic line quoting a
+// tunnel URL must not be extractable: a stale URL in a diagnostic would
+// otherwise be picked up as a live tunnel and resurrect tunnel.json. Keep the
+// subdomain readable, mangle the domain so TRYCLOUDFLARE_URL_RE cannot match.
+export function redactTunnelUrl(text: string): string {
+  // Case-insensitive to match TRYCLOUDFLARE_URL_RE exactly: an uppercase URL
+  // in a diagnostic must be mangled too, or the extractor still finds it.
+  return text.replace(/\.trycloudflare\.com/gi, ".trycloudflare<redacted>");
+}
+
+/** Append one timestamped, pid-attributed diagnostics line to tunnel.log.
+ * This module's tunnel.json decisions (probe results, grace-window checks,
+ * deletions) are logged here so a deleted state file can always be explained
+ * from the log alone — the pid matters because several processes (dev
+ * servers, test workers) share one state dir and one log, and attribution is
+ * what keeps the log self-sufficient instead of forensics. Best-effort:
+ * logging must never break the tunnel it explains. */
+function tunnelEvent(message: string, logFile: string = tunnelLogFile()): void {
+  try {
+    mkdirSync(tunnelStateDir(), { recursive: true });
+    appendFileSync(logFile, `[tunnel ${new Date().toISOString()} pid ${process.pid}] ${redactTunnelUrl(message)}\n`);
+  } catch {}
+}
+
+// The log is append-only across launches (see launchTunnel), so it needs a
+// cap: a new launch over a log larger than this starts fresh instead of
+// growing without bound.
+const LOG_MAX_BYTES = 2_000_000;
 /** The detached cloudflared's pid, so a new server instance can stop an
  * adopted orphan it never spawned (see stopTunnel). */
 function cloudflaredPidFile(): string {
@@ -142,6 +173,7 @@ export function watchdogAction(input: {
 
 /** The canonical persisted state for a tunnel this instance runs or adopts. */
 function writeCurrentState(url: string) {
+  tunnelEvent(`persisting tunnel.json (url ${url}, port ${localServer?.port ?? "unknown"}, autoReconnect ${autoReconnectEnabled})`);
   writePersistedState({
     url,
     autoReconnect: autoReconnectEnabled,
@@ -201,6 +233,10 @@ function startWatchdog() {
         // scheduleReconnect's timer no-ops here (autoReconnect stays false
         // until a URL is ever extracted), so the watchdog's own interval is
         // the pacing, and watchdogAction stops at the attempts cap.
+        tunnelEvent(
+          `watchdog: launch produced no URL within ${LAUNCH_URL_TIMEOUT_MS / 1000}s — ` +
+          `killing the hung process and relaunching (attempt ${reconnectAttempts + 1}/${MAX_RECONNECT_ATTEMPTS})`,
+        );
         if (activeProc && activeProc.exitCode === null) {
           try { activeProc.kill(); } catch {}
         }
@@ -212,14 +248,23 @@ function startWatchdog() {
           // server restart — only relaunch when nothing answers for it. Validate
           // the persisted URL before probing it (same guard as reconcile).
           const url = tunnelUrl ?? readPersistedState()?.url ?? null;
-          if (url && isPersistableTunnelUrl(url) && await isUrlAlive(url)) {
-            touchLastAlive();
-            return;
+          if (url && isPersistableTunnelUrl(url)) {
+            const probe = await isUrlAlive(url);
+            if (probe.ok) {
+              tunnelEvent(`watchdog: adopted URL still answers (${probe.detail}) — keeping it`);
+              touchLastAlive();
+              return;
+            }
+            tunnelEvent(`watchdog: adopted URL probe failed (${probe.detail}) — scheduling reconnect`);
           }
           scheduleReconnect();
         })();
       }
     } else if (action === "stop") {
+      tunnelEvent(
+        `watchdog: stopping supervision ` +
+        `(${launchTimedOut ? "launch-timeout cap reached" : manualStop ? "manual stop" : "reconnect cap reached"})`,
+      );
       // Stopping at the launch-timeout cap leaves a hung process alive with no
       // further watchdog ticks — kill it so nothing lingers untracked.
       if (launchTimedOut && activeProc && activeProc.exitCode === null) {
@@ -256,7 +301,13 @@ function writePersistedUrl(url: string) {
     const existing = readPersistedState();
     // Keep a recently-alive persisted URL (e.g. an adopted orphan left behind
     // by a server restart) — only replace it once its marker times out.
-    if (!shouldReplacePersistedUrl(existing, url)) return;
+    if (!shouldReplacePersistedUrl(existing, url)) {
+      tunnelEvent(
+        `not replacing persisted URL ${existing?.url} with ${url}: ` +
+        `the existing tunnel's lastAliveAt is still inside the liveness grace window`,
+      );
+      return;
+    }
     writeCurrentState(url);
   });
 }
@@ -264,13 +315,20 @@ export function writePersistedState(state: PersistedTunnelState) {
   try {
     mkdirSync(tunnelStateDir(), { recursive: true });
     writeFileSync(tunnelStateFile(), JSON.stringify(state), "utf8");
-  } catch {}
+  } catch (e) {
+    tunnelEvent(`failed to write tunnel.json: ${String(e)}`);
+  }
 }
 
-function removePersistedFile() {
+/** Delete tunnel.json, recording why in tunnel.log — every removal decision
+ * must be diagnosable from the log alone. No-op (and silent) when the file is
+ * already gone. */
+function removePersistedFile(reason: string, file: string = tunnelStateFile()) {
   try {
-    const file = tunnelStateFile();
-    if (existsSync(file)) unlinkSync(file);
+    if (existsSync(file)) {
+      tunnelEvent(`deleting tunnel.json: ${reason}`);
+      unlinkSync(file);
+    }
   } catch {}
 }
 
@@ -332,32 +390,44 @@ async function reconcilePersistedUrl(
   state: PersistedTunnelState | null,
 ): Promise<{ alive: boolean; removed: boolean }> {
   if (!isPersistableTunnelUrl(url)) {
-    await withStateLock(() => removePersistedFile());
+    await withStateLock(() =>
+      removePersistedFile(`persisted URL failed validation — not a trycloudflare quick-tunnel URL (${url})`));
     return { alive: false, removed: true };
   }
-  try {
-    if (await isUrlAlive(url)) {
-      await withStateLock(() => {
-        // Re-read inside the lock so a concurrent writer's fields survive.
-        const fresh = readPersistedState();
-        // A concurrent writer removed the file (explicit stop) or replaced it
-        // with a different, still-fresh URL — either way their write wins.
-        if (!fresh) return;
-        if (fresh.url && fresh.url !== url && isRecentlyAlive(fresh.lastAliveAt)) return;
-        const base = fresh.url === url ? fresh : state;
-        writePersistedState({
-          url,
-          autoReconnect: base?.autoReconnect,
-          active: base?.active ?? true,
-          port: base?.port,
-          lastAliveAt: new Date().toISOString(),
-        });
+  const probe = await isUrlAlive(url);
+  if (probe.ok) {
+    tunnelEvent(`liveness probe OK (${probe.detail}) — tunnel.json kept, lastAliveAt refreshed`);
+    await withStateLock(() => {
+      // Re-read inside the lock so a concurrent writer's fields survive.
+      const fresh = readPersistedState();
+      // A concurrent writer removed the file (explicit stop) or replaced it
+      // with a different, still-fresh URL — either way their write wins.
+      if (!fresh) return;
+      if (fresh.url && fresh.url !== url && isRecentlyAlive(fresh.lastAliveAt)) return;
+      const base = fresh.url === url ? fresh : state;
+      writePersistedState({
+        url,
+        autoReconnect: base?.autoReconnect,
+        active: base?.active ?? true,
+        port: base?.port,
+        lastAliveAt: new Date().toISOString(),
       });
-      return { alive: true, removed: false };
-    }
-  } catch {}
-  if (isRecentlyAlive(state?.lastAliveAt)) return { alive: false, removed: false };
-  await withStateLock(() => removePersistedFile());
+    });
+    return { alive: true, removed: false };
+  }
+  tunnelEvent(`liveness probe failed (${probe.detail})`);
+  if (isRecentlyAlive(state?.lastAliveAt)) {
+    const ageSec = Math.round((Date.now() - Date.parse(state!.lastAliveAt!)) / 1000);
+    tunnelEvent(
+      `lastAliveAt is ${ageSec}s old, inside the ${ALIVE_GRACE_MS / 1000}s grace window — ` +
+      `tunnel.json kept despite the failed probe`,
+    );
+    return { alive: false, removed: false };
+  }
+  await withStateLock(() =>
+    removePersistedFile(
+      `liveness probe failed (${probe.detail}) and lastAliveAt outside the ${ALIVE_GRACE_MS / 1000}s grace window`,
+    ));
   return { alive: false, removed: true };
 }
 
@@ -368,7 +438,7 @@ export async function prunePersistedUrl(): Promise<boolean> {
   const state = readPersistedState();
   const url = state?.url ?? null;
   if (!url) {
-    await withStateLock(() => removePersistedFile());
+    await withStateLock(() => removePersistedFile("no persisted URL to keep"));
     return true;
   }
   return (await reconcilePersistedUrl(url, state)).removed;
@@ -378,11 +448,14 @@ export async function prunePersistedUrl(): Promise<boolean> {
 // server is still binding its port after a restart) still proves the tunnel
 // serves — it heals once the origin is up. Only a dead tunnel counts as
 // gone: connection failure, or Cloudflare edge's 530 (tunnel unreachable).
-async function isUrlAlive(url: string): Promise<boolean> {
+async function isUrlAlive(url: string): Promise<{ ok: boolean; detail: string }> {
   try {
     const r = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(3000) });
-    return r.status !== 530;
-  } catch { return false; }
+    if (r.status !== 530) return { ok: true, detail: `HTTP ${r.status}` };
+    return { ok: false, detail: "HTTP 530 (tunnel unreachable at the Cloudflare edge)" };
+  } catch (e) {
+    return { ok: false, detail: `no response (${String(e)})` };
+  }
 }
 
 function isTunnelAlive(): boolean {
@@ -393,6 +466,15 @@ function isTunnelAlive(): boolean {
 // origin, but the hostname may drift across restarts (options.host), so any
 // loopback target matches. A decoy pointing at a remote URL does not.
 const LOCAL_TARGET_RE = /tunnel --url http:\/\/(localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|\[::1\]):/;
+
+/** True when a command line carries our cloudflared spawn signature (binary
+ * name + loopback tunnel target). Used by the launch sweep's orphan check;
+ * stopTunnel's pid verification is deliberately relaxed (any cloudflared) —
+ * an explicit stop means stop, so the two scopes must not drift into each
+ * other's jobs. */
+export function isCloudflaredSpawnSignature(cmd: string): boolean {
+  return cmd.includes("cloudflared") && LOCAL_TARGET_RE.test(cmd);
+}
 
 // Bound the per-session replay history: a late stream connection gets the
 // recent tail only, but memory no longer grows with a long-running tunnel's
@@ -429,11 +511,55 @@ function clearReconnectTimer() {
   }
 }
 
+// Stale untracked cloudflared processes (orphans from a killed server run)
+// are not covered by activeProc or the pid file — both only ever name the
+// most recent launch, so several can pile up (observed 3 concurrent). Before
+// spawning a new tunnel, sweep the process list for candidates carrying our
+// spawn signature — a loopback tunnel target (LOCAL_TARGET_RE) — and stop
+// them, so only one tunnel serves the origin. Unrelated processes and decoys
+// pointing elsewhere survive: the sweep kills without an operator's intent,
+// so its scope stays stricter than stopTunnel's relaxed explicit-stop check.
+// Orphan-only scope: a reparented process (ppid 1 = launchd/init) is the
+// fingerprint of a dead owner — its spawning server is gone. A cloudflared
+// whose parent is still alive belongs to a LIVE instance (another server or
+// this test/dev server), and sweeping it turns two coexisting instances into
+// a mutual-kill loop: each launch kills the other's tunnel, whose watchdog
+// relaunches and kills back (observed live: the dev server's sweep SIGTERMed
+// test fakes ~1s after launch, before their delayed URL lines were written).
+function killStaleCloudflared(keepPids: Iterable<number>): number {
+  let killed = 0;
+  try {
+    const keep = new Set(keepPids);
+    keep.add(process.pid);
+    const out = execFileSync("pgrep", ["-f", "cloudflared.*tunnel --url"], { encoding: "utf8" });
+    for (const line of out.split("\n")) {
+      const pid = Number.parseInt(line.trim(), 10);
+      if (!Number.isInteger(pid) || pid <= 1 || keep.has(pid)) continue;
+      try {
+        // One ps call carries both filters: ppid (orphan check) and command
+        // (spawn signature). A parse failure reads as "no orphan evidence" —
+        // the candidate is spared rather than guessed at.
+        const row = execFileSync("ps", ["-o", "ppid=,command=", "-p", String(pid)], { encoding: "utf8" });
+        const m = row.trim().match(/^(\d+)\s(.*)$/s);
+        if (!m) continue;
+        const ppid = Number.parseInt(m[1] ?? "", 10);
+        const cmd = m[2] ?? "";
+        if (!isCloudflaredSpawnSignature(cmd)) continue;
+        if (Number.isInteger(ppid) && ppid > 1) continue;
+        try { process.kill(pid, "SIGTERM"); killed += 1; } catch {}
+        tunnelEvent(`launchTunnel: killed stale untracked cloudflared pid ${pid} (${cmd.trim()})`);
+      } catch {}
+    }
+  } catch {}
+  return killed;
+}
+
 // Shared by the exit handler and the watchdog so both reconnect paths follow
 // the same backoff schedule with the same guards.
 function scheduleReconnect() {
   reconnectAttempts += 1;
   const delay = reconnectDelay(reconnectAttempts);
+  tunnelEvent(`scheduling reconnect attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS} in ${delay}ms`);
   clearReconnectTimer();
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
@@ -452,6 +578,15 @@ export async function launchTunnel(): Promise<{ id: string; session: TunnelSessi
   const cloudflaredBin = process.env.CLOUDFLARED_BIN || "cloudflared";
   const args = [cloudflaredBin, "tunnel", "--url", projectUrl];
 
+  // Sweep untracked stale processes first, keeping every tracked live proc
+  // (the sessions map holds each launch's proc) so the explicit kill below is
+  // the only signal they get.
+  const keepPids = new Set<number>();
+  for (const s of sessions.values()) {
+    if (s.proc.exitCode === null) keepPids.add(s.proc.pid);
+  }
+  killStaleCloudflared(keepPids);
+
   if (activeProc && activeProc.exitCode === null) {
     try { activeProc.kill(); } catch {}
     activeProc = null;
@@ -459,15 +594,35 @@ export async function launchTunnel(): Promise<{ id: string; session: TunnelSessi
 
   // Bun.spawn fails asynchronously (the 'error' event), so probe the binary
   // up front to keep the synchronous "failed to spawn" contract.
-  if (!cloudflaredBin.includes("/") && !Bun.which(cloudflaredBin)) return null;
+  if (!cloudflaredBin.includes("/") && !Bun.which(cloudflaredBin)) {
+    tunnelEvent(`launch aborted: ${cloudflaredBin} not found on PATH`);
+    return null;
+  }
 
   const id = randomUUID();
   let logFd: number;
+  // The size the log had before this launch spawned anything: the tail reader
+  // starts here, so nothing written after the spawn can fall outside the tail
+  // window and older content (previous tunnels' URLs, diagnostics) never
+  // feeds the extractor.
+  let preLaunchSize = 0;
   try {
     mkdirSync(tunnelStateDir(), { recursive: true });
-    // Fresh log per launch: the tail reader always starts from offset 0.
-    logFd = openSync(tunnelLogFile(), "w");
-  } catch {
+    // The log is append-only across launches so deletion-decision lines
+    // written before this launch survive it; the tail reader below skips
+    // straight to the pre-launch size instead of offset 0. A log grown past
+    // the cap (many launches, many diagnostics) starts fresh.
+    const logFile = tunnelLogFile();
+    const size = statSync(logFile, { throwIfNoEntry: false })?.size ?? 0;
+    if (size > LOG_MAX_BYTES) {
+      closeSync(openSync(logFile, "w"));
+      tunnelEvent("tunnel.log exceeded the size cap — truncated at this launch");
+    } else {
+      preLaunchSize = size;
+    }
+    logFd = openSync(logFile, "a");
+  } catch (e) {
+    tunnelEvent(`launch aborted: cannot open ${tunnelLogFile()} (${String(e)})`);
     return null;
   }
   let proc: Bun.Subprocess<"ignore", number, number>;
@@ -477,13 +632,15 @@ export async function launchTunnel(): Promise<{ id: string; session: TunnelSessi
     // the next boot adopts it via the persisted URL.
     proc = Bun.spawn(args, { stdin: "ignore", stdout: logFd, stderr: logFd, detached: true });
     proc.unref();
-  } catch {
+  } catch (e) {
     closeSync(logFd);
+    tunnelEvent(`launch failed: cloudflared could not spawn (${String(e)})`);
     return null;
   }
   closeSync(logFd);
   activeProc = proc;
   lastLaunchAt = Date.now();
+  tunnelEvent(`launched cloudflared pid ${proc.pid} → ${projectUrl}`);
   try { writeFileSync(cloudflaredPidFile(), String(proc.pid)); } catch {}
   startWatchdog();
   const s: TunnelSession = { id, proc, output: [], done: false, exitCode: null, listeners: new Set() };
@@ -493,12 +650,15 @@ export async function launchTunnel(): Promise<{ id: string; session: TunnelSessi
   // The detached process writes to the log file the server tails. Pipes would
   // fill and block the orphan once the server that reads them dies.
   const LOG_TAIL_INTERVAL_MS = 250;
-  let tailPos = 0;
+  // Anchored to the size captured before the spawn (see preLaunchSize) —
+  // capturing it after Bun.spawn could skip cloudflared's first startup burst.
+  let tailPos = preLaunchSize;
   // A URL can straddle two tail reads (split log writes); a rolling window of
   // the recent tail keeps the extraction contiguous even when a startup burst
   // trails the URL line with more log output. Fresh per launch.
   let extractWindow = "";
-  const EXTRACT_WINDOW_BYTES = 1024;
+  // Chars, not bytes: the window is a JS string slice (UTF-16 code units).
+  const EXTRACT_WINDOW_CHARS = 1024;
   let tailChain: Promise<void> = Promise.resolve();
   const readTail = () => {
     tailChain = tailChain
@@ -514,7 +674,7 @@ export async function launchTunnel(): Promise<{ id: string; session: TunnelSessi
           await fh.read(buf, 0, buf.length, start);
           const chunk = buf.toString("utf8");
           notify(s, chunk);
-          extractWindow = (extractWindow + chunk).slice(-EXTRACT_WINDOW_BYTES);
+          extractWindow = (extractWindow + chunk).slice(-EXTRACT_WINDOW_CHARS);
           // Prefer this chunk itself: a burst longer than the window could
           // otherwise carry the URL out of its reach. The window still catches
           // a URL split across two reads.
@@ -548,6 +708,7 @@ export async function launchTunnel(): Promise<{ id: string; session: TunnelSessi
   (async () => {
     s.exitCode = await proc.exited;
     procExited = true;
+    tunnelEvent(`cloudflared pid ${proc.pid} exited with code ${s.exitCode}`);
     if (activeProc === proc) {
       activeProc = null;
       const shouldReconnect = autoReconnectEnabled && !manualStop && reconnectAttempts < MAX_RECONNECT_ATTEMPTS;
@@ -555,9 +716,14 @@ export async function launchTunnel(): Promise<{ id: string; session: TunnelSessi
         tunnelUrl = null;
         scheduleReconnect();
       } else {
+        tunnelEvent(
+          `not reconnecting (manualStop ${manualStop}, autoReconnect ${autoReconnectEnabled}, ` +
+          `attempts ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}) — pruning tunnel.json`,
+        );
         tunnelUrl = null;
         await prunePersistedUrl();
         if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+          tunnelEvent("reconnect attempts exhausted — auto-reconnect disabled");
           autoReconnectEnabled = false;
         }
       }
@@ -596,8 +762,16 @@ export function clearStaleTunnelUrl() {
   }
 }
 
+// lastAliveAt lives in the persisted state and is refreshed by the watchdog's
+// touch; expose it only for the URL this instance currently runs — an older
+// tunnel's marker kept through the grace window must not read as the current
+// tunnel's liveness (same guard as touchLastAlive).
 export function getTunnelStatus() {
-  return { tunnelUrl, autoReconnectEnabled, isTunnelAlive: isTunnelAlive() };
+  const persisted = readPersistedState();
+  // tunnelUrl must be non-null too: a normalized state file with url null
+  // would otherwise satisfy both-null equality and read as current liveness.
+  const lastAliveAt = tunnelUrl && persisted?.url === tunnelUrl ? persisted?.lastAliveAt ?? null : null;
+  return { tunnelUrl, autoReconnectEnabled, isTunnelAlive: isTunnelAlive(), lastAliveAt };
 }
 
 /**
@@ -612,6 +786,7 @@ async function restoreTunnel(): Promise<PersistedTunnelState | null> {
   if (!persisted) return state;
   const { alive } = await reconcilePersistedUrl(persisted, state);
   if (alive) {
+    tunnelEvent("recovered persisted tunnel URL from tunnel.json — adopting the still-running tunnel");
     tunnelUrl = persisted;
     if (typeof state?.autoReconnect === "boolean") autoReconnectEnabled = state.autoReconnect;
   }
@@ -624,6 +799,7 @@ export async function recoverPersistedUrl() {
 }
 
 export async function startTunnel() {
+  tunnelEvent("startTunnel: manual start requested");
   manualStop = false;
   autoReconnectEnabled = false;
   clearReconnectTimer();
@@ -632,6 +808,14 @@ export async function startTunnel() {
 }
 
 export async function stopTunnel() {
+  // Resolve every state path before the first await: withStateLock queues
+  // this removal behind other writers, and $HOME must not be re-read after
+  // that gap (a concurrent test or restart flipping it would otherwise land
+  // this stop's deletion — and its log lines — on another state dir).
+  const pidPath = cloudflaredPidFile();
+  const stateFile = tunnelStateFile();
+  const logFile = tunnelLogFile();
+  tunnelEvent("stopTunnel: explicit stop requested", logFile);
   manualStop = true;
   autoReconnectEnabled = false;
   clearReconnectTimer();
@@ -645,28 +829,38 @@ export async function stopTunnel() {
     try { s.proc.kill(); } catch {}
   }
   // The pid file names a cloudflared this instance may not have spawned (an
-  // adopted orphan from a previous server). Verify its command line carries
-  // our spawn signature before signalling — the pid may have been recycled by
-  // an unrelated process (e.g. a grep mentioning "cloudflared"). The spawned
-  // args always target a loopback origin (see LOCAL_TARGET_RE): a decoy
-  // merely carrying the words "cloudflared tunnel --url" with a remote URL
-  // does not match, and the hostname may drift across restarts.
+  // adopted orphan from a previous server). An explicit stop intends to stop
+  // the tunnel, so the recorded daemon is stopped unless the pid was recycled
+  // by an unrelated process — the command still containing "cloudflared" is
+  // that guard, regardless of which origin the daemon targets. Every branch
+  // is logged so tunnel.log alone explains the stop.
   try {
-    const orphanPid = Number.parseInt(readFileSync(cloudflaredPidFile(), "utf8").trim(), 10);
+    const raw = readFileSync(pidPath, "utf8").trim();
+    const orphanPid = Number.parseInt(raw, 10);
     if (Number.isInteger(orphanPid) && orphanPid > 1) {
-      const cmd = execFileSync("ps", ["-o", "command=", "-p", String(orphanPid)], { encoding: "utf8" });
-      if (cmd.includes("cloudflared") && LOCAL_TARGET_RE.test(cmd)) {
-        try { process.kill(orphanPid, "SIGTERM"); } catch {}
+      let cmd = "";
+      try { cmd = execFileSync("ps", ["-o", "command=", "-p", String(orphanPid)], { encoding: "utf8" }); } catch {}
+      if (cmd.includes("cloudflared")) {
+        tunnelEvent(`stopTunnel: stopping recorded daemon cloudflared pid ${orphanPid} (${cmd.trim()})`, logFile);
+        try { process.kill(orphanPid, "SIGTERM"); } catch (e) {
+          tunnelEvent(`stopTunnel: signalling pid ${orphanPid} failed (${String(e)})`, logFile);
+        }
+      } else {
+        tunnelEvent(`stopTunnel: pid ${orphanPid} no longer runs cloudflared (${cmd.trim() || "no ps output"}) — not signalling (pid recycled?)`, logFile);
       }
+    } else {
+      tunnelEvent(`stopTunnel: cloudflared.pid holds no usable pid (${raw || "empty"})`, logFile);
     }
-  } catch {}
-  try { unlinkSync(cloudflaredPidFile()); } catch {}
+  } catch {
+    tunnelEvent("stopTunnel: no cloudflared.pid — no recorded daemon to stop", logFile);
+  }
+  try { unlinkSync(pidPath); } catch {}
   sessions.clear();
   tunnelUrl = null;
   // Wait for any queued locked writes (touch/reconcile) to land first, then
   // remove the file — otherwise a pending write could resurrect tunnel.json
   // after an explicit stop.
-  await withStateLock(() => removePersistedFile());
+  await withStateLock(() => removePersistedFile("explicit stop", stateFile));
   return true;
 }
 
@@ -679,6 +873,7 @@ export async function initTunnel() {
   // adopt) relaunch automatically instead of leaving the tunnel down until a
   // manual click.
   if (state?.active && !tunnelUrl && !isTunnelAlive() && !manualStop) {
+    tunnelEvent("initTunnel: nothing to adopt — relaunching the tunnel");
     await launchTunnel();
   }
 }
