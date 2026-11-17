@@ -175,5 +175,5 @@ export function start(options: StartOptions = {}): ReturnType<typeof Bun.serve> 
 }
 
 if (import.meta.main) {
-  start();
+  start({ port: Number(process.env.PORT ?? 3000), host: process.env.HOST ?? "127.0.0.1" });
 }

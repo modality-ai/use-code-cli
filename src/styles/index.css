@@ -70,8 +70,26 @@ details {
 .entry-body,
 .md-content,
 .lazy-body,
-.lazy-body pre {
+.lazy-body pre,
+.entry,
+#context-bar,
+#context-bar span {
   overflow-wrap: anywhere;
+  word-break: break-word;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Transcript code blocks: browser-default white-space:pre forbids soft
+   wraps, so overflow-wrap can never act and long one-liners overflow the
+   transcript column. pre-wrap lets them wrap like the rest of the entry. */
+.md-content pre,
+.md-content pre code,
+.entry-body pre,
+.entry-body pre code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   min-width: 0;
   max-width: 100%;
 }
@@ -86,3 +104,15 @@ details {
 }
 
 /* .chat-input converted to Tailwind utility classes in ChatInput.tsx */
+
+/* Global wrap protection (no overflow-x:hidden — that breaks position:sticky
+   on the context bar). Long unbreakable tokens wrap instead of stretching,
+   so they never push the page wider than the viewport. Applies to every page,
+   including the session chat view. */
+html, body, #root {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+#root {
+  min-width: 0;
+}

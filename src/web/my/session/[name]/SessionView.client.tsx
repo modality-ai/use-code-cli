@@ -167,9 +167,9 @@ export const BAR_BAND = 34; // px — reserved layout space, matches the bar's h
 
 export function updateBar(root: HTMLElement | null, entries: Entry[], last: BarState): BarState {
   if (!root) return null;
-  const rootTop = root.getBoundingClientRect().top;
-  const cs = getComputedStyle(root);
-  const edge = rootTop + (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.paddingTop) || 0);
+  // The page (viewport) is the scroll container, so an entry is "fully
+  // scrolled past" once its bottom is at/above the viewport top.
+  const edge = 0;
   const els = root.querySelectorAll<HTMLElement>(".entry");
   let candidate = -1;
   for (let i = 0; i < els.length; i++) {
@@ -214,7 +214,6 @@ export default function SessionView(props: BootProps) {
   const [paused, setPaused] = useState(() => !!initial?.success && initial.data?.stopped === true);
   const [reconnecting, setReconnecting] = useState(false);
 
-  const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const bottomBarRef = useRef<HTMLDivElement>(null);
   const chatRef = useRef<HTMLTextAreaElement>(null);
@@ -305,12 +304,13 @@ export default function SessionView(props: BootProps) {
 
   // Context bar follows scrolling.
   useEffect(() => {
-    const root = scrollRef.current;
-    const onScroll = () => setBar((b) => updateBar(root, entriesRef.current, b));
+    const onScroll = () => setBar((b) => updateBar(contentRef.current, entriesRef.current, b));
     window.addEventListener("scroll", onScroll, { passive: true });
+    // initial pass
+    setBar((b) => updateBar(contentRef.current, entries, b));
     return () => window.removeEventListener("scroll", onScroll);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [entries]);
 
   // Keep page content from being hidden behind the fixed bottom bar: measure
   // the bar's rendered height and apply it as bottom padding to the content.
@@ -346,7 +346,7 @@ export default function SessionView(props: BootProps) {
 
   // Post-paint pass: refresh the context-bar target (guarded set in updateBar).
   useEffect(() => {
-    setBar((b) => updateBar(scrollRef.current, entries, b));
+    setBar((b) => updateBar(contentRef.current, entries, b));
   });
 
   // Scroll maintenance on transcript growth (entries only — bar changes must
@@ -356,7 +356,7 @@ export default function SessionView(props: BootProps) {
   //    any pinned context-bar space that appeared above
   //  - without the bar, plain growth below keeps scrollTop untouched
   useEffect(() => {
-    const root = scrollRef.current;
+    const root = contentRef.current;
     const sc = autoscrollRef.current;
     if (!root) return;
     if (sc?.checked) {
@@ -466,38 +466,35 @@ export default function SessionView(props: BootProps) {
   const barEntry: Entry | undefined = bar && barOpen === bar.index ? entries[bar.index] : undefined;
 
   return (
-    <div ref={contentRef}>
+    <div ref={contentRef} className="p-3">
       <div className="flex items-center gap-3 mb-md">
         <a href="/my/sessions" className="text-xs text-accent-collaboration hover:underline">← Back to sessions</a>
         <h1 className="text-2xl font-semibold font-display">{(initial?.data?.name as string | undefined) || name || "Session"}</h1>
       </div>
-      <div id="transcript" ref={scrollRef} className="border border-border rounded-sm p-3 bg-surface font-code text-sm">
-        <div
-          id="context-bar"
-          className="sticky -top-3 z-10 flex items-baseline gap-2 h-8 bg-surface text-sm cursor-pointer shadow-md"
-          style={{ visibility: bar ? "visible" : "hidden" }}
-          onClick={() => setBarOpen((i) => (bar && i === bar.index ? null : bar?.index ?? null))}
-        >
-          <span className="shrink-0 font-semibold text-accent-collaboration">❯ You</span>
-          <span className="flex-1 min-w-0 truncate font-normal text-text-muted">{bar ? bar.teaser : " "}</span>
-          {barEntry && (
-            /* Absolute overlay under the chip: opening never reflows the
-               transcript, so the scroll position stays exactly where it is. */
-            <div
-              className="absolute left-0 right-0 top-full z-20 mt-1 max-h-pinned overflow-auto border border-border rounded-sm bg-surface p-3 shadow-md"
-              onClick={(ev) => ev.stopPropagation()}
-            >
-              <div className="mb-1 text-xs text-text-muted uppercase tracking-wide">pinned message</div>
-              <EntryBody e={barEntry} sessionName={name} />
-            </div>
-          )}
-        </div>
-        {entries.length === 0 ? (
-          <p className="text-text-muted">Loading session transcript...</p>
-        ) : (
-          entries.map((e, i) => <Entry key={i} e={e} sessionName={name} />)
+      <div
+        id="context-bar"
+        className="sticky top-0 z-10 flex items-baseline gap-2 h-8 bg-surface text-sm cursor-pointer shadow-md"
+        style={{ visibility: bar ? "visible" : "hidden" }}
+        onClick={() => setBarOpen((i) => (bar && i === bar.index ? null : bar?.index ?? null))}
+      >
+        <span className="shrink-0 font-semibold text-accent-collaboration">❯ You</span>
+        <span className="flex-1 min-w-0 truncate font-normal text-text-muted">{bar ? bar.teaser : " "}</span>
+        {barEntry && (
+          <div
+            className="absolute left-0 right-0 top-full z-30 mt-1 overflow-auto border border-border rounded-sm bg-surface p-3 shadow-md"
+            style={{ maxHeight: "50vh" }}
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            <div className="mb-1 text-xs text-text-muted uppercase tracking-wide">pinned message</div>
+            <EntryBody e={barEntry} sessionName={name} />
+          </div>
         )}
       </div>
+      {entries.length === 0 ? (
+        <p className="text-text-muted">Loading session transcript...</p>
+      ) : (
+        entries.map((e, i) => <Entry key={i} e={e} sessionName={name} />)
+      )}
       <div ref={bottomBarRef} className="flex flex-col gap-2 fixed bottom-0 left-0 right-0 z-20 bg-surface p-2" role="region" aria-label="Session controls">
         <div className="flex items-center gap-2" role="toolbar" aria-label="Session scroll controls">
         <label className="flex items-center gap-1 text-xs text-text-muted cursor-pointer">
