@@ -175,7 +175,8 @@ describe("talk", () => {
     const h = setup();
     h.addSession("worker");
 
-    const res = await h.run("talk", "worker");
+    // Empty stdin: without the pipe there would be nothing to read either way.
+    const res = await h.run("talk", "worker", { stdin: "" });
 
     expect(res.code).toBe(1);
     expect(res.err).toContain("Message required");
@@ -417,6 +418,61 @@ describe("talk — --- message separator", () => {
     expect(res.code).toBe(1);
     expect(res.err).toContain("Message required after ---");
     expect(res.received()).toBe("");
+  });
+});
+
+describe("talk — piped stdin without ---", () => {
+  it("reads the message from stdin when the target names a session", async () => {
+    const h = setup();
+    h.addSession("worker");
+
+    const res = await h.run("talk", "worker", { stdin: "hello via pipe\n" });
+
+    expect(res.code).toBe(0);
+    expect(res.received()).toContain("hello via pipe");
+  });
+
+  it("reads stdin and auto-picks the session when no arguments are given", async () => {
+    const h = setup();
+    h.addSession("worker");
+
+    const res = await h.run("talk", { stdin: "hello via pipe\n" });
+
+    expect(res.code).toBe(0);
+    expect(res.received()).toContain("hello via pipe");
+  });
+
+  it("prefers the message argument over piped stdin", async () => {
+    const h = setup();
+    h.addSession("worker");
+
+    const res = await h.run("talk", "worker", "arg message", { stdin: "piped message" });
+
+    expect(res.code).toBe(0);
+    expect(lastContent(res.received())).toContain("arg message");
+    expect(lastContent(res.received())).not.toContain("piped message");
+  });
+
+  it("keeps treating a lone non-session argument as the message even when stdin has content", async () => {
+    const h = setup();
+    h.addSession("worker");
+
+    const res = await h.run("talk", "plain message", { stdin: "piped message" });
+
+    expect(res.code).toBe(0);
+    expect(lastContent(res.received())).toContain("plain message");
+    expect(lastContent(res.received())).not.toContain("piped message");
+  });
+
+  it("passes multiline stdin content verbatim", async () => {
+    const h = setup();
+    h.addSession("worker");
+
+    const res = await h.run("talk", "worker", { stdin: "line one\n中文行\n`backtick`\n" });
+
+    expect(res.code).toBe(0);
+    const content = lastContent(res.received());
+    expect(content).toContain("line one\n中文行\n`backtick`");
   });
 });
 

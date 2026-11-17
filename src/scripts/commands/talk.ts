@@ -1,19 +1,8 @@
-import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { CLICommand } from "modality-cli-kit";
-import {
-  ancestorPids,
-  currentSession,
-  deliver,
-  liveSessions,
-  type LiveSession,
-} from "../../lib/peer";
-import {
-  appendReplyInstruction,
-  hasReplyInstruction,
-  isAutoReply,
-} from "../../lib/reply";
-import { findReply, recordReply } from "../../lib/reply-ledger";
+import { ancestorPids, liveSessions, type LiveSession } from "../../lib/peer";
+import { sendWithReply } from "../../lib/reply-send";
+import { readStdinMessageOrUndefined } from "../../lib/talk-argv";
 import { sessionLabel as label } from "../../lib/sessions";
 
 const TalkArgsSchema = z.object({
@@ -49,13 +38,6 @@ const TalkArgsSchema = z.object({
 
 type TalkArgs = z.infer<typeof TalkArgsSchema>;
 
-type ReplyHint =
-  | "appended"
-  | "already-present"
-  | "auto-reply"
-  | "disabled"
-  | "skipped-no-sender";
-
 function findTargets(sessions: LiveSession[], target: string): LiveSession[] {
   return sessions.filter(
     (s) =>
@@ -82,23 +64,14 @@ async function talk(args: TalkArgs) {
 
   // `talk "hello"` parses as a lone target. When it names no session it is the
   // message, and the target is picked automatically; when it does name one the
-  // user simply forgot the message.
-  if (message === undefined && target !== undefined) {
-    if (findTargets(sessions, target).length > 0) {
-      return {
-        success: false,
-        message: `Message required. Usage: use-code-cli talk ${target} "your message"`,
-      };
-    }
+  // message comes from piped stdin, read below once the session is resolved.
+  if (
+    message === undefined &&
+    target !== undefined &&
+    findTargets(sessions, target).length === 0
+  ) {
     message = target;
     target = undefined;
-  }
-
-  if (message === undefined) {
-    return {
-      success: false,
-      message: 'Message required. Usage: use-code-cli talk [target] "your message"',
-    };
   }
 
   let session: LiveSession | undefined;
@@ -137,85 +110,29 @@ async function talk(args: TalkArgs) {
     }
   }
 
-  // One inbound message, one answer: a retry or a second relay must not send
-  // the same reply again, which is how chains start looping.
-  if (inReplyTo && !args.force) {
-    const previous = await findReply(inReplyTo, session.sessionId);
-    if (previous) {
+  if (message === undefined) {
+    // Piped or heredoc stdin carries the message when the argument is omitted;
+    // on a terminal or blank input there is nothing to read.
+    message = await readStdinMessageOrUndefined();
+    if (message === undefined) {
       return {
         success: false,
-        message: `Already replied to msg_id=${inReplyTo} for ${label(session)} at ${new Date(previous.at).toISOString()} (msg_id=${previous.msgId}). Pass --force to send again.`,
+        message:
+          target !== undefined
+            ? `Message required. Usage: use-code-cli talk ${target} "your message"`
+            : 'Message required. Usage: use-code-cli talk [target] "your message"',
       };
     }
   }
 
-  const sender = await currentSession(sessions);
-  const senderName = sender ? label(sender) : undefined;
-
-  // The instruction is always appended unless --one-way sends the message as
-  // written, the sender is unknown, or the message already carries one.
-  let replyHint: ReplyHint;
-  if (args["one-way"]) {
-    replyHint = "disabled";
-  } else if (!senderName) {
-    replyHint = "skipped-no-sender";
-  } else if (hasReplyInstruction(message)) {
-    replyHint = "already-present";
-  } else if (isAutoReply(message)) {
-    replyHint = "auto-reply";
-  } else {
-    replyHint = "appended";
-  }
-
-  const msgId = randomUUID();
-  const body =
-    replyHint === "appended"
-      ? appendReplyInstruction(message, senderName, { msgId, inReplyTo })
-      : message;
-
-  try {
-    await deliver(session, body, msgId);
-  } catch (err) {
-    return { success: false, message: (err as Error).message };
-  }
-
-  const notes: string[] = [];
-  if (replyHint === "skipped-no-sender") {
-    notes.push("could not determine the sender session — reply instruction skipped.");
-  }
-  if (replyHint === "auto-reply") {
-    notes.push("message looks like an automatic reply — no reply instruction appended.");
-  }
-
-  if (inReplyTo) {
-    try {
-      await recordReply({
-        inReplyTo,
-        targetSessionId: session.sessionId,
-        msgId,
-        at: Date.now(),
-      });
-    } catch (err) {
-      notes.push(
-        `LEDGER NOT UPDATED (${(err as Error).message}): a duplicate answer to msg_id=${inReplyTo} will not be blocked.`,
-      );
-    }
-  }
-
-  const note = notes.map((n) => `\nNote: ${n}`).join("");
-
-  return {
-    success: true,
-    message: `Sent to ${label(session)} (pid ${session.pid}) msg_id=${msgId}${note}`,
-    data: {
-      pid: session.pid,
-      sessionId: session.sessionId,
-      msgId,
-      sender: senderName ?? null,
-      inReplyTo: inReplyTo ?? null,
-      replyHint,
-    },
-  };
+  return sendWithReply({
+    session,
+    message,
+    sessions,
+    oneWay: args["one-way"],
+    inReplyTo,
+    force: args.force,
+  });
 }
 
 export const talkCommand: CLICommand = {

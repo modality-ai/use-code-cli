@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { cleanup } from "@testing-library/react";
 import { render, screen } from "reshow-unit";
+import { act } from "reshow-unit";
 import TunnelPage from "../page";
 
 afterEach(() => cleanup());
@@ -48,15 +49,18 @@ describe("TunnelPage", () => {
     const origFetch = globalThis.fetch;
     globalThis.fetch = (async () => ({ status: 401, json: async () => ({ success: false, error: "unauthorized" }) })) as any;
     try {
-      const { container } = render(TunnelPage());
-      await new Promise((r) => setTimeout(r, 50));
+      let container: any;
+      await act(() => {
+        const r = render(TunnelPage());
+        container = r.container;
+      }, 50);
       const statusEl = container.querySelector("#tunnel-status");
       expect(statusEl?.textContent).toBe("Not signed in — redirecting to sign in…");
       expect(statusEl?.textContent).not.toContain("cloudflared not found");
       expect(container.querySelector("#tunnel-url")?.textContent).toBe("—");
     } finally {
       globalThis.fetch = origFetch;
-      cleanup();
+      await act(async () => { cleanup(); });
     }
   });
 
@@ -66,12 +70,15 @@ describe("TunnelPage", () => {
       json: async () => ({ success: true, version: "2026.1", url: "https://live.trycloudflare.com", lastAliveAt: "2026-11-15T02:00:00.000Z" }),
     })) as any;
     try {
-      const { container } = render(TunnelPage());
-      await new Promise((r) => setTimeout(r, 50));
+      let container: any;
+      await act(() => {
+        const r = render(TunnelPage());
+        container = r.container;
+      }, 50);
       expect(container.querySelector("#tunnel-last-alive")?.textContent).toBe("2026-11-15T02:00:00.000Z");
     } finally {
       globalThis.fetch = origFetch;
-      cleanup();
+      await act(async () => { cleanup(); });
     }
   });
 
@@ -103,19 +110,25 @@ describe("TunnelPage", () => {
       return (origClearTimeout as any)(id);
     }) as any;
     try {
-      const { container } = render(TunnelPage());
-      await new Promise((r) => setTimeout(r, 50)); // first poll
-      await new Promise((r) => (origSetTimeout as any)(r, 2100)); // second poll at the 2s interval
+      let container: any;
+      await act(async () => {
+        const r = render(TunnelPage({ pollMs: 50 }));
+        container = r.container;
+        await new Promise((r) => setTimeout(r, 50)); // first poll
+      });
+      await act(async () => {}, 120); // second poll at the pollMs interval
       expect(container.querySelector("#tunnel-status")?.textContent).toBe("Not signed in — redirecting to sign in…");
       expect(container.querySelector("#tunnel-last-alive")?.textContent).toBe("—");
       expect([...scheduled.keys()]).toHaveLength(1);
-      cleanup(); // unmount inside the redirect window: the pending timer must be cleared
+      await act(async () => {
+        cleanup(); // unmount inside the redirect window: the pending timer must be cleared
+      });
       expect([...scheduled.keys()]).toHaveLength(0);
     } finally {
       globalThis.fetch = origFetch;
       globalThis.setTimeout = origSetTimeout;
       globalThis.clearTimeout = origClearTimeout;
-      cleanup();
+      await act(async () => { cleanup(); });
     }
   });
 
@@ -150,17 +163,21 @@ describe("TunnelPage", () => {
       return { status: 200, json: async () => ({ success: true, version: "2026.1", url: "https://live.trycloudflare.com" }) } as any;
     }) as any;
     try {
-      const { container } = render(TunnelPage());
-      await new Promise((r) => setTimeout(r, 50)); // first poll: 401 schedules the redirect
+      let container: any;
+      await act(async () => {
+        const r = render(TunnelPage({ pollMs: 50 }));
+        container = r.container;
+        await new Promise((r) => setTimeout(r, 50)); // first poll: 401 schedules the redirect
+      });
       expect([...scheduled.keys()]).toHaveLength(1);
-      await new Promise((r) => (origSetTimeout as any)(r, 2100)); // second poll at the 2s interval: success cancels it
+      await act(async () => {}, 120); // second poll at the pollMs interval: success cancels it
       expect([...scheduled.keys()]).toHaveLength(0);
       expect(container.querySelector("#tunnel-status")?.textContent).toBe("cloudflared: 2026.1");
     } finally {
       globalThis.fetch = origFetch;
       globalThis.setTimeout = origSetTimeout;
       globalThis.clearTimeout = origClearTimeout;
-      cleanup();
+      await act(async () => { cleanup(); });
     }
   });
 

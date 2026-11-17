@@ -4,6 +4,7 @@ import {
   MESSAGE_SEPARATOR,
   preprocessTalkArgv,
   readStdinMessage,
+  readStdinMessageOrUndefined,
 } from "../talk-argv";
 
 describe("readStdinMessage", () => {
@@ -18,6 +19,28 @@ describe("readStdinMessage", () => {
     await expect(readStdinMessage(neverEnding, 100)).rejects.toThrow(
       "stdin did not close within 100ms.",
     );
+  });
+});
+
+describe("readStdinMessageOrUndefined", () => {
+  it("returns the piped text with the trailing newline trimmed", async () => {
+    const stream = Readable.from(["line one\nline ", "two\n"]);
+    expect(await readStdinMessageOrUndefined(stream, 1000)).toBe("line one\nline two");
+  });
+
+  it("reports a terminal as no message", async () => {
+    const tty = Object.assign(new Readable({ read() {} }), { isTTY: true });
+    expect(await readStdinMessageOrUndefined(tty, 100)).toBeUndefined();
+  });
+
+  it("reports blank input as no message", async () => {
+    expect(await readStdinMessageOrUndefined(Readable.from(["  \n"]), 1000)).toBeUndefined();
+  });
+
+  it("reports a held-open stdin as no message instead of hanging forever", async () => {
+    const neverEnding = new Readable({ read() {} });
+    neverEnding.push("x");
+    expect(await readStdinMessageOrUndefined(neverEnding, 50)).toBeUndefined();
   });
 });
 

@@ -5,9 +5,10 @@ import { TUNNEL_BTN, TUNNEL_OUTPUT, TUNNEL_STATUS, TUNNEL_URL, UNLINK_BTN, COPY_
 
 export interface TunnelPageProps {
   url?: string | null;
+  pollMs?: number;
 }
 
-export default function TunnelApp({ url }: TunnelPageProps = {}) {
+export default function TunnelApp({ url, pollMs = 2000 }: TunnelPageProps = {}) {
   const [hasUrl, setHasUrl] = useState<boolean>(!!url);
   const [lastAliveAt, setLastAliveAt] = useState<string | null>(null);
   const redirectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -135,7 +136,7 @@ export default function TunnelApp({ url }: TunnelPageProps = {}) {
         .catch((e) => { if (statusEl) statusEl.textContent = "status error: " + String(e); });
     }
     refreshTunnelStatus();
-    const intervalId = setInterval(refreshTunnelStatus, 2000);
+    const intervalId = setInterval(refreshTunnelStatus, pollMs);
     if (url) setUrlSection(url);
     return () => {
       clearInterval(intervalId);

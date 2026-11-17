@@ -47,6 +47,25 @@ export async function readStdinMessage(
 }
 
 /**
+ * The piped-stdin message for commands that take the text without a `---`
+ * separator: non-empty when stdin is a readable pipe carrying content,
+ * undefined on a terminal, on blank input, or when the read fails — callers
+ * fall back to their own "Message required" error. An unreadable-but-open
+ * stdin (the read timeout) reports as no message too, after its wait.
+ */
+export async function readStdinMessageOrUndefined(
+  input: Readable & { isTTY?: boolean } = process.stdin,
+  timeoutMs: number = STDIN_READ_TIMEOUT_MS,
+): Promise<string | undefined> {
+  try {
+    const text = await readStdinMessage(input, timeoutMs);
+    return text !== undefined && text.trim() !== "" ? text : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Split argv on the first `---` before modality-cli-kit parses it.
  *
  * The kit would otherwise read `---` as an unknown flag and scatter the message
