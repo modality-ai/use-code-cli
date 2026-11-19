@@ -185,3 +185,61 @@ describe("SessionView optimistic updates", () => {
     expect(container.querySelector("[data-optimistic]")).toBeTruthy();
   });
 });
+
+describe("SessionView tool fold refetch", () => {
+  it("fetches tool result on first open and exposes an Update button that refetches", async () => {
+    const toolResultCalls: string[] = [];
+    // @ts-ignore
+    globalThis.fetch = mock(async (url: string) => {
+      if (String(url).includes("/my/api/session/tool-result")) {
+        toolResultCalls.push(String(url));
+        return { json: async () => ({ success: true, input: { cmd: "ls" }, result: "out", resultHtml: "<p>out</p>" }) } as any;
+      }
+      if (String(url).includes("/my/api/session")) {
+        const boot = (window as any).__REACT_DATA__?.sessionView?.initial;
+        return { json: async () => boot ?? { success: true, data: { name: "Debug --init", entries: [], online: true, status: "idle" } } } as any;
+      }
+      if (String(url).includes("/my/api/talk")) {
+        return { json: async () => ({ success: true, data: { success: true, message: "sent" } }) } as any;
+      }
+      return { json: async () => ({}) } as any;
+    });
+    const initial = { success: true, data: { name: "Debug --init", entries: [{ role: "assistant", text: "hi", tools: [{ id: "t1", name: "bash" }] }], online: true, status: "idle" } };
+    (window as any).__REACT_DATA__ = { sessionView: { name: "Debug --init", initial } };
+    const { container } = render(<SessionView name="Debug --init" initial={initial as any} />);
+    await act();
+    // open the fold
+    const summary = container.querySelector("summary") as HTMLElement;
+    await act(() => { summary.click(); }, 50);
+    expect(toolResultCalls.length).toBe(1);
+    // Update button should be present
+    const updateBtn = Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.trim() === "Update") as HTMLButtonElement;
+    expect(updateBtn).toBeTruthy();
+    // click Update -> refetch
+    await act(() => { updateBtn.click(); }, 50);
+    expect(toolResultCalls.length).toBe(2);
+  });
+
+  it("does not fetch when tool has no id or sessionName, but still marks fetched", async () => {
+    const toolResultCalls: string[] = [];
+    // @ts-ignore
+    globalThis.fetch = mock(async (url: string) => {
+      if (String(url).includes("/my/api/session/tool-result")) {
+        toolResultCalls.push(String(url));
+        return { json: async () => ({ success: true }) } as any;
+      }
+      if (String(url).includes("/my/api/session")) {
+        const boot = (window as any).__REACT_DATA__?.sessionView?.initial;
+        return { json: async () => boot ?? { success: true, data: { name: "x", entries: [], online: true, status: "idle" } } } as any;
+      }
+      return { json: async () => ({}) } as any;
+    });
+    const initial = { success: true, data: { name: "x", entries: [{ role: "assistant", text: "hi", tools: [{ name: "bash" }] }], online: true, status: "idle" } };
+    (window as any).__REACT_DATA__ = { sessionView: { name: "x", initial } };
+    const { container } = render(<SessionView name="x" initial={initial as any} />);
+    await act();
+    const summary = container.querySelector("summary") as HTMLElement;
+    await act(() => { summary.click(); }, 50);
+    expect(toolResultCalls.length).toBe(0);
+  });
+});

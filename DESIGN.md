@@ -50,7 +50,7 @@ content; combine with `bg-surface` + a `border`.
 | `color.surface` | #fffdf8 | #22252a |
 | `color.border` | #d8d4cb | #3a3e44 |
 | `color.text.primary` | #23262b | #e8e6e1 |
-| `color.text.muted` | #5b5f66 | #a6a9ae |
+| `color.text.muted` | #475569 | #94a3b8 |
 | `color.accent.collaboration` | #1f6f78 | #4dacb2 |
 | `color.glow.night` | #f2c879 | — |
 | `color.island.civil` | #9ebcd1 | #386889 |
@@ -79,7 +79,7 @@ content; combine with `bg-surface` + a `border`.
     { "path": "color.surface", "type": "color", "value": "#fffdf8", "dark": "#22252a" },
     { "path": "color.border", "type": "color", "value": "#d8d4cb", "dark": "#3a3e44" },
     { "path": "color.text.primary", "type": "color", "value": "#23262b", "dark": "#e8e6e1" },
-    { "path": "color.text.muted", "type": "color", "value": "#5b5f66", "dark": "#a6a9ae" },
+    { "path": "color.text.muted", "type": "color", "value": "#475569", "dark": "#94a3b8" },
     { "path": "color.accent.collaboration", "type": "color", "value": "#1f6f78", "dark": "#4dacb2" },
     { "path": "color.glow.night", "type": "color", "value": "#f2c879" },
     { "path": "color.island.civil", "type": "color", "value": "#9ebcd1", "dark": "#386889" },
@@ -127,3 +127,14 @@ Or re-export tokens:
 ```bash
 use-design tokens island --format json
 ```
+
+## Button
+
+All clickable buttons MUST include `cursor-pointer` (Tailwind) / `cursor: pointer` (CSS) so the pointer cursor is shown on hover. Disabled buttons use `cursor-not-allowed` (or `cursor: not-allowed`) instead.
+
+| Token/Utility | Value |
+|---|---|
+| `cursor.pointer` | `pointer` |
+| `cursor.not-allowed` | `not-allowed` (disabled state) |
+
+Base button classes: `cursor-pointer` plus `border border-border rounded-sm px-2 py-0.5 text-xs`. Apply `disabled:cursor-not-allowed disabled:opacity-50` for disabled states.

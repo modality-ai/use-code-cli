@@ -7,7 +7,7 @@
   --color-surface: #fffdf8;
   --color-border: #d8d4cb;
   --color-text-primary: #23262b;
-  --color-text-muted: #5b5f66;
+  --color-text-muted: #475569;
   --color-accent-collaboration: #1f6f78;
   --font-display: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
   --font-body: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
@@ -31,7 +31,7 @@
     --color-surface: #22252a;
     --color-border: #3a3e44;
     --color-text-primary: #e8e6e1;
-    --color-text-muted: #a6a9ae;
+    --color-text-muted: #94a3b8;
     --color-accent-collaboration: #4dacb2;
   }
 }

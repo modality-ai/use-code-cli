@@ -70,11 +70,13 @@ function ToolFold({ tool, sessionName }: { tool: any; sessionName?: string }) {
   const [resultHtml, setResultHtml] = useState<string | undefined>(tool.resultHtml);
   const [loading, setLoading] = useState(false);
   const [fetched, setFetched] = useState(!!(tool.input || tool.result || tool.resultHtml));
-  const onToggle = async (ev: any) => {
-    if (!ev.currentTarget.open) return;
-    setLoaded(true);
-    if (fetched) return;
-    if (!tool.id || !sessionName) { setFetched(true); return; }
+  // Guards against overlapping fetches when the component re-rend hasn't
+  // flipped `loading` yet (e.g. rapid double-clicks on "Update").
+  const fetchingRef = useRef(false);
+  const fetchResult = async () => {
+    if (!tool.id || !sessionName) return;
+    if (fetchingRef.current) return;
+    fetchingRef.current = true;
     setLoading(true);
     try {
       const r = await fetch(`/my/api/session/tool-result?name=${encodeURIComponent(sessionName)}&toolId=${encodeURIComponent(tool.id)}`);
@@ -88,8 +90,20 @@ function ToolFold({ tool, sessionName }: { tool: any; sessionName?: string }) {
       // ignore; keep empty
     } finally {
       setLoading(false);
-      setFetched(true);
+      fetchingRef.current = false;
     }
+  };
+  const onToggle = async (ev: any) => {
+    if (!ev.currentTarget.open) return;
+    setLoaded(true);
+    if (fetched) return;
+    if (!tool.id || !sessionName) { setFetched(true); return; }
+    await fetchResult();
+    setFetched(true);
+  };
+  const refetch = async () => {
+    if (loading) return;
+    await fetchResult();
   };
   return (
     <details
@@ -99,6 +113,16 @@ function ToolFold({ tool, sessionName }: { tool: any; sessionName?: string }) {
       <summary>CLICK TO SEE {tool.name || "tool"}</summary>
       {loaded && (
         <>
+          {fetched && tool.id && sessionName && (
+            <button
+              type="button"
+              onClick={refetch}
+              disabled={loading}
+              className="text-xs text-text-muted border border-border rounded-sm px-2 py-0.5 mt-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {loading ? "Updating…" : "Update"}
+            </button>
+          )}
           {(() => {
             const tname = String(tool?.name || "").toLowerCase();
             const isDiffTool = tname === "write" || tname === "edit" || tname === "read";
@@ -107,6 +131,9 @@ function ToolFold({ tool, sessionName }: { tool: any; sessionName?: string }) {
                 <>
                   {loading && <div className="text-text-muted text-xs mt-1">Loading…</div>}
                   {!loading && (resultHtml ? (
+                    // resultHtml is trusted server-generated content (tool output
+                    // rendered as HTML by the server-side transcript parser), not
+                    // user input — no sanitization needed.
                     <div className="lazy-body" dangerouslySetInnerHTML={{ __html: resultHtml }} />
                   ) : null)}
                 </>
@@ -585,7 +612,7 @@ export default function SessionView(props: BootProps) {
               </div>
               <div className="entry-body pl-4 whitespace-pre-wrap">{o.text}</div>
               {o.status === "failed" && (
-                <button type="button" className="ml-4 mt-1 text-xs text-accent-collaboration border border-border rounded-sm px-2 py-0.5" onClick={() => retryOptimistic(o.localId)}>
+                <button type="button" className="ml-4 mt-1 text-xs text-accent-collaboration border border-border rounded-sm px-2 py-0.5 cursor-pointer" onClick={() => retryOptimistic(o.localId)}>
                   retry
                 </button>
               )}
