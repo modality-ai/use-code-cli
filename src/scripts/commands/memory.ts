@@ -1,4 +1,5 @@
 import { homedir } from "node:os";
+import { filterByProject } from "../../lib/filterProject";
 import { z } from "zod";
 import { optionalValueFlag, type CLICommand } from "modality-cli-kit";
 import { formatTime, oneLine, plural } from "../../lib/output/format";
@@ -26,6 +27,8 @@ const MemoryArgsSchema = z.object({
       "must be a positive integer, e.g. --limit 5",
     )
     .describe("Show at most N memory files (20 when passed bare; every match with --search)"),
+  "filter-project": optionalValueFlag(process.cwd())
+    .describe("Only memory files whose project workspace folder matches any of these comma-separated keywords (case-insensitive). Passed bare, defaults to the current working directory."),
 });
 
 type MemoryArgs = z.infer<typeof MemoryArgsSchema>;
@@ -69,7 +72,8 @@ async function memory(args: MemoryArgs) {
       ? 20
       : undefined;
 
-  const all = await readMemoryFiles(); // already newest first
+  const allRaw = await readMemoryFiles(); // already newest first
+  const all = filterByProject(allRaw, (f) => [f.cwd], args["filter-project"]);
   let rows: Row[];
   let total: number;
 
@@ -129,7 +133,9 @@ async function memory(args: MemoryArgs) {
     ? lines.join("\n")
     : term !== undefined
       ? `No memory files contain "${term}" (searched ${plural(all.length, "file")}).`
-      : "No memory files found in ~/.claude/projects/*/memory.";
+      : args["filter-project"] !== undefined
+        ? `No memory files matching --filter-project=${args["filter-project"]}.`
+        : "No memory files found in ~/.claude/projects/*/memory.";
 
   return {
     success: true,

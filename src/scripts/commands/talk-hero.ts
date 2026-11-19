@@ -2,8 +2,8 @@ import { z } from "zod";
 import type { CLICommand } from "modality-cli-kit";
 import { sendWithReply } from "../../lib/reply-send";
 import { readStdinMessageOrUndefined } from "../../lib/talk-argv";
+import { matchesProjectFolder, splitFilterProjectTerms } from "../../lib/filterProject";
 import {
-  matchesSessionFilter,
   readSessions,
   readTranscriptMeta,
 } from "../../lib/sessions";
@@ -56,8 +56,9 @@ async function talkHero(args: TalkHeroArgs) {
   // Search sessions in the current project (cwd), reading each transcript for
   // its deployed hero, and pick the first whose hero matches the keyword.
   const all = await readSessions(false);
+  const projectTerms = splitFilterProjectTerms(process.cwd());
   const projectSessions = all.filter(
-    (s) => s.online && matchesSessionFilter(s, { filterProject: process.cwd() }),
+    (s) => s.online && matchesProjectFolder([s.cwd, s.latestCwd], projectTerms),
   );
 
   const metas = await Promise.all(

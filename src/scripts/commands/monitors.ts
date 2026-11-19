@@ -2,6 +2,7 @@ import { z } from "zod";
 import { optionalValueFlag, renderTable, type CLICommand } from "modality-cli-kit";
 import { formatTime, oneLine, plural } from "../../lib/output/format";
 import { filterStatusField } from "../../lib/flags";
+import { matchesProjectFolder, splitFilterProjectTerms } from "../../lib/filterProject";
 import {
   describeSessionFilter,
   findSessions,
@@ -160,15 +161,15 @@ async function monitors(args: MonitorsArgs) {
   } else {
     const includeOffline = args.all === true;
     const all = await readSessions(includeOffline);
+    const projectTerms = splitFilterProjectTerms(args["filter-project"]);
     const fieldFilter: SessionFilter = {
       filterName: args["filter-name"],
       filterStatus: args["filter-status"],
-      filterProject: args["filter-project"],
     };
     const filter: SessionFilter = { ...fieldFilter, filterHero: args["filter-hero"] };
-    let candidates = (includeOffline ? all : all.filter((s) => s.online)).filter((s) =>
-      matchesSessionFilter(s, fieldFilter),
-    );
+    let candidates = (includeOffline ? all : all.filter((s) => s.online))
+      .filter((s) => matchesProjectFolder([s.cwd, s.latestCwd], projectTerms))
+      .filter((s) => matchesSessionFilter(s, fieldFilter));
     if (filter.filterHero !== undefined) {
       const read = await Promise.all(candidates.map(async (s) => ({ s, meta: await readTranscriptMeta(s) })));
       candidates = read

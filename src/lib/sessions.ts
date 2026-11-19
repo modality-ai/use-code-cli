@@ -5,6 +5,7 @@ import { createInterface } from "node:readline";
 import { appendFile, mkdir, open, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { liveSessionStatus, liveSessionWaitingFor } from "./status";
 import { prettyJsonFile } from "./output/json";
+import { matchesProjectFolder, splitFilterProjectTerms } from "./filterProject";
 
 export const SESSIONS_DIR = join(homedir(), ".claude", "sessions");
 export const PROJECTS_DIR = join(homedir(), ".claude", "projects");
@@ -289,19 +290,11 @@ export function matchesSessionFilter(
     if (!heroTerms.some((term) => hero.includes(term))) return false;
   }
 
-  const folderTerms = splitFilterTerms(filter.filterProject).map((term) => {
-    // Allow full paths (e.g. a bare --filter-project resolved to cwd): match
-    // on their basename so a project directory filters like a folder keyword.
-    return term.includes("/") || term.includes("\\") ? basename(term) : term;
-  });
+  const folderTerms = splitFilterProjectTerms(filter.filterProject);
   if (folderTerms.length > 0) {
-    // A keyword names the workspace folder itself, so only its basename is
-    // matched — a parent directory in the path never counts. A session that
-    // moved during its life counts under both the launch and the final folder.
-    const folders = [s.cwd, s.latestCwd]
-      .filter((path): path is string => path !== undefined)
-      .map((path) => basename(path).toLowerCase());
-    if (!folderTerms.some((term) => folders.some((folder) => folder.includes(term)))) {
+    // A session that moved during its life counts under both the launch and
+    // the final folder. Delegate to the shared helper.
+    if (!matchesProjectFolder([s.cwd, s.latestCwd], folderTerms)) {
       return false;
     }
   }
