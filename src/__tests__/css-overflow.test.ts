@@ -1,19 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import React from "react";
-import { cleanup } from "@testing-library/react";
-import { render } from "reshow-unit";
+import { render, cleanIt } from "reshow-unit";
+import { jsdom } from "reshow-unit-dom";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join, dirname } from "node:path";
 
 describe("long English overflow (css)", () => {
   beforeEach(() => {
+    jsdom();
     const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "styles", "index.css"), "utf8");
     const style = document.createElement("style");
     style.textContent = css;
     document.head.appendChild(style);
   });
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanIt();
+  });
 
   it("wraps a long unbreakable token in .md-content pre", () => {
     const { container } = render(
