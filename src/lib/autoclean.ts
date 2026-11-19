@@ -1,15 +1,12 @@
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { rm, stat } from "node:fs/promises";
-import { z } from "zod";
-import type { CLICommand } from "modality-cli-kit";
-import { plural } from "../../lib/output/format";
 import {
   describeProjects,
   findProject,
   readProjects,
   type ProjectInfo,
-} from "../../lib/projects";
+} from "./projects";
 import {
   encodeProjectDir,
   matchesSessionFilter,
@@ -19,35 +16,7 @@ import {
   readSessions,
   transcriptPath,
   type SessionInfo,
-} from "../../lib/sessions";
-
-const AutocleanArgsSchema = z.object({
-  keep: z
-    .string()
-    .optional()
-    .default("50")
-    .refine(
-      (v) => /^\d+$/.test(v) && Number(v) >= 1,
-      "keep must be a positive integer >= 1, e.g. --keep 50",
-    )
-    .describe("Number of most-recent sessions to keep (default 50)"),
-  project: z
-    .string()
-    .optional()
-    .describe("Project workspace path, directory name, or unique path suffix (default: current working directory)"),
-  "dry-run": z
-    .boolean()
-    .optional()
-    .default(false)
-    .describe("Report what would be deleted, without deleting it"),
-  yes: z
-    .boolean()
-    .optional()
-    .default(false)
-    .describe("Delete without stopping at the confirmation gate"),
-});
-
-type AutocleanArgs = z.infer<typeof AutocleanArgsSchema>;
+} from "./sessions";
 
 function label(s: SessionInfo): string {
   return s.name ?? s.sessionId;
@@ -65,8 +34,19 @@ async function activityOf(s: SessionInfo): Promise<number> {
   return s.updatedAt ?? 0;
 }
 
-async function autoclean(args: AutocleanArgs) {
+export async function autoclean(args: {
+  keep: string;
+  project?: string;
+  "dry-run"?: boolean;
+  yes?: boolean;
+}): Promise<{ success: boolean; message: string; data?: Record<string, unknown> }> {
   const keep = Number(args.keep);
+  if (!Number.isFinite(keep) || keep < 1) {
+    return {
+      success: false,
+      message: "keep must be a positive integer >= 1, e.g. --keep 50",
+    };
+  }
 
   const projects = await readProjects();
   const target = (args.project ?? process.cwd()).replace(/\/+$/, "");
@@ -114,8 +94,6 @@ async function autoclean(args: AutocleanArgs) {
   const active = candidates.filter((s) => s.online);
   const inactive = candidates.filter((s) => !s.online);
 
-  // Never delete active sessions; if they already fill `keep`, there is nothing
-  // to clean.
   if (active.length >= keep) {
     const lines = [
       `Project: ${project.cwd}`,
@@ -134,13 +112,10 @@ async function autoclean(args: AutocleanArgs) {
 
   const slotsForInactive = keep - active.length;
 
-  // Sort inactive candidates by transcript activity (newest first); keep the top
-  // `slotsForInactive`, delete the rest.
   const withActivity = await Promise.all(
     inactive.map(async (s) => ({ s, activity: await activityOf(s) })),
   );
   withActivity.sort((a, b) => b.activity - a.activity);
-  const keptInactive = withActivity.slice(0, slotsForInactive).map((x) => x.s);
   const toDelete = withActivity.slice(slotsForInactive).map((x) => x.s);
 
   if (toDelete.length === 0) {
@@ -155,7 +130,6 @@ async function autoclean(args: AutocleanArgs) {
     };
   }
 
-  // Safety: only transcripts physically inside the project's encoded directory.
   const deletable: SessionInfo[] = [];
   const skippedPath: SessionInfo[] = [];
   for (const s of toDelete) {
@@ -167,7 +141,7 @@ async function autoclean(args: AutocleanArgs) {
     }
   }
 
-  const dryRun = args["dry-run"];
+  const dryRun = !!args["dry-run"];
   const verb = dryRun ? "Would delete" : "Deleted";
 
   if (!dryRun && !args.yes) {
@@ -201,11 +175,9 @@ async function autoclean(args: AutocleanArgs) {
         await rm(path);
         deleted.push(s.sessionId);
       } catch {
-        // Leave the registry entry if the file could not be removed.
         continue;
       }
     }
-    // Clean up name registry entries for the removed sessions.
     try {
       const names = await readSessionNames();
       let changed = false;
@@ -218,7 +190,7 @@ async function autoclean(args: AutocleanArgs) {
       if (changed) {
         const { mkdir, writeFile } = await import("node:fs/promises");
         await mkdir(dirname(NAMES_FILE), { recursive: true });
-        const { prettyJsonFile } = await import("../../lib/output/json");
+        const { prettyJsonFile } = await import("./output/json");
         await writeFile(NAMES_FILE, prettyJsonFile(names), "utf8");
       }
     } catch {
@@ -269,17 +241,3 @@ async function autoclean(args: AutocleanArgs) {
   };
 }
 
-export const autocleanCommand: CLICommand = {
-  name: "autoclean",
-  description:
-    "Clean old sessions of a project, keeping only the most recent N (default 50). Never deletes active sessions.",
-  inputSchema: AutocleanArgsSchema,
-  positionalKeys: ["keep"],
-  execute: autoclean,
-  examples: [
-    "use-code-cli autoclean",
-    "use-code-cli autoclean 30",
-    "use-code-cli autoclean --project /w/use-stock --dry-run",
-    "use-code-cli autoclean 20 --yes",
-  ],
-};

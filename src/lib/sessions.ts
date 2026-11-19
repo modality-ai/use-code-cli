@@ -470,34 +470,34 @@ export function pauseSessionResult(
   };
 }
 
-export function resumeSessionResult(
+export function unpauseSessionResult(
   s: SessionInfo,
   kill: (pid: number, signal: NodeJS.Signals) => void = process.kill,
 ): { success: boolean; message: string; data?: Record<string, unknown> } {
-  console.log("[resume] resumeSessionResult: session=%s pid=%d online=%s", sessionLabel(s), s.pid, s.online);
+  console.log("[unpause] unpauseSessionResult: session=%s pid=%d online=%s", sessionLabel(s), s.pid, s.online);
   if (!s.online) {
-    console.log("[resume] offline guard: session offline, nothing to resume");
+    console.log("[unpause] offline guard: session offline, nothing to unpause");
     return {
       success: false,
-      message: `Session ${sessionLabel(s)} is offline; nothing to resume. (Only active sessions can be resumed.)`,
+      message: `Session ${sessionLabel(s)} is offline; nothing to unpause. (Only active sessions can be unpaused.)`,
     };
   }
   try {
-    console.log("[resume] sending SIGCONT to pid %d", s.pid);
+    console.log("[unpause] sending SIGCONT to pid %d", s.pid);
     kill(s.pid, "SIGCONT");
-    console.log("[resume] SIGCONT delivered to pid %d", s.pid);
+    console.log("[unpause] SIGCONT delivered to pid %d", s.pid);
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
-    console.log("[resume] SIGCONT failed for pid %d: %s", s.pid, reason);
+    console.log("[unpause] SIGCONT failed for pid %d: %s", s.pid, reason);
     return {
       success: false,
-      message: `Could not resume session ${sessionLabel(s)} (pid ${s.pid}): ${reason}.`,
+      message: `Could not unpause session ${sessionLabel(s)} (pid ${s.pid}): ${reason}.`,
     };
   }
   return {
     success: true,
-    message: `Resumed session ${sessionLabel(s)} (pid ${s.pid}).`,
-    data: { sessionId: s.sessionId, pid: s.pid, name: sessionLabel(s), resume: "sigcont" },
+    message: `Unpaused session ${sessionLabel(s)} (pid ${s.pid}).`,
+    data: { sessionId: s.sessionId, pid: s.pid, name: sessionLabel(s), unpause: "sigcont" },
   };
 }
 

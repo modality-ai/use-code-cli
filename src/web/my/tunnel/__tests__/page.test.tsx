@@ -7,36 +7,55 @@ import TunnelPage from "../page";
 afterEach(() => cleanup());
 
 describe("TunnelPage", () => {
-  it("renders the heading", () => {
-    render(TunnelPage());
+  it("renders the heading", async () => {
+    await act(() => { render(TunnelPage()); });
     expect(screen().getByText(/Tunnel \(cloudflared\)/i)).toBeTruthy();
   });
 
-  it("renders the create & link button", () => {
-    render(TunnelPage());
+  it("renders the create & link button", async () => {
+    await act(() => { render(TunnelPage()); });
     expect(screen().getByText(/Create & Link tunnel/i)).toBeTruthy();
   });
 
-  it("renders the unlink button", () => {
-    render(TunnelPage());
+  it("renders the unlink button", async () => {
+    await act(() => { render(TunnelPage()); });
     expect(screen().getByText(/Unlink/i)).toBeTruthy();
   });
 
-  it("shows placeholder when no url", () => {
+  it("shows placeholder when no url", async () => {
     // Query the URL span directly: the "Last alive" placeholder is also "—",
     // so a bare getByText(/—/) would match two elements.
-    const { container } = render(TunnelPage());
+    let container: any;
+    await act(() => {
+      const r = render(TunnelPage());
+      container = r.container;
+    });
     const el = container.querySelector("#tunnel-url");
     expect(el?.textContent).toBe("—");
   });
 
-  it("shows provided url", () => {
-    render(TunnelPage({ url: "https://example.trycloudflare.com" } as any));
-    expect(screen().getByText(/https:\/\/example.trycloudflare.com/i)).toBeTruthy();
+  it("shows provided url", async () => {
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = (async () => ({ ok: true, status: 200, json: async () => ({ success: true, url: "https://example.trycloudflare.com" }) })) as any;
+    try {
+      let container: any;
+      await act(() => {
+        const r = render(TunnelPage({ url: "https://example.trycloudflare.com" } as any));
+        container = r.container;
+      });
+      expect(container.textContent).toMatch(/https:\/\/example.trycloudflare.com/i);
+    } finally {
+      globalThis.fetch = origFetch;
+      await act(async () => { cleanup(); });
+    }
   });
 
-  it("uses cursor-pointer on the create button", () => {
-    const { container } = render(TunnelPage());
+  it("uses cursor-pointer on the create button", async () => {
+    let container: any;
+    await act(() => {
+      const r = render(TunnelPage());
+      container = r.container;
+    });
     const btn = container.querySelector("#tunnel-btn");
     expect(btn).toBeTruthy();
     expect(btn?.className).toContain("cursor-pointer");
@@ -181,8 +200,12 @@ describe("TunnelPage", () => {
     }
   });
 
-  it("uses cursor-pointer on the unlink button", () => {
-    const { container } = render(TunnelPage());
+  it("uses cursor-pointer on the unlink button", async () => {
+    let container: any;
+    await act(() => {
+      const r = render(TunnelPage());
+      container = r.container;
+    });
     const btn = container.querySelector("#unlink-btn");
     expect(btn).toBeTruthy();
     expect(btn?.className).toContain("cursor-pointer");

@@ -20,6 +20,8 @@ export interface LiveSession {
   waitingFor?: string;
   cwd: string;
   messagingSocketPath?: string;
+  /** True when the live process is frozen (SIGSTOP); reported as idle. */
+  stopped?: boolean;
 }
 
 /** Cap on the ancestor walk — the chain is short in practice. */
@@ -147,7 +149,15 @@ export function interruptFrame(requestId: string = randomUUID(), reason = "user-
  * track it out of band. Throws when the session has no socket or the frame
  * cannot be written.
  */
-export async function interrupt(s: LiveSession, reason?: string): Promise<string> {
+export async function interrupt(
+  s: LiveSession,
+  reason?: string,
+  deps?: { kill?: (pid: number, signal: NodeJS.Signals) => void },
+): Promise<string> {
+  const kill = deps?.kill ?? ((pid, signal) => process.kill(pid, signal));
+  if (s.stopped) {
+    try { kill(s.pid, "SIGCONT"); } catch { /* best-effort; don't block delivery */ }
+  }
   if (!s.messagingSocketPath) throw new Error(`Session ${s.pid} has no messaging socket.`);
   const token = await peerToken(s.pid);
   if (!token) throw new Error(`No peer token found for pid ${s.pid}.`);
@@ -236,8 +246,7 @@ export async function pauseSession(
     };
   }
 }
-
-export async function resumeSession(
+export async function unpauseSession(
   s: SessionInfo,
   deps: {
     kill?: (pid: number, signal: NodeJS.Signals) => void;
@@ -246,7 +255,7 @@ export async function resumeSession(
   if (!s.online) {
     return {
       success: false,
-      message: `Session ${sessionLabel(s)} is offline; nothing to resume. (Only active sessions can be resumed.)`,
+      message: `Session ${sessionLabel(s)} is offline; nothing to unpause. (Only active sessions can be unpaused.)`,
     };
   }
   const kill = deps.kill ?? ((pid, signal) => process.kill(pid, signal));
@@ -254,12 +263,12 @@ export async function resumeSession(
     kill(s.pid, "SIGCONT");
     return {
       success: true,
-      message: `Resumed session ${sessionLabel(s)} (pid ${s.pid}).`,
-      data: { sessionId: s.sessionId, pid: s.pid, name: sessionLabel(s), resume: "sigcont" },
+      message: `Unpaused session ${sessionLabel(s)} (pid ${s.pid}).`,
+      data: { sessionId: s.sessionId, pid: s.pid, name: sessionLabel(s), unpause: "sigcont" },
     };
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
-    return { success: false, message: `Could not resume session ${sessionLabel(s)} (pid ${s.pid}): ${reason}.` };
+    return { success: false, message: `Could not unpause session ${sessionLabel(s)} (pid ${s.pid}): ${reason}.` };
   }
 }
 
@@ -273,7 +282,12 @@ export async function deliver(
   s: LiveSession,
   message: string,
   msgId: string = randomUUID(),
+  deps?: { kill?: (pid: number, signal: NodeJS.Signals) => void },
 ): Promise<string> {
+  const kill = deps?.kill ?? ((pid, signal) => process.kill(pid, signal));
+  if (s.stopped) {
+    try { kill(s.pid, "SIGCONT"); } catch { /* best-effort; don't block delivery */ }
+  }
   if (!s.messagingSocketPath) throw new Error(`Session ${s.pid} has no messaging socket.`);
   const token = await peerToken(s.pid);
   if (!token) throw new Error(`No peer token found for pid ${s.pid}.`);

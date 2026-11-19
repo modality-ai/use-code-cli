@@ -28,8 +28,8 @@ interface SendWithReplyDeps {
   recordReply?: (record: { inReplyTo: string; targetSessionId: string; msgId: string; at: number }) => Promise<void>;
   currentSession?: (sessions?: LiveSession[]) => Promise<LiveSession | undefined>;
   liveSessions?: () => Promise<LiveSession[]>;
-  deliver?: (session: LiveSession, body: string, msgId: string) => Promise<string>;
-  interrupt?: (session: LiveSession) => Promise<string>;
+  deliver?: (session: LiveSession, body: string, msgId?: string, deps?: { kill?: (pid: number, signal: NodeJS.Signals) => void }) => Promise<string>;
+  interrupt?: (session: LiveSession, reason?: string, deps?: { kill?: (pid: number, signal: NodeJS.Signals) => void }) => Promise<string>;
   label?: (session: LiveSession) => string;
 }
 

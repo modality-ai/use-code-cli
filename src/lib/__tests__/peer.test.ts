@@ -246,3 +246,32 @@ describe("deliver", () => {
     }
   }, 8000);
 });
+
+describe("auto-resume on delivery to a stopped session", () => {
+  it("sends SIGCONT before interrupting a stopped session", async () => {
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const s = { pid: 10, sessionId: "s1", cwd: "/tmp", stopped: true } as any;
+    await expect(
+      interrupt(s, "r", { kill: (pid, signal) => signals.push({ pid, signal }) }),
+    ).rejects.toThrow("Session 10 has no messaging socket.");
+    expect(signals).toEqual([{ pid: 10, signal: "SIGCONT" }]);
+  });
+
+  it("sends SIGCONT before delivering to a stopped session", async () => {
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const s = { pid: 10, sessionId: "s1", cwd: "/tmp", stopped: true } as any;
+    await expect(
+      deliver(s, "hi", "m1", { kill: (pid, signal) => signals.push({ pid, signal }) }),
+    ).rejects.toThrow("Session 10 has no messaging socket.");
+    expect(signals).toEqual([{ pid: 10, signal: "SIGCONT" }]);
+  });
+
+  it("does not send SIGCONT when the session is not stopped", async () => {
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const s = { pid: 10, sessionId: "s1", cwd: "/tmp", stopped: false } as any;
+    await expect(
+      interrupt(s, "r", { kill: (pid, signal) => signals.push({ pid, signal }) }),
+    ).rejects.toThrow("Session 10 has no messaging socket.");
+    expect(signals).toEqual([]);
+  });
+});

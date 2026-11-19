@@ -20,7 +20,7 @@ import {
   type SessionCron,
   type SessionInfo,
 } from "../../lib/sessions";
-import { deliver, liveSessions, pauseSession, resumeSession } from "../../lib/peer";
+import { deliver, liveSessions, pauseSession, unpauseSession } from "../../lib/peer";
 
 const SessionArgsSchema = z.object({
   target: z
@@ -49,14 +49,14 @@ const SessionArgsSchema = z.object({
     .optional()
     .default(false)
     .describe(
-      "Freeze (SIGSTOP) the target session's process without killing it — the session stays alive; resume with SIGCONT (online sessions only)",
+      "Freeze (SIGSTOP) the target session's process without killing it — the session stays alive; paused sessions auto-resume (SIGCONT) on inbound messages",
     ),
-  resume: z
+  unpause: z
     .boolean()
     .optional()
     .default(false)
     .describe(
-      "Resume (SIGCONT) a frozen (SIGSTOP'd) target session's process (online sessions only)",
+      "Wake a frozen (SIGSTOP'd) session with SIGCONT (online sessions only); paused sessions also auto-resume on inbound messages",
     ),
   delete: z
     .boolean()
@@ -291,8 +291,8 @@ async function session(args: SessionArgs) {
   // Pause mode: freeze the process (SIGSTOP) without killing the session.
   if (args.pause) return pauseSession(s);
 
-  // Resume mode: wake a frozen (SIGSTOP'd) process with SIGCONT.
-  if (args.resume) return resumeSession(s);
+  // Unpause mode: wake a frozen (SIGSTOP'd) process with SIGCONT.
+  if (args.unpause) return unpauseSession(s);
 
   // Stop mode: kill the session's process.
   if (args.stop) {
@@ -415,7 +415,7 @@ async function session(args: SessionArgs) {
 
 export const sessionCommand: CLICommand = {
   name: "session",
-  description: "Show one session's workspace, hero, cron jobs, and how to talk to it; --pause freezes the process (SIGSTOP), --resume wakes it (SIGCONT), --stop kills the session",
+  description: "Show one session's workspace, hero, cron jobs, and how to talk to it; --pause freezes (SIGSTOP), --unpause wakes (SIGCONT); paused sessions auto-resume on inbound messages; --stop kills the session",
   inputSchema: SessionArgsSchema,
   positionalKeys: ["target"],
   execute: session,

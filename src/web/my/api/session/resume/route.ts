@@ -16,15 +16,15 @@ export async function POST(request: Request): Promise<Response> {
   }
   const s = matches.length === 0 ? null : pickBestSession(matches);
   if (!s) return Response.json({ success: false, error: "session not found" }, { status: 404 });
-  if (!s.online) return Response.json({ success: false, error: "session is offline; cannot resume it" }, { status: 409 });
+  if (!s.online) return Response.json({ success: false, error: "session is offline; cannot unpause it" }, { status: 409 });
 
-  const result = (await aiTool.execute({ command: "session", target: name, resume: true })) as {
+  const result = (await aiTool.execute({ command: "session", target: name, unpause: true })) as {
     success?: boolean;
     message?: string;
     data?: { pid?: number; name?: string };
   };
   if (!result?.success) {
-    return Response.json({ success: false, error: result?.message || "resume failed" }, { status: 500 });
+    return Response.json({ success: false, error: result?.message || "unpause failed" }, { status: 500 });
   }
 
   const data = result.data as { pid?: number; name?: string } | undefined;

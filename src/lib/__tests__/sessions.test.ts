@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
-import { pauseSession, resumeSession, interruptFrame } from "../peer";
+import { pauseSession, unpauseSession, interruptFrame } from "../peer";
 import { promptFromLine } from "../sessions";
-import { applySessionNames, splitFilterTerms, matchesSessionFilter, describeSessionFilter, sessionLabel, findSessions, findSessionsFuzzy, pauseSessionResult, resumeSessionResult, encodeProjectDir, parseTranscriptSessionName, trimValue, compressTranscript, isStopped, duplicateSession, readSessionNames, PROJECTS_DIR, SESSIONS_DIR } from "../sessions";
+import { applySessionNames, splitFilterTerms, matchesSessionFilter, describeSessionFilter, sessionLabel, findSessions, findSessionsFuzzy, pauseSessionResult, unpauseSessionResult, encodeProjectDir, parseTranscriptSessionName, trimValue, compressTranscript, isStopped, duplicateSession, readSessionNames, PROJECTS_DIR, SESSIONS_DIR } from "../sessions";
 import { liveSessionStatus, liveSessionWaitingFor } from "../status";
 
 describe("applySessionNames", () => {
@@ -200,42 +200,42 @@ describe("pauseSessionResult", () => {
   });
 });
 
-describe("resumeSessionResult", () => {
+describe("unpauseSessionResult", () => {
   it("refuses to signal an offline session", () => {
     const s = { sessionId: "s1", name: "alpha", pid: 10, online: false } as any;
-    const out = resumeSessionResult(s);
+    const out = unpauseSessionResult(s);
     expect(out.success).toBe(false);
     expect(out.message).toBe(
-      "Session alpha is offline; nothing to resume. (Only active sessions can be resumed.)",
+      "Session alpha is offline; nothing to unpause. (Only active sessions can be unpaused.)",
     );
   });
 
   it("reports the failure when the signal cannot be delivered", () => {
     const s = { sessionId: "s1", name: "alpha", pid: 10, online: true } as any;
-    const out = resumeSessionResult(s, () => {
+    const out = unpauseSessionResult(s, () => {
       throw new Error("EPERM");
     });
     expect(out.success).toBe(false);
-    expect(out.message).toBe("Could not resume session alpha (pid 10): EPERM.");
+    expect(out.message).toBe("Could not unpause session alpha (pid 10): EPERM.");
   });
 
   it("falls back to the raw error string for non-Error throws", () => {
     const s = { sessionId: "s1", name: "alpha", pid: 10, online: true } as any;
-    const out = resumeSessionResult(s, () => {
+    const out = unpauseSessionResult(s, () => {
       throw "boom";
     });
     expect(out.success).toBe(false);
-    expect(out.message).toBe("Could not resume session alpha (pid 10): boom.");
+    expect(out.message).toBe("Could not unpause session alpha (pid 10): boom.");
   });
 
   it("sends SIGCONT to the live pid and reports the resume", () => {
     const s = { sessionId: "s1", name: "alpha", pid: 10, online: true } as any;
     const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
-    const out = resumeSessionResult(s, (pid, signal) => signals.push({ pid, signal }));
+    const out = unpauseSessionResult(s, (pid, signal) => signals.push({ pid, signal }));
     expect(signals).toEqual([{ pid: 10, signal: "SIGCONT" }]);
     expect(out.success).toBe(true);
-    expect(out.message).toBe("Resumed session alpha (pid 10).");
-    expect(out.data).toEqual({ sessionId: "s1", pid: 10, name: "alpha", resume: "sigcont" });
+    expect(out.message).toBe("Unpaused session alpha (pid 10).");
+    expect(out.data).toEqual({ sessionId: "s1", pid: 10, name: "alpha", unpause: "sigcont" });
   });
 });
 
@@ -291,53 +291,53 @@ describe("pauseSession", () => {
   });
 });
 
-describe("resumeSession", () => {
+describe("unpauseSession", () => {
   it("refuses to resume an offline session", async () => {
     const s = { sessionId: "s1", name: "alpha", pid: 10, online: false } as any;
-    const out = await resumeSession(s);
+    const out = await unpauseSession(s);
     expect(out.success).toBe(false);
     expect(out.message).toBe(
-      "Session alpha is offline; nothing to resume. (Only active sessions can be resumed.)",
+      "Session alpha is offline; nothing to unpause. (Only active sessions can be unpaused.)",
     );
   });
 
   it("sends SIGCONT to the process and reports the resume", async () => {
     const s = { sessionId: "s1", name: "alpha", pid: 10, online: true } as any;
     const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
-    const out = await resumeSession(s, {
+    const out = await unpauseSession(s, {
       kill: (pid, signal) => signals.push({ pid, signal }),
     });
     expect(signals).toEqual([{ pid: 10, signal: "SIGCONT" }]);
     expect(out.success).toBe(true);
-    expect(out.message).toBe("Resumed session alpha (pid 10).");
+    expect(out.message).toBe("Unpaused session alpha (pid 10).");
     expect(out.data).toEqual({
       sessionId: "s1",
       pid: 10,
       name: "alpha",
-      resume: "sigcont",
+      unpause: "sigcont",
     });
   });
 
   it("propagates a failed resume", async () => {
     const s = { sessionId: "s1", name: "alpha", pid: 10, online: true } as any;
-    const out = await resumeSession(s, {
+    const out = await unpauseSession(s, {
       kill: () => {
         throw new Error("EPERM");
       },
     });
     expect(out.success).toBe(false);
-    expect(out.message).toBe("Could not resume session alpha (pid 10): EPERM.");
+    expect(out.message).toBe("Could not unpause session alpha (pid 10): EPERM.");
   });
 
   it("falls back to the raw error string for non-Error throws", async () => {
     const s = { sessionId: "s1", name: "alpha", pid: 10, online: true } as any;
-    const out = await resumeSession(s, {
+    const out = await unpauseSession(s, {
       kill: () => {
         throw "boom";
       },
     });
     expect(out.success).toBe(false);
-    expect(out.message).toBe("Could not resume session alpha (pid 10): boom.");
+    expect(out.message).toBe("Could not unpause session alpha (pid 10): boom.");
   });
 });
 
