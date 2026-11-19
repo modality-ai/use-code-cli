@@ -11,6 +11,7 @@ export async function GET(request: Request): Promise<Response> {
   return sseResponse(request, {
     watchDirs: [PROJECTS_DIR, SESSIONS_DIR],
     minIntervalMs: 1000,
+    pollIntervalMs: 2000,
     payload: async () => {
       const sessions = await fetchSessions();
       return { success: true, data: sessions };

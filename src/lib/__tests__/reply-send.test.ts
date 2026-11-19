@@ -22,6 +22,7 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
       delivered.push({ body, msgId });
       return msgId;
     },
+    interrupt: async () => "interrupted",
     label: (s: LiveSession) => s.name ?? `pid-${s.pid}`,
     ...overrides,
   };
@@ -114,5 +115,39 @@ describe("sendWithReply", () => {
     const res = await sendWithReply({ session, message: "hi", deps });
     expect(res.success).toBe(false);
     expect(res.message).toBe("socket down");
+  });
+
+  it("interrupts a busy session before delivery", async () => {
+    const calls: string[] = [];
+    const { deps } = makeDeps({
+      interrupt: async () => { calls.push("interrupt"); return "ok"; },
+      deliver: async (_s, _b, msgId) => { calls.push("deliver"); return msgId; },
+    });
+    const busySession = { ...session, status: "busy" } as LiveSession;
+    const res = await sendWithReply({ session: busySession, message: "hi", deps });
+    expect(res.success).toBe(true);
+    expect(calls).toEqual(["interrupt", "deliver"]);
+  });
+
+  it("does not interrupt an idle session", async () => {
+    const interrupted: number[] = [];
+    const { deps } = makeDeps({
+      interrupt: async () => { interrupted.push(1); return "ok"; },
+    });
+    const res = await sendWithReply({ session, message: "hi", deps });
+    expect(res.success).toBe(true);
+    expect(interrupted).toHaveLength(0);
+  });
+
+  it("still delivers when interrupt throws", async () => {
+    const delivered: number[] = [];
+    const { deps } = makeDeps({
+      interrupt: async () => { throw new Error("boom"); },
+      deliver: async (_s, _b, msgId) => { delivered.push(1); return msgId; },
+    });
+    const busySession = { ...session, status: "busy" } as LiveSession;
+    const res = await sendWithReply({ session: busySession, message: "hi", deps });
+    expect(res.success).toBe(true);
+    expect(delivered).toHaveLength(1);
   });
 });

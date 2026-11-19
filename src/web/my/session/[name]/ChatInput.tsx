@@ -6,13 +6,11 @@ export interface ChatInputProps {
   chatStatus: string;
   sending: boolean;
   busy: boolean;
-  paused?: boolean;
   onSend: () => void;
   onPause: () => void;
-  onResume: () => void;
 }
 
-export default function ChatInput({ chatOpen, chatRef, chatStatus, sending, busy, paused = false, onSend, onPause, onResume }: ChatInputProps) {
+export default function ChatInput({ chatOpen, chatRef, chatStatus, sending, busy, onSend, onPause }: ChatInputProps) {
   return (
     <>
       <div className={(chatOpen ? "flex" : "hidden") + " gap-2 w-full"} role="group" aria-label="Chat input">
@@ -35,36 +33,28 @@ export default function ChatInput({ chatOpen, chatRef, chatStatus, sending, busy
             }
           }}
         />
-        {busy ? (
+        <button
+          id="chat-send"
+          type="button"
+          className="shrink-0 px-3 py-2 rounded-sm border border-border bg-surface text-text-primary cursor-pointer"
+          onClick={onSend}
+          disabled={sending}
+          aria-label="Send message to the session"
+        >▶️</button>
+      </div>
+      <div id="chat-status" role="status" aria-live="polite" className="text-xs text-text-muted mt-1 flex items-center gap-2">
+        <span>{chatStatus}</span>
+        {busy && (
           <button
             id="chat-pause"
             type="button"
-            className="shrink-0 px-3 py-2 rounded-sm border border-border bg-surface text-text-primary cursor-pointer"
+            className="shrink-0 px-2 py-1 rounded-sm border border-border bg-surface text-text-primary cursor-pointer"
             onClick={onPause}
             disabled={sending}
             aria-label="Pause the session (freeze its process)"
           >⏸️</button>
-        ) : paused ? (
-          <button
-            id="chat-resume"
-            type="button"
-            className="shrink-0 px-3 py-2 rounded-sm border border-border bg-surface text-text-primary cursor-pointer"
-            onClick={onResume}
-            disabled={sending}
-            aria-label="Resume the session (SIGCONT)"
-          >▶️</button>
-        ) : (
-          <button
-            id="chat-send"
-            type="button"
-            className="shrink-0 px-3 py-2 rounded-sm border border-border bg-surface text-text-primary cursor-pointer"
-            onClick={onSend}
-            disabled={sending}
-            aria-label="Send message to the session"
-          >▶️</button>
         )}
       </div>
-      <div id="chat-status" role="status" aria-live="polite" className="text-xs text-text-muted mt-1">{chatStatus}</div>
     </>
   );
 }

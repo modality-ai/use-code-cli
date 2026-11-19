@@ -20,6 +20,8 @@ export interface SsePushOptions {
   minIntervalMs?: number;
   /** Debounce window for write bursts (default 300ms). */
   debounceMs?: number;
+  /** Polling interval (ms) to re-push even without filesystem events. 0 disables. */
+  pollIntervalMs?: number;
 }
 
 /**
@@ -31,7 +33,8 @@ export interface SsePushOptions {
  * trailing catch-up push, and abort cleanup — all in one place.
  */
 export function sseResponse(request: Request, options: SsePushOptions): Response {
-  const { payload, watchDirs = [], watchFilter, unchanged, minIntervalMs = 0, debounceMs = 300 } = options;
+  const { payload, watchDirs = [], watchFilter, unchanged, minIntervalMs = 0, debounceMs = 300, pollIntervalMs = 0 } = options;
+  const pollMs = Math.max(0, pollIntervalMs);
   const enc = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -77,6 +80,11 @@ export function sseResponse(request: Request, options: SsePushOptions): Response
         }
       }
 
+      let poll: ReturnType<typeof setInterval> | null = null;
+      if (pollMs > 0) {
+        poll = setInterval(() => { if (!closed) schedule(); }, pollMs);
+      }
+
       // immediate initial snapshot
       doPush();
 
@@ -85,6 +93,7 @@ export function sseResponse(request: Request, options: SsePushOptions): Response
         closed = true;
         if (debounce) clearTimeout(debounce);
         if (trailing) clearTimeout(trailing);
+        if (poll) clearInterval(poll);
         for (const w of watchers) w.close();
         try { controller.close(); } catch { /* already closed */ }
       };

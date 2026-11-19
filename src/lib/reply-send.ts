@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { currentSession, deliver, liveSessions, type LiveSession } from "./peer";
+import { currentSession, deliver, interrupt, liveSessions, type LiveSession } from "./peer";
 import { appendReplyInstruction, hasReplyInstruction, isAutoReply } from "./reply";
 import { findReply, recordReply } from "./reply-ledger";
 import { sessionLabel as label } from "./sessions";
@@ -29,6 +29,7 @@ interface SendWithReplyDeps {
   currentSession?: (sessions?: LiveSession[]) => Promise<LiveSession | undefined>;
   liveSessions?: () => Promise<LiveSession[]>;
   deliver?: (session: LiveSession, body: string, msgId: string) => Promise<string>;
+  interrupt?: (session: LiveSession) => Promise<string>;
   label?: (session: LiveSession) => string;
 }
 
@@ -52,6 +53,7 @@ export async function sendWithReply({
   const currentSessionFn = deps?.currentSession ?? currentSession;
   const liveSessionsFn = deps?.liveSessions ?? liveSessions;
   const deliverFn = deps?.deliver ?? deliver;
+  const interruptFn = deps?.interrupt ?? interrupt;
   const labelFn = deps?.label ?? label;
 
   if (inReplyTo && !force) {
@@ -85,6 +87,18 @@ export async function sendWithReply({
     replyHint === "appended"
       ? appendReplyInstruction(message, senderName!, { msgId, inReplyTo })
       : message;
+
+  // A busy session is mid-turn: a queued "next" message would not be seen
+  // until that turn finishes. Interrupt the active turn first so the message
+  // is actually processed, without changing idle behaviour.
+  if (session.status === "busy") {
+    try {
+      await interruptFn(session);
+    } catch (err) {
+      // Best-effort: still attempt delivery, but surface the failure.
+      console.error("reply-send: interrupt failed:", (err as Error)?.message ?? err);
+    }
+  }
 
   try {
     await deliverFn(session, body, msgId);

@@ -17,15 +17,6 @@ export default function HelpPage() {
         <li><a href="/design" className="text-accent-collaboration hover:underline"><code>GET /design</code></a> - rendered design system</li>
         <li><a href="/help" className="text-accent-collaboration hover:underline"><code>GET /help</code></a> - this page</li>
       </ul>
-      <h2>API</h2>
-      <ul>
-        <li><code>GET /my/api/session?name=</code> - transcript entries, online status, busy/waiting/idle state</li>
-        <li><code>GET /my/api/tunnel</code> - cloudflared availability + current tunnel URL</li>
-        <li><code>POST /my/api/tunnel</code> - start a cloudflared tunnel</li>
-        <li><code>DELETE /my/api/tunnel</code> - stop the running tunnel</li>
-      </ul>
-      <h2>Example</h2>
-      <pre>curl http://127.0.0.1:3000/my/sessions</pre>
     </div>
   );
 }

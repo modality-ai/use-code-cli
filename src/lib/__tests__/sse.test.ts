@@ -27,4 +27,12 @@ describe("sseResponse", () => {
     const res = sseResponse(req, { payload: () => "hi", minIntervalMs: 50, debounceMs: 10 });
     expect(res.status).toBe(200);
   });
+
+  it("accepts pollIntervalMs without throwing", () => {
+    const req = new Request("http://localhost/x");
+    const res = sseResponse(req, { payload: () => "hi", pollIntervalMs: 20, debounceMs: 10 });
+    expect(res.status).toBe(200);
+    const reader = res.body!.getReader();
+    reader.cancel();
+  });
 });

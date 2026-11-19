@@ -75,11 +75,21 @@ export default function SessionsApp({ initial }: { initial?: Session[] }) {
     if (!name || stopping) return;
     setStopping(name);
     try {
-      await fetch("/my/api/session/stop", {
+      const r = await fetch("/my/api/session/stop", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name }),
       });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d?.success !== false) {
+        // Optimistically drop the session from the list; the SSE stream
+        // will reconcile (and re-add it) if the stop did not actually land.
+        setSessions((prev) =>
+          (Array.isArray(prev) ? prev : []).filter(
+            (x) => String(x?.sessionId || x?.name || "").trim() !== name,
+          ),
+        );
+      }
     } catch {
       // ignore; SSE refresh will reflect state
     } finally {

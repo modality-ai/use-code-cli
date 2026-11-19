@@ -18,6 +18,17 @@ interface Entry {
   tools?: any[];
 }
 
+interface OptimisticEntry {
+  localId: string;
+  text: string;
+  baseCount: number;
+  status: "sending" | "sent" | "failed";
+}
+
+function normalizeText(v: unknown): string {
+  return String(v ?? "").trim().replace(/\s+/g, " ");
+}
+
 interface BootProps {
   name: string;
   initial?: SessionData | null;
@@ -206,6 +217,16 @@ export default function SessionView(props: BootProps) {
       : { success: false, online: false, status: "idle", waitingFor: null },
   );
   const [chatStatus, setChatStatus] = useState(""); // send progress + SSE errors
+  const [optimistic, setOptimistic] = useState<OptimisticEntry[]>([]);
+  const optimisticTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  // Clear any pending optimistic fallback timers on unmount to avoid state
+  // updates after the component is gone.
+  useEffect(() => {
+    return () => {
+      for (const t of optimisticTimers.current.values()) clearTimeout(t);
+      optimisticTimers.current.clear();
+    };
+  }, []);
   const [sending, setSending] = useState(false);
   const [pausing, setPausing] = useState(false);
   const [resuming, setResuming] = useState(false);
@@ -241,9 +262,30 @@ export default function SessionView(props: BootProps) {
     setMeta(d.success ? { success: true, online: d.data?.online !== false, status: (d.data?.status as string | null) || "idle", waitingFor: (d.data?.waitingFor as string | null) || null } : { success: false, online: false, status: "idle", waitingFor: null });
   };
 
+  const reconcileOptimistic = (next: Entry[]) => {
+    setOptimistic((prev) => prev.filter((o) => {
+      // Only treat a server entry as the authoritative counterpart if it
+      // appears at/after the position the transcript had when we sent (sentAt
+      // ordering guard): otherwise a pre-existing identical user message would
+      // incorrectly evict an optimistic item that has not yet been persisted.
+      const matched = next.some((e: Entry, idx: number) => {
+        if (e?.role !== "user") return false;
+        if (normalizeText(e.text ?? e.html) !== normalizeText(o.text)) return false;
+        return idx >= (o.baseCount ?? 0);
+      });
+      if (matched) {
+        const t = optimisticTimers.current.get(o.localId);
+        if (t) { clearTimeout(t); optimisticTimers.current.delete(o.localId); }
+      }
+      return !matched;
+    }));
+  };
+
   const applyEntries = (d: any) => {
     if (d.success && Array.isArray(d.data?.entries)) {
-      setEntries(d.data.entries);
+      const next = d.data.entries as Entry[];
+      setEntries(next);
+      reconcileOptimistic(next);
     }
   };
 
@@ -274,7 +316,11 @@ export default function SessionView(props: BootProps) {
           if (d.error) {
             setChatStatus("Error: " + d.error);
           } else {
-            if (Array.isArray(d.data?.entries)) setEntries(d.data.entries);
+            if (Array.isArray(d.data?.entries)) {
+              const next = d.data.entries as Entry[];
+              setEntries(next);
+              reconcileOptimistic(next);
+            }
             applyMeta(d);
             setReconnecting(false);
           }
@@ -379,30 +425,67 @@ export default function SessionView(props: BootProps) {
     if (meta.status === "busy" || meta.status === "waiting") setPaused(false);
   }, [meta.status]);
 
-  const send = async () => {
+  const sendMessage = async (rawText: string) => {
+    const text = String(rawText || "").trim();
+    if (!text || sending) return;
+    const localId = "optimistic-" + (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
+    const baseCount = entriesRef.current.length;
+    setOptimistic((prev) => [...prev, { localId, text, baseCount, status: "sending" }]);
     const input = chatRef.current;
-    if (!input || !input.value.trim() || sending) return;
+    if (input) input.value = "";
+    // scroll to bottom immediately
+    try { window.scrollTo({ top: document.documentElement.scrollHeight }); } catch {}
     setSending(true);
-    setChatStatus("sending...");
     try {
+      // A paused (SIGSTOP'd) session cannot accept input until it is
+      // resumed; resume it automatically so submitting a message works.
+      if (paused) {
+        setChatStatus("resuming...");
+        await resume();
+        setPaused(false);
+      }
+      setChatStatus("sending...");
       const r = await fetch("/my/api/talk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, message: input.value }),
+        body: JSON.stringify({ name, message: text }),
       });
       const d = await r.json();
       const inner = d?.data;
       if (d.success && inner?.success !== false) {
         setChatStatus("sent");
-        input.value = "";
+        setOptimistic((prev) => prev.map((o) => (o.localId === localId ? { ...o, status: "sent" } : o)));
+        // Fallback: clear a sent optimistic item after 30s if server batch never matches.
+        const timer = setTimeout(() => {
+          setOptimistic((prev) => prev.filter((o) => !(o.localId === localId && o.status === "sent")));
+          optimisticTimers.current.delete(localId);
+        }, 30000);
+        optimisticTimers.current.set(localId, timer);
       } else {
         setChatStatus("error: " + (inner?.message || d.error || "failed"));
+        setOptimistic((prev) => prev.map((o) => (o.localId === localId ? { ...o, status: "failed" } : o)));
       }
     } catch (e) {
       setChatStatus("error: " + String(e));
+      setOptimistic((prev) => prev.map((o) => (o.localId === localId ? { ...o, status: "failed" } : o)));
     } finally {
       setSending(false);
     }
+  };
+
+  const send = async () => {
+    const input = chatRef.current;
+    if (!input) return;
+    await sendMessage(input.value);
+  };
+
+  const retryOptimistic = async (localId: string) => {
+    const item = optimistic.find((o) => o.localId === localId);
+    if (!item) return;
+    const t = optimisticTimers.current.get(localId);
+    if (t) { clearTimeout(t); optimisticTimers.current.delete(localId); }
+    setOptimistic((prev) => prev.filter((o) => o.localId !== localId));
+    await sendMessage(item.text);
   };
 
   const pause = async () => {
@@ -490,10 +573,25 @@ export default function SessionView(props: BootProps) {
           </div>
         )}
       </div>
-      {entries.length === 0 ? (
+      {entries.length === 0 && optimistic.length === 0 ? (
         <p className="text-text-muted">Loading session transcript...</p>
       ) : (
-        entries.map((e, i) => <Entry key={i} e={e} sessionName={name} />)
+        <>
+          {entries.map((e, i) => <Entry key={i} e={e} sessionName={name} />)}
+          {optimistic.map((o) => (
+            <div key={o.localId} className={"mb-sm entry " + (o.status === "failed" ? "opacity-100" : "opacity-60")} data-role="user" data-optimistic={o.localId}>
+              <div className="relative font-semibold text-accent-collaboration">
+                ❯ You <span className="text-xs text-text-muted ml-2">{o.status === "sending" ? "sending…" : o.status === "sent" ? "sent" : "failed"}</span>
+              </div>
+              <div className="entry-body pl-4 whitespace-pre-wrap">{o.text}</div>
+              {o.status === "failed" && (
+                <button type="button" className="ml-4 mt-1 text-xs text-accent-collaboration border border-border rounded-sm px-2 py-0.5" onClick={() => retryOptimistic(o.localId)}>
+                  retry
+                </button>
+              )}
+            </div>
+          ))}
+        </>
       )}
       <div ref={bottomBarRef} className="flex flex-col gap-2 fixed bottom-0 left-0 right-0 z-20 bg-surface p-2" role="region" aria-label="Session controls">
         <div className="flex items-center gap-2" role="toolbar" aria-label="Session scroll controls">
@@ -537,10 +635,8 @@ export default function SessionView(props: BootProps) {
         chatStatus={chatStatus}
         sending={sending}
         busy={meta.status === "busy"}
-        paused={paused}
         onSend={send}
         onPause={pause}
-        onResume={resume}
       />
     </div>
     </div>
