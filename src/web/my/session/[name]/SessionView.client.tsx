@@ -134,7 +134,7 @@ function ToolFold({ tool, sessionName }: { tool: any; sessionName?: string }) {
                     // resultHtml is trusted server-generated content (tool output
                     // rendered as HTML by the server-side transcript parser), not
                     // user input — no sanitization needed.
-                    <div className="lazy-body" dangerouslySetInnerHTML={{ __html: resultHtml }} />
+                    <div className="lazy-body max-h-96 overflow-y-auto" dangerouslySetInnerHTML={{ __html: resultHtml }} />
                   ) : null)}
                 </>
               );
@@ -146,7 +146,7 @@ function ToolFold({ tool, sessionName }: { tool: any; sessionName?: string }) {
                 </pre>
                 {loading && <div className="text-text-muted text-xs mt-1">Loading…</div>}
                 {!loading && (resultHtml ? (
-                  <div className="lazy-body" dangerouslySetInnerHTML={{ __html: resultHtml }} />
+                  <div className="lazy-body max-h-96 overflow-y-auto" dangerouslySetInnerHTML={{ __html: resultHtml }} />
                 ) : result ? (() => {
                   const pretty = tryPrettyJson(result);
                   return (

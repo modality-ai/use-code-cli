@@ -8,7 +8,50 @@ export function escHtml(s: string): string {
 /** Render raw tool output as a pre block: terminal text loses meaning when
  *  markdown re-wraps it into paragraphs (newlines collapse, code becomes prose). */
 export function preHtml(text: string): string {
-  return `<pre class="whitespace-pre-wrap">${escHtml(text)}</pre>`;
+  // Parse <bash-stdout>...</bash-stdout> and <bash-stderr>...</bash-stderr> tags
+  // emitted by bash tool results: strip the tags and colourise the streams.
+  const tagRe = /<bash-(stdout|stderr)>([\s\S]*?)<\/bash-\1>/g;
+  if (!tagRe.test(text)) {
+    // No tags: render as before (escaped + linkified).
+    const escaped = escHtml(text);
+    const linked = escaped.replace(
+      /(https?:\/\/[^\s<>"']+)/g,
+      (url) => `<a href="${url}" target="_blank" rel="noopener noreferrer" class="text-accent underline break-all">${url}</a>`,
+    );
+    return `<pre class="whitespace-pre-wrap break-words">${linked}</pre>`;
+  }
+  // Reset regex lastIndex after test().
+  tagRe.lastIndex = 0;
+  let out = "";
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = tagRe.exec(text)) !== null) {
+    // Render any plain text between tags as before.
+    if (m.index > last) {
+      const between = text.slice(last, m.index);
+      const escaped = escHtml(between);
+      out += escaped.replace(
+        /(https?:\/\/[^\s<>"']+)/g,
+        (url) => `<a href="${url}" target="_blank" rel="noopener noreferrer" class="text-accent underline break-all">${url}</a>`,
+      );
+    }
+    const stream = m[1];
+    const content = m[2] ?? "";
+    const escaped = escHtml(content);
+    const cls = stream === "stdout" ? "text-text" : "text-red-400";
+    out += `<span class="${cls}">${escaped}</span>`;
+    last = m.index + m[0].length;
+  }
+  // Trailing plain text.
+  if (last < text.length) {
+    const between = text.slice(last);
+    const escaped = escHtml(between);
+    out += escaped.replace(
+      /(https?:\/\/[^\s<>"']+)/g,
+      (url) => `<a href="${url}" target="_blank" rel="noopener noreferrer" class="text-accent underline break-all">${url}</a>`,
+    );
+  }
+  return `<pre class="whitespace-pre-wrap break-words">${out}</pre>`;
 }
 
 /** Collapse whitespace and clip to `max` characters with an ellipsis. */

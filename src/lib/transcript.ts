@@ -198,8 +198,12 @@ export function parseTranscript(lines: string[]): TranscriptEntry[] {
             ? content.filter((b: any) => b && b.type === "text").map((b: any) => b.text || "").join("\n")
             : ""
         );
-        // No html payload: client renders escaped text (raw tags would execute).
-        if (text) entries.push({ role: "user", text });
+        // User messages carrying bash output tags get colourised HTML;
+        // otherwise keep the plain-text path (client renders escaped text).
+        if (text) {
+          const hasBashTags = /<bash-(stdout|stderr)>/.test(text);
+          entries.push({ role: "user", text, html: hasBashTags ? preHtml(text) : undefined });
+        }
       } else {
         let text = "";
         if (typeof content === "string") text = content;
@@ -207,8 +211,12 @@ export function parseTranscript(lines: string[]): TranscriptEntry[] {
           text = content.filter((b: any) => b && b.type === "text").map((b: any) => b.text || "").join("\n");
         }
         text = cleanPrompt(text);
-        // No html payload: client renders escaped text (raw tags would execute).
-        if (text) entries.push({ role: "user", text });
+        // User messages carrying bash output tags get colourised HTML;
+        // otherwise keep the plain-text path (client renders escaped text).
+        if (text) {
+          const hasBashTags = /<bash-(stdout|stderr)>/.test(text);
+          entries.push({ role: "user", text, html: hasBashTags ? preHtml(text) : undefined });
+        }
       }
     } else if (obj.type === "assistant" && obj.message) {
       const content = obj.message.content;

@@ -52,15 +52,15 @@ describe("escHtml", () => {
 
 describe("preHtml", () => {
   it("wraps text in a whitespace-pre-wrap pre block", () => {
-    expect(preHtml("hello")).toBe('<pre class="whitespace-pre-wrap">hello</pre>');
+    expect(preHtml("hello")).toBe('<pre class="whitespace-pre-wrap break-words">hello</pre>');
   });
 
   it("escapes HTML special characters", () => {
-    expect(preHtml("a < b & c > d")).toBe('<pre class="whitespace-pre-wrap">a &lt; b &amp; c &gt; d</pre>');
+    expect(preHtml("a < b & c > d")).toBe('<pre class="whitespace-pre-wrap break-words">a &lt; b &amp; c &gt; d</pre>');
   });
 
   it("preserves newlines", () => {
-    expect(preHtml("line1\nline2")).toBe('<pre class="whitespace-pre-wrap">line1\nline2</pre>');
+    expect(preHtml("line1\nline2")).toBe('<pre class="whitespace-pre-wrap break-words">line1\nline2</pre>');
   });
 
   it("does not interpret markdown", () => {
@@ -71,6 +71,6 @@ describe("preHtml", () => {
   });
 
   it("handles empty text", () => {
-    expect(preHtml("")).toBe('<pre class="whitespace-pre-wrap"></pre>');
+    expect(preHtml("")).toBe('<pre class="whitespace-pre-wrap break-words"></pre>');
   });
 });

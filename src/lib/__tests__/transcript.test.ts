@@ -281,7 +281,7 @@ describe("parseTranscript tool result handling", () => {
       JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "line1\nline2 **bold** <tag>" }] } }),
     ]);
     const tool = entries[0]!.tools![0]!;
-    expect(tool.resultHtml).toContain("<pre class=\"whitespace-pre-wrap\">line1\nline2 **bold** &lt;tag&gt;</pre>");
+    expect(tool.resultHtml).toContain("<pre class=\"whitespace-pre-wrap break-words\">line1\nline2 **bold** &lt;tag&gt;</pre>");
     expect(tool.resultHtml).not.toContain("<strong>");
     expect(tool.resultHtml).not.toContain("<p>");
   });
@@ -316,7 +316,7 @@ describe("parseTranscript bash result handling", () => {
     ]);
     const tool = entries[0]!.tools![0]!;
     expect(tool.resultHtml).toBeDefined();
-    expect(tool.resultHtml).toContain('<pre class="whitespace-pre-wrap">');
+    expect(tool.resultHtml).toContain('<pre class="whitespace-pre-wrap break-words">');
     expect(tool.resultHtml).toContain("truncated for display");
   });
 
@@ -326,7 +326,7 @@ describe("parseTranscript bash result handling", () => {
       JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "out" }] } }),
     ]);
     const tool = entries[0]!.tools![0]!;
-    expect(tool.resultHtml).toContain('<pre class="whitespace-pre-wrap">out</pre>');
+    expect(tool.resultHtml).toContain('<pre class="whitespace-pre-wrap break-words">out</pre>');
   });
 });
 
