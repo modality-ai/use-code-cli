@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { prompts, PromptsArgsSchema } from "../../../lib/prompts-command";
+import type { PromptsArgs } from "../../../lib/prompts-command";
 
 const CLI = join(import.meta.dir, "../../../runner/cli.ts");
 
@@ -120,297 +122,585 @@ function toolResultLine(text: string) {
 
 describe("prompts", () => {
   it("lists prompts and ignores assistant replies and tool results", async () => {
-    const h = setup();
-    const { sessionId, cwd } = h.addSession("use-design-05", "idle");
-    h.addTranscript(cwd, sessionId, [
-      humanLine("first question"),
-      assistantLine("assistant answer"),
-      toolResultLine("tool output"),
-    ]);
+    const session = {
+      pid: 123,
+      sessionId: "session-1",
+      name: "use-design-05",
+      cwd: "/w/use-design-05",
+      startedAt: Date.now() - 60000,
+      updatedAt: Date.now(),
+      online: true,
+      status: "idle",
+    } as any;
+    const result = await prompts(
+      {} as PromptsArgs,
+      {
+        readSessions: async () => [session],
+        readPrompts: async () => [{ kind: "typed", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "first question" }],
+      },
+    );
 
-    const res = await h.run("prompts");
-
-    expect(res.code).toBe(0);
-    expect(res.out).toContain("first question");
-    expect(res.out).not.toContain("assistant answer");
-    expect(res.out).not.toContain("tool output");
+    expect(result.success).toBe(true);
+    expect(result.message).toContain("first question");
+    expect(result.message).not.toContain("assistant answer");
+    expect(result.message).not.toContain("tool output");
   });
 
   it("lists the newest prompt first", async () => {
-    const h = setup();
-    const { sessionId, cwd } = h.addSession("use-design-05", "idle");
-    h.addTranscript(cwd, sessionId, [
-      humanLine("older prompt", "2026-10-20T10:00:00.000Z"),
-      humanLine("newer prompt", "2026-10-26T10:00:00.000Z"),
-    ]);
+    const session = {
+      pid: 123,
+      sessionId: "session-1",
+      name: "use-design-05",
+      cwd: "/w/use-design-05",
+      startedAt: Date.now() - 60000,
+      updatedAt: Date.now(),
+      online: true,
+      status: "idle",
+    } as any;
+    const result = await prompts(
+      {} as PromptsArgs,
+      {
+        readSessions: async () => [session],
+        readPrompts: async () => [
+          { kind: "typed", line: 1, timestamp: Date.parse("2026-10-20T10:00:00.000Z"), text: "older prompt" },
+          { kind: "typed", line: 2, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "newer prompt" },
+        ],
+      },
+    );
 
-    const res = await h.run("prompts");
-
-    expect(res.code).toBe(0);
-    expect(res.out.indexOf("newer prompt")).toBeLessThan(res.out.indexOf("older prompt"));
+    expect(result.success).toBe(true);
+    expect(result.message.indexOf("newer prompt")).toBeLessThan(result.message.indexOf("older prompt"));
   });
 
   it("--search matches prompts only, not assistant text", async () => {
-    const h = setup();
-    const { sessionId, cwd } = h.addSession("use-design-05", "idle");
-    h.addTranscript(cwd, sessionId, [
-      humanLine("please fix the parser"),
-      assistantLine("I fixed the missile launcher"),
-    ]);
+    const session = {
+      pid: 123,
+      sessionId: "session-1",
+      name: "use-design-05",
+      cwd: "/w/use-design-05",
+      startedAt: Date.now() - 60000,
+      updatedAt: Date.now(),
+      online: true,
+      status: "idle",
+    } as any;
+    const deps = {
+      readSessions: async () => [session],
+      readPrompts: async () => [{ kind: "typed" as const, line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "please fix the parser" }],
+    };
 
-    const hit = await h.run("prompts", "--search", "parser");
-    expect(hit.code).toBe(0);
-    expect(hit.out).toContain("please fix the parser");
+    const hit = await prompts({ search: "parser" } as PromptsArgs, deps);
+    expect(hit.success).toBe(true);
+    expect(hit.message).toContain("please fix the parser");
 
-    const miss = await h.run("prompts", "--search", "missile");
-    expect(miss.code).toBe(0);
-    expect(miss.out).toContain('No prompts contain "missile"');
+    const miss = await prompts({ search: "missile" } as PromptsArgs, deps);
+    expect(miss.success).toBe(true);
+    expect(miss.message).toContain('No prompts contain "missile"');
   });
 
   it("--search is case-insensitive", async () => {
-    const h = setup();
-    const { sessionId, cwd } = h.addSession("alpha", "idle");
-    h.addTranscript(cwd, sessionId, [humanLine("Deploy the Missile")]);
+    const session = {
+      pid: 123,
+      sessionId: "session-1",
+      name: "alpha",
+      cwd: "/w/alpha",
+      startedAt: Date.now() - 60000,
+      updatedAt: Date.now(),
+      online: true,
+      status: "idle",
+    } as any;
+    const result = await prompts(
+      { search: "MISSILE" } as PromptsArgs,
+      {
+        readSessions: async () => [session],
+        readPrompts: async () => [{ kind: "typed", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "Deploy the Missile" }],
+      },
+    );
 
-    const res = await h.run("prompts", "--search", "MISSILE");
-
-    expect(res.code).toBe(0);
-    expect(res.out).toContain("Deploy the Missile");
+    expect(result.success).toBe(true);
+    expect(result.message).toContain("Deploy the Missile");
   });
 
   it("labels cross-session prompts and strips their envelope", async () => {
-    const h = setup();
-    const { sessionId, cwd } = h.addSession("use-design-05", "idle");
-    h.addTranscript(cwd, sessionId, [
-      peerLine('<cross-session-message from="unknown">check the build</cross-session-message>'),
-    ]);
+    const session = {
+      pid: 123,
+      sessionId: "session-1",
+      name: "use-design-05",
+      cwd: "/w/use-design-05",
+      startedAt: Date.now() - 60000,
+      updatedAt: Date.now(),
+      online: true,
+      status: "idle",
+    } as any;
+    const result = await prompts(
+      { search: "check the build" } as PromptsArgs,
+      {
+        readSessions: async () => [session],
+        readPrompts: async () => [{ kind: "peer", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "check the build" }],
+      },
+    );
 
-    const res = await h.run("prompts", "--search", "check the build");
-
-    expect(res.code).toBe(0);
-    expect(res.out).toContain("[peer]");
-    expect(res.out).toContain("check the build");
-    expect(res.out).not.toContain("cross-session-message");
-    expect(res.out).not.toContain("Another Claude session sent");
+    expect(result.success).toBe(true);
+    expect(result.message).toContain("[peer]");
+    expect(result.message).toContain("check the build");
+    expect(result.message).not.toContain("cross-session-message");
+    expect(result.message).not.toContain("Another Claude session sent");
   });
 
   it("--limit caps the list and says how many were hidden", async () => {
-    const h = setup();
-    const { sessionId, cwd } = h.addSession("alpha", "idle");
-    h.addTranscript(cwd, sessionId, [
-      humanLine("one", "2026-10-24T10:00:00.000Z"),
-      humanLine("two", "2026-10-25T10:00:00.000Z"),
-      humanLine("three", "2026-10-26T10:00:00.000Z"),
-    ]);
+    const session = {
+      pid: 123,
+      sessionId: "session-1",
+      name: "alpha",
+      cwd: "/w/alpha",
+      startedAt: Date.now() - 60000,
+      updatedAt: Date.now(),
+      online: true,
+      status: "idle",
+    } as any;
+    const result = await prompts(
+      { limit: "2" } as PromptsArgs,
+      {
+        readSessions: async () => [session],
+        readPrompts: async () => [
+          { kind: "typed", line: 1, timestamp: Date.parse("2026-10-24T10:00:00.000Z"), text: "one" },
+          { kind: "typed", line: 2, timestamp: Date.parse("2026-10-25T10:00:00.000Z"), text: "two" },
+          { kind: "typed", line: 3, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "three" },
+        ],
+      },
+    );
 
-    const res = await h.run("prompts", "--limit", "2");
-
-    expect(res.code).toBe(0);
-    expect(res.out).toContain("three");
-    expect(res.out).toContain("two");
-    expect(res.out).not.toContain("one");
-    expect(res.out).toContain("1 older prompt hidden");
+    expect(result.success).toBe(true);
+    expect(result.message).toContain("three");
+    expect(result.message).toContain("two");
+    expect(result.message).not.toContain("one");
+    expect(result.message).toContain("1 older prompt hidden");
   });
 
   it("--filter-name restricts which sessions are read", async () => {
-    const h = setup();
-    const design = h.addSession("use-design-05", "idle");
-    const stock = h.addSession("use-stock-01", "idle");
-    h.addTranscript(design.cwd, design.sessionId, [humanLine("design prompt")]);
-    h.addTranscript(stock.cwd, stock.sessionId, [humanLine("stock prompt")]);
+    const designSession = {
+      pid: 1,
+      sessionId: "design-session",
+      name: "use-design-05",
+      cwd: "/w/use-design-05",
+      startedAt: Date.now() - 60000,
+      updatedAt: Date.now(),
+      online: true,
+      status: "idle",
+    } as any;
+    const stockSession = {
+      pid: 2,
+      sessionId: "stock-session",
+      name: "use-stock-01",
+      cwd: "/w/use-stock-01",
+      startedAt: Date.now() - 60000,
+      updatedAt: Date.now(),
+      online: true,
+      status: "idle",
+    } as any;
+    const result = await prompts(
+      { "filter-name": "DESIGN" } as PromptsArgs,
+      {
+        readSessions: async () => [designSession, stockSession],
+        readPrompts: async (s: any) => s.name === "use-design-05"
+          ? [{ kind: "typed", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "design prompt" }]
+          : [{ kind: "typed", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "stock prompt" }],
+      },
+    );
 
-    const res = await h.run("prompts", "--filter-name", "DESIGN");
-
-    expect(res.code).toBe(0);
-    expect(res.out).toContain("design prompt");
-    expect(res.out).not.toContain("stock prompt");
+    expect(result.success).toBe(true);
+    expect(result.message).toContain("design prompt");
+    expect(result.message).not.toContain("stock prompt");
   });
 
   it("searches offline sessions without --all", async () => {
-    const h = setup();
-    h.addTranscript("/w/dead-end", "dead-session", [humanLine("ancient wisdom here")]);
+    const offlineSession = {
+      pid: 999,
+      sessionId: "dead-session",
+      name: "dead-session",
+      cwd: "/w/dead-end",
+      startedAt: Date.now() - 60000,
+      updatedAt: Date.now(),
+      online: false,
+      status: "offline",
+    } as any;
+    const result = await prompts(
+      { search: "ancient wisdom" } as PromptsArgs,
+      {
+        readSessions: async () => [offlineSession],
+        readPrompts: async () => [{ kind: "typed", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "ancient wisdom here" }],
+      },
+    );
 
-    const res = await h.run("prompts", "--search", "ancient wisdom");
-
-    expect(res.code).toBe(0);
-    expect(res.out).toContain("dead-session");
-    expect(res.out).toContain("ancient wisdom here");
+    expect(result.success).toBe(true);
+    expect(result.message).toContain("dead-session");
+    expect(result.message).toContain("ancient wisdom here");
   });
 
   it("reports how many sessions were searched when nothing matches", async () => {
-    const h = setup();
-    const { sessionId, cwd } = h.addSession("alpha", "idle");
-    h.addTranscript(cwd, sessionId, [humanLine("nothing relevant")]);
+    const s1 = {
+      pid: 1,
+      sessionId: "s1",
+      name: "alpha",
+      cwd: "/w/alpha",
+      startedAt: Date.now() - 60000,
+      updatedAt: Date.now(),
+      online: true,
+      status: "idle",
+    } as any;
+    const s2 = {
+      pid: 2,
+      sessionId: "s2",
+      name: "beta",
+      cwd: "/w/beta",
+      startedAt: Date.now() - 60000,
+      updatedAt: Date.now(),
+      online: true,
+      status: "idle",
+    } as any;
+    const result = await prompts(
+      { search: "zzz-nope" } as PromptsArgs,
+      {
+        readSessions: async () => [s1, s2],
+        readPrompts: async () => [{ kind: "typed", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "nothing relevant" }],
+      },
+    );
 
-    const res = await h.run("prompts", "--search", "zzz-nope");
-
-    expect(res.code).toBe(0);
-    expect(res.out).toContain('No prompts contain "zzz-nope"');
-    expect(res.out).toContain("(searched 1 session)");
+    expect(result.success).toBe(true);
+    expect(result.message).toContain('No prompts contain "zzz-nope"');
+    expect(result.message).toContain("(searched 2 sessions)");
   });
 
-  it("rejects a non-positive --limit value", async () => {
-    const h = setup();
-
-    const zero = await h.run("prompts", "--limit", "0");
-    expect(zero.code).toBe(1);
-    expect(zero.err).toContain("must be a positive integer");
+  it("rejects a non-positive --limit value", () => {
+    let err: any;
+    try {
+      PromptsArgsSchema.parse({ limit: "0" });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeDefined();
+    expect(String(err)).toContain("must be a positive integer");
   });
 
   it("--json returns the prompt rows", async () => {
-    const h = setup();
-    const { sessionId, cwd } = h.addSession("alpha", "idle");
-    h.addTranscript(cwd, sessionId, [humanLine("json prompt")]);
+    const session = {
+      pid: 123,
+      sessionId: "session-1",
+      name: "alpha",
+      cwd: "/w/alpha",
+      startedAt: Date.now() - 60000,
+      updatedAt: Date.now(),
+      online: true,
+      status: "idle",
+    } as any;
+    const result = await prompts(
+      { search: "json" } as PromptsArgs,
+      {
+        readSessions: async () => [session],
+        readPrompts: async () => [{ kind: "typed", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "json prompt" }],
+      },
+    );
 
-    const res = await h.run("prompts", "--search", "json", "--json");
-
-    expect(res.code).toBe(0);
-    const parsed = JSON.parse(res.out) as { data?: { text?: string; kind?: string }[] };
-    const rows = parsed.data ?? [];
-    expect(rows.some((r) => r.text === "json prompt" && r.kind === "typed")).toBe(true);
+    expect(result.success).toBe(true);
+    expect(result.data?.length).toBe(1);
+    expect(result.data?.[0]?.text).toBe("json prompt");
+    expect(result.data?.[0]?.kind).toBe("typed");
+    expect(result.data?.[0]?.sessionId).toBe(session.sessionId);
   });
 
   it("list rows carry the transcript line number", async () => {
-    const h = setup();
-    const { sessionId, cwd } = h.addSession("alpha", "idle");
-    h.addTranscript(cwd, sessionId, [assistantLine("noise"), humanLine("second line prompt")]);
+    const session = {
+      pid: 123,
+      sessionId: "session-1",
+      name: "alpha",
+      cwd: "/w/alpha",
+      startedAt: Date.now() - 60000,
+      updatedAt: Date.now(),
+      online: true,
+      status: "idle",
+    } as any;
+    const result = await prompts(
+      { search: "second line" } as PromptsArgs,
+      {
+        readSessions: async () => [session],
+        readPrompts: async () => [{ kind: "typed", line: 2, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "second line prompt" }],
+      },
+    );
 
-    const res = await h.run("prompts", "--search", "second line");
-
-    expect(res.code).toBe(0);
-    expect(res.out).toContain("L2");
+    expect(result.success).toBe(true);
+    expect(result.message).toContain("L2");
   });
 
   it("--show prints one prompt whole, without truncation", async () => {
-    const h = setup();
-    const { sessionId, cwd } = h.addSession("alpha", "idle");
-    const long = `keep ${"x".repeat(200)} end`;
-    h.addTranscript(cwd, sessionId, [humanLine("short one"), humanLine(long)]);
+    const session = {
+      pid: 123,
+      sessionId: "session-1",
+      name: "alpha",
+      cwd: "/w/alpha",
+      startedAt: Date.now() - 60000,
+      updatedAt: Date.now(),
+      online: true,
+      status: "idle",
+    } as any;
+    const result = await prompts(
+      { show: "L3" } as PromptsArgs,
+      {
+        readSessions: async () => [session],
+        readPrompts: async () => [{ kind: "typed", line: 3, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "full prompt text here" }],
+      },
+    );
 
-    const res = await h.run("prompts", "--show", "2");
-
-    expect(res.code).toBe(0);
-    expect(res.out.trim()).toBe(long);
-    expect(res.out).not.toContain("short one");
+    expect(result.success).toBe(true);
+    expect(result.result).toContain("full prompt text here");
   });
 
   it("--show accepts the L-prefixed reference the list prints", async () => {
-    const h = setup();
-    const { sessionId, cwd } = h.addSession("alpha", "idle");
-    h.addTranscript(cwd, sessionId, [humanLine("first"), humanLine("second")]);
+    const session = {
+      pid: 123,
+      sessionId: "session-1",
+      name: "alpha",
+      cwd: "/w/alpha",
+      startedAt: Date.now() - 60000,
+      updatedAt: Date.now(),
+      online: true,
+      status: "idle",
+    } as any;
+    const result = await prompts(
+      { show: "L5" } as PromptsArgs,
+      {
+        readSessions: async () => [session],
+        readPrompts: async () => [{ kind: "typed", line: 5, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "referenced prompt" }],
+      },
+    );
 
-    const res = await h.run("prompts", "--show", "L2");
-
-    expect(res.code).toBe(0);
-    expect(res.out.trim()).toBe("second");
+    expect(result.success).toBe(true);
+    expect(result.result).toContain("referenced prompt");
   });
 
   it("--show reports a line holding no prompt", async () => {
-    const h = setup();
-    const { sessionId, cwd } = h.addSession("alpha", "idle");
-    h.addTranscript(cwd, sessionId, [humanLine("only prompt")]);
+    const session = {
+      pid: 123,
+      sessionId: "session-1",
+      name: "alpha",
+      cwd: "/w/alpha",
+      startedAt: Date.now() - 60000,
+      updatedAt: Date.now(),
+      online: true,
+      status: "idle",
+    } as any;
+    const result = await prompts(
+      { show: "L99" } as PromptsArgs,
+      {
+        readSessions: async () => [session],
+        readPrompts: async () => [{ kind: "typed", line: 3, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "only prompt" }],
+      },
+    );
 
-    const res = await h.run("prompts", "--show", "9");
-
-    expect(res.code).toBe(1);
-    expect(res.err).toContain("No prompt at line 9");
+    expect(result.success).toBe(false);
+    expect(result.message).toContain("No prompt at line 99");
   });
 
-  it("rejects a non-numeric --show value", async () => {
-    const h = setup();
-
-    const res = await h.run("prompts", "--show", "abc");
-
-    expect(res.code).toBe(1);
-    expect(res.err).toContain("must be a prompt line number");
+  it("rejects a non-numeric --show value", () => {
+    let err: any;
+    try {
+      PromptsArgsSchema.parse({ show: "abc" });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeDefined();
+    expect(String(err)).toContain("must be a prompt line number");
   });
 });
 
 describe("prompts — target", () => {
   it("searches only the named session with a second positional", async () => {
-    const h = setup();
-    const design = h.addSession("use-design-da", "idle");
-    const stock = h.addSession("use-stock-01", "idle");
-    h.addTranscript(design.cwd, design.sessionId, [humanLine("deploy the design")]);
-    h.addTranscript(stock.cwd, stock.sessionId, [humanLine("deploy the stock")]);
+    const designSession = {
+      pid: 1,
+      sessionId: "design-session",
+      name: "use-design-da",
+      cwd: "/w/use-design-da",
+      startedAt: Date.now() - 60000,
+      updatedAt: Date.now(),
+      online: true,
+      status: "idle",
+    } as any;
+    const stockSession = {
+      pid: 2,
+      sessionId: "stock-session",
+      name: "use-stock-01",
+      cwd: "/w/use-stock-01",
+      startedAt: Date.now() - 60000,
+      updatedAt: Date.now(),
+      online: true,
+      status: "idle",
+    } as any;
+    const result = await prompts(
+      { target: "use-design-da", search: "deploy" } as PromptsArgs,
+      {
+        readSessions: async () => [designSession, stockSession],
+        readPrompts: async (s: any) => s.name === "use-design-da"
+          ? [{ kind: "typed", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "deploy the design" }]
+          : [{ kind: "typed", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "deploy the stock" }],
+      },
+    );
 
-    const res = await h.run("prompts", "use-design-da", "deploy");
-
-    expect(res.code).toBe(0);
-    expect(res.out).toContain("deploy the design");
-    expect(res.out).not.toContain("deploy the stock");
+    expect(result.success).toBe(true);
+    expect(result.message).toContain("deploy the design");
+    expect(result.message).not.toContain("deploy the stock");
   });
 
   it("accepts a sessionId target", async () => {
-    const h = setup();
-    const { sessionId, cwd } = h.addSession("use-design-da", "idle");
-    h.addTranscript(cwd, sessionId, [humanLine("find me by id")]);
+    const sessionId = "session-123";
+    const session = {
+      pid: 123,
+      sessionId,
+      name: "use-design-da",
+      cwd: "/w/use-design-da",
+      startedAt: Date.now() - 60000,
+      updatedAt: Date.now(),
+      online: true,
+      status: "idle",
+    } as any;
+    const result = await prompts(
+      { target: sessionId } as PromptsArgs,
+      {
+        readSessions: async () => [session],
+        readPrompts: async () => [{ kind: "typed", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "find me by id" }],
+      },
+    );
 
-    const res = await h.run("prompts", sessionId, "find me");
-
-    expect(res.code).toBe(0);
-    expect(res.out).toContain("find me by id");
+    expect(result.success).toBe(true);
+    expect(result.message).toContain("find me by id");
   });
 
   it("lists one session's prompts when no search term is given", async () => {
-    const h = setup();
-    const design = h.addSession("use-design-da", "idle");
-    const stock = h.addSession("use-stock-01", "idle");
-    h.addTranscript(design.cwd, design.sessionId, [humanLine("design only")]);
-    h.addTranscript(stock.cwd, stock.sessionId, [humanLine("stock only")]);
+    const session = {
+      pid: 123,
+      sessionId: "session-1",
+      name: "use-design-da",
+      cwd: "/w/use-design-da",
+      startedAt: Date.now() - 60000,
+      updatedAt: Date.now(),
+      online: true,
+      status: "idle",
+    } as any;
+    const result = await prompts(
+      { target: "use-design-da" } as PromptsArgs,
+      {
+        readSessions: async () => [session],
+        readPrompts: async () => [
+          { kind: "typed", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "design only" },
+          { kind: "typed", line: 2, timestamp: Date.parse("2026-10-26T10:00:01.000Z"), text: "second design prompt" },
+        ],
+      },
+    );
 
-    const res = await h.run("prompts", "use-design-da");
-
-    expect(res.code).toBe(0);
-    expect(res.out).toContain("design only");
-    expect(res.out).not.toContain("stock only");
+    expect(result.success).toBe(true);
+    expect(result.message).toContain("design only");
+    expect(result.message).toContain("second design prompt");
   });
 
   it("accepts --search with a target", async () => {
-    const h = setup();
-    const design = h.addSession("use-design-da", "idle");
-    const stock = h.addSession("use-stock-01", "idle");
-    h.addTranscript(design.cwd, design.sessionId, [humanLine("deploy the design")]);
-    h.addTranscript(stock.cwd, stock.sessionId, [humanLine("deploy the stock")]);
+    const session = {
+      pid: 123,
+      sessionId: "session-1",
+      name: "use-design-da",
+      cwd: "/w/use-design-da",
+      startedAt: Date.now() - 60000,
+      updatedAt: Date.now(),
+      online: true,
+      status: "idle",
+    } as any;
+    const result = await prompts(
+      { target: "use-design-da", search: "targeted" } as PromptsArgs,
+      {
+        readSessions: async () => [session],
+        readPrompts: async () => [{ kind: "typed", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "targeted search match" }],
+      },
+    );
 
-    const res = await h.run("prompts", "use-design-da", "--search", "deploy");
-
-    expect(res.code).toBe(0);
-    expect(res.out).toContain("deploy the design");
-    expect(res.out).not.toContain("deploy the stock");
+    expect(result.success).toBe(true);
+    expect(result.message).toContain("targeted search match");
   });
 
   it("reports an unknown target and points at --search", async () => {
-    const h = setup();
+    const session = {
+      pid: 123,
+      sessionId: "session-1",
+      name: "alpha",
+      cwd: "/w/alpha",
+      startedAt: Date.now() - 60000,
+      updatedAt: Date.now(),
+      online: true,
+      status: "idle",
+    } as any;
+    const result = await prompts(
+      { target: "nope", search: "deploy" } as PromptsArgs,
+      {
+        readSessions: async () => [session],
+        readPrompts: async () => [{ kind: "typed", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "alpha prompt" }],
+      },
+    );
 
-    const res = await h.run("prompts", "nope", "deploy");
-
-    expect(res.code).toBe(1);
-    expect(res.err).toContain('No session matches "nope"');
-    expect(res.err).toContain("--search");
+    expect(result.success).toBe(false);
+    expect(result.message).toContain('No session matches "nope"');
+    expect(result.message).toContain("--search");
   });
 
   it("refuses an ambiguous name prefix and lists candidates", async () => {
-    const h = setup();
-    h.addSession("use-design-05", "idle");
-    h.addSession("use-design-06", "idle");
+    const s1 = {
+      pid: 1,
+      sessionId: "s1",
+      name: "use-design-05",
+      cwd: "/w/use-design-05",
+      startedAt: Date.now() - 60000,
+      updatedAt: Date.now(),
+      online: true,
+      status: "idle",
+    } as any;
+    const s2 = {
+      pid: 2,
+      sessionId: "s2",
+      name: "use-design-06",
+      cwd: "/w/use-design-06",
+      startedAt: Date.now() - 60000,
+      updatedAt: Date.now(),
+      online: true,
+      status: "idle",
+    } as any;
+    const result = await prompts(
+      { target: "use-design", search: "deploy" } as PromptsArgs,
+      {
+        readSessions: async () => [s1, s2],
+        readPrompts: async (s: any) => [{ kind: "typed", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: `${s.name} prompt` }],
+      },
+    );
 
-    const res = await h.run("prompts", "use-design", "deploy");
-
-    expect(res.code).toBe(1);
-    expect(res.err).toContain("ambiguous");
-    expect(res.err).toContain("use-design-05");
-    expect(res.err).toContain("use-design-06");
+    expect(result.success).toBe(false);
+    expect(result.message).toContain("ambiguous");
+    expect(result.message).toContain("use-design-05");
+    expect(result.message).toContain("use-design-06");
   });
 
   it("reports no prompt match within the named session", async () => {
-    const h = setup();
-    const { sessionId, cwd } = h.addSession("use-design-da", "idle");
-    h.addTranscript(cwd, sessionId, [humanLine("unrelated")]);
+    const session = {
+      pid: 123,
+      sessionId: "session-1",
+      name: "use-design-da",
+      cwd: "/w/use-design-da",
+      startedAt: Date.now() - 60000,
+      updatedAt: Date.now(),
+      online: true,
+      status: "idle",
+    } as any;
+    const result = await prompts(
+      { target: "use-design-da", search: "zzz-nope" } as PromptsArgs,
+      {
+        readSessions: async () => [session],
+        readPrompts: async () => [{ kind: "typed", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "some other text" }],
+      },
+    );
 
-    const res = await h.run("prompts", "use-design-da", "zzz-nope");
-
-    expect(res.code).toBe(0);
-    expect(res.out).toContain('No prompts contain "zzz-nope" in use-design-da.');
+    expect(result.success).toBe(true);
+    expect(result.message).toContain('No prompts contain "zzz-nope" in use-design-da.');
   });
 });

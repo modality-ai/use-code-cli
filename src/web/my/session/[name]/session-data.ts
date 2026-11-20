@@ -48,14 +48,17 @@ export function findToolById(entries: any[], toolId: string): { input?: any; res
   return undefined;
 }
 
-export async function resolveSessionTarget(name: string): Promise<string | null> {
+export async function resolveSessionTarget(
+  name: string,
+  readSessionsFn: (includeOffline: boolean) => Promise<any[]> = readSessions,
+): Promise<string | null> {
   if (!name) return null;
   // Prefer the cheap live-only read; fall back to the full offline scan only
   // when no live session matches (avoids the ~2s cost on the hot path).
-  let all = await readSessions(false);
+  let all = await readSessionsFn(false);
   let matches = findSessionsFuzzy(all, name);
   if (matches.length === 0) {
-    all = await readSessions(true);
+    all = await readSessionsFn(true);
     matches = findSessionsFuzzy(all, name);
   }
   if (matches.length === 0) return null;

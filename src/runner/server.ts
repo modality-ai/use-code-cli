@@ -70,10 +70,7 @@ export interface StartOptions {
   includeOffline?: boolean;
 }
 
-export function start(options: StartOptions = {}): ReturnType<typeof Bun.serve> {
-  const port = options.port ?? Number(process.env.PORT ?? 3000);
-  const host = options.host ?? "127.0.0.1";
-
+export function createApp(): Hono {
   const app = new Hono();
   app.use("*", staticHandler);
 
@@ -156,6 +153,14 @@ export function start(options: StartOptions = {}): ReturnType<typeof Bun.serve> 
   }
 
   app.notFound((c) => c.json({ success: false, error: "not found" }, 404));
+  return app;
+}
+
+export function start(options: StartOptions = {}): ReturnType<typeof Bun.serve> {
+  const port = options.port ?? Number(process.env.PORT ?? 3000);
+  const host = options.host ?? "127.0.0.1";
+
+  const app = createApp();
 
   const server = Bun.serve({
     fetch: app.fetch,

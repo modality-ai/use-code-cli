@@ -23,7 +23,7 @@ interface SendWithReplyArgs {
   deps?: SendWithReplyDeps;
 }
 
-interface SendWithReplyDeps {
+export interface SendWithReplyDeps {
   findReply?: (inReplyTo: string, targetSessionId: string) => Promise<{ at: number; msgId: string } | undefined>;
   recordReply?: (record: { inReplyTo: string; targetSessionId: string; msgId: string; at: number }) => Promise<void>;
   currentSession?: (sessions?: LiveSession[]) => Promise<LiveSession | undefined>;

@@ -3,6 +3,7 @@ import { basename, dirname, join } from "node:path";
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { appendFile, mkdir, open, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { liveSessionStatus, liveSessionWaitingFor } from "./status";
 import { prettyJsonFile } from "./output/json";
 import { matchesProjectFolder, splitFilterProjectTerms } from "./filterProject";
@@ -723,7 +724,7 @@ async function exists(path: string): Promise<boolean> {
  * Locate a session's transcript. The direct path is tried first; the directory
  * scan is the fallback so a changed encoding never hides the transcript.
  */
-export async function transcriptPath(s: SessionInfo): Promise<string | undefined> {
+export async function transcriptPath(s: { cwd: string; sessionId: string }): Promise<string | undefined> {
   const direct = join(PROJECTS_DIR, encodeProjectDir(s.cwd), `${s.sessionId}.jsonl`);
   if (await exists(direct)) return direct;
 
@@ -847,7 +848,7 @@ function unescapeJsonString(s: string): string {
  * Read the small facts a transcript holds about its session: the deployed
  * hero, the workspace's git branch, and the last prompt.
  */
-export async function readTranscriptMeta(s: SessionInfo): Promise<TranscriptMeta> {
+export async function readTranscriptMeta(s: { cwd: string; sessionId: string }): Promise<TranscriptMeta> {
   const path = await transcriptPath(s);
   if (!path) return {};
 
@@ -1319,6 +1320,7 @@ export function trimValue(value: unknown, max: number = 800): unknown {
 export async function compressTranscript(
   path: string,
   summary?: string,
+  cwd?: string,
 ): Promise<{
   originalBytes: number;
   newBytes: number;
@@ -1331,11 +1333,49 @@ export async function compressTranscript(
 
   if (summary !== undefined) {
     const sessionId = path.split("/").pop()?.replace(/\.jsonl$/, "") ?? "";
+    const msgId = randomUUID();
+    const entryUuid = randomUUID();
+    const requestRef = randomUUID();
     const compacted = JSON.stringify({
-      type: "system",
-      subtype: "compact_boundary",
-      content: summary,
+      parentUuid: null,
+      isSidechain: false,
+      message: {
+        id: msgId,
+        type: "message",
+        role: "assistant",
+        content: [{ type: "text", text: summary }],
+        model: "beam-free",
+        stop_reason: "end_turn",
+        stop_sequence: null,
+        usage: {
+          input_tokens: 0,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+          output_tokens: 0,
+          output_tokens_details: { thinking_tokens: 0 },
+          server_tool_use: { web_search_requests: 0, web_fetch_requests: 0 },
+          service_tier: "standard",
+          cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 0 },
+          inference_geo: "",
+          iterations: [],
+          speed: "standard",
+          fallback_credit: null,
+        },
+      },
+      apiBlockIndex: 1,
+      requestRef,
+      requestedModel: "beam-free",
+      type: "assistant",
+      uuid: entryUuid,
+      timestamp: new Date().toISOString(),
+      effort: "high",
+      perTurnEffort: null,
+      session_id: sessionId,
       sessionId,
+      userType: "external",
+      entrypoint: "cli",
+      cwd,
+      gitBranch: "main",
     });
     const newText = `${compacted}\n`;
     const tmp = `${path}.compact.tmp`;

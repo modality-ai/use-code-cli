@@ -452,8 +452,9 @@ describe("compressTranscript", () => {
     const r = await compressTranscript(path, "summary text");
     expect(r.entries).toBe(1);
     const out = await readFile(path, "utf8");
-    expect(out).toContain("compact_boundary");
-    expect(out).toContain("summary text");
+    const entry = JSON.parse(out.trim());
+    expect(entry.type).toBe("assistant");
+    expect(entry.message.content[0].text).toBe("summary text");
     await rm(dir, { recursive: true });
   });
 });

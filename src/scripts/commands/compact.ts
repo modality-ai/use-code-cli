@@ -44,7 +44,7 @@ async function compact(args: CompactArgs) {
   if (!path) {
     return { success: false, message: `No transcript found for session ${label(s)}.` };
   }
-  const r = await compressTranscript(path, args.summary);
+  const r = await compressTranscript(path, args.summary, s.cwd);
   const lines = [
     `Compacted transcript for session ${label(s)}.`,
     `  ${path}`,

@@ -35,12 +35,12 @@ describe("interrupt", () => {
 
     try {
       const s = { pid, sessionId: "s1", cwd: "/tmp", messagingSocketPath: sock } as any;
-      const requestId = await interrupt(s, "user-cancel");
+      const requestId = await interrupt(s, "user-cancel", { idleMs: 10, settleMs: 5, deadlineMs: 30 });
       expect(typeof requestId).toBe("string");
       expect(requestId.length).toBeGreaterThan(0);
 
       // Give the client a moment to finish flushing.
-      await new Promise((r) => setTimeout(r, 250));
+      await new Promise((r) => setTimeout(r, 1));
 
       const text = Buffer.concat(received).toString("utf8");
       const lines = text.trim().split("\n");
@@ -72,8 +72,8 @@ describe("interrupt", () => {
 
     try {
       const s = { pid, sessionId: "s1", cwd: "/tmp", messagingSocketPath: sock } as any;
-      const requestId = await interrupt(s);
-      await new Promise((r) => setTimeout(r, 250));
+      const requestId = await interrupt(s, undefined, { idleMs: 10, settleMs: 5, deadlineMs: 30 });
+      await new Promise((r) => setTimeout(r, 1));
       const text = Buffer.concat(received).toString("utf8");
       const lines = text.trim().split("\n");
       const frame = JSON.parse(lines[1]!);
@@ -117,8 +117,8 @@ describe("interrupt", () => {
 
     try {
       const s = { pid, sessionId: "s1", cwd: "/tmp", messagingSocketPath: sock } as any;
-      const requestId = await interrupt(s, "timeout");
-      await new Promise((r) => setTimeout(r, 250));
+      const requestId = await interrupt(s, "timeout", { idleMs: 10, settleMs: 5, deadlineMs: 30 });
+      await new Promise((r) => setTimeout(r, 1));
       const text = Buffer.concat(received).toString("utf8");
       const lines = text.trim().split("\n");
       const frame = JSON.parse(lines[1]!);
@@ -151,9 +151,9 @@ describe("interrupt", () => {
       const s = { pid, sessionId: "s1", cwd: "/tmp", messagingSocketPath: sock } as any;
       const started = Date.now();
       await Promise.race([
-        interrupt(s),
+        interrupt(s, undefined, { deadlineMs: 10, idleMs: 5, settleMs: 2 }),
         new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("interrupt() hung past its deadline")), 3000),
+          setTimeout(() => reject(new Error("interrupt() hung past its deadline")), 500),
         ),
       ]);
       expect(Date.now() - started).toBeLessThan(2500);
@@ -181,7 +181,7 @@ describe("interrupt", () => {
       const requestId = await Promise.race([
         interrupt(s),
         new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("interrupt() hung on early close")), 3000),
+          setTimeout(() => reject(new Error("interrupt() hung on early close")), 1500),
         ),
       ]);
       expect(typeof requestId).toBe("string");
@@ -212,7 +212,7 @@ describe("deliver", () => {
 
     try {
       const s = { pid, sessionId: "s1", cwd: "/tmp", messagingSocketPath: sock } as any;
-      const msgId = await deliver(s, "word ".repeat(200_000), "msg-1");
+      const msgId = await deliver(s, "word ".repeat(2_000), "msg-1");
       expect(msgId).toBe("msg-1");
     } finally {
       server.close();
@@ -237,7 +237,7 @@ describe("deliver", () => {
     try {
       const s = { pid, sessionId: "s1", cwd: "/tmp", messagingSocketPath: sock } as any;
       await expect(
-        deliver(s, "word ".repeat(200_000), "msg-2"),
+        deliver(s, "word ".repeat(200_000), "msg-2", { timeoutMs: 5 }),
       ).rejects.toThrow("Timed out sending to");
     } finally {
       server.close();

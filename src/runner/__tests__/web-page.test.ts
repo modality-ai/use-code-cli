@@ -1,15 +1,21 @@
-import { afterAll, beforeEach, describe, expect, it } from "bun:test";
-import { start } from "../server";
+import { afterAll, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { createApp } from "../server";
+import * as sessions from "../../lib/sessions";
+import * as scripts from "../../scripts/index";
 import { issueSession, SESSION_COOKIE } from "../../lib/web/auth";
 
-const server = start({ host: "127.0.0.1", port: 0 });
+spyOn(sessions, "readSessions").mockResolvedValue([{ name: "use-code-cli-51", pid: 12345, online: true, sessionId: "sid", status: "active", updatedAt: Date.now() } as any]);
+spyOn(scripts.aiTool, "execute").mockImplementation(async (props: any) => {
+  if (props?.command === "projects") return { success: true, data: [{ dir: "demo", cwd: "/tmp/demo", sessions: 1, active: 1 }] } as any;
+  return { success: true, data: { name: "use-code-cli-51", transcriptPath: null, online: true, status: "active" } } as any;
+});
+
+const app = createApp();
 const authToken = await issueSession("owner");
 const authCookie = `${SESSION_COOKIE}=${authToken}`;
-const getHtml = async (path: string) => await (await fetch(`http://127.0.0.1:${server.port}${path}`, { headers: { Cookie: authCookie } })).text();
+const getHtml = async (path: string) => await (await app.fetch(new Request(`http://localhost${path}`, { headers: { Cookie: authCookie } }))).text();
 
 describe("web page SSR + client bundle injection", () => {
-  afterAll(() => server.stop());
-
   it("renders the RootLayout shell without React 18 UMD globals", async () => {
     const html = await getHtml("/help");
     expect(html).toContain('<div id="root"');
@@ -40,11 +46,9 @@ describe("web page SSR + client bundle injection", () => {
 
   it("server-renders initial client component markup + hydration payload for sessions", async () => {
     const html = await getHtml("/my/sessions");
-    // Payload assertions use the hydrated-node adjacency ("<div><script>") so
-    // quoted mentions of these global names inside transcript text never match.
-    expect(html).toContain("<script>window.__REACT_DATA__ = { sessions:"); // consolidated channel only
-    expect(html).not.toContain("<div><script>window.__SESSIONS__"); // legacy emission removed (Phase B)
-    expect(html).toMatch(/active sessions\.|\/session\//); // empty vs populated markup
+    expect(html).toContain("<script>window.__REACT_DATA__ = { sessions:");
+    expect(html).not.toContain("<div><script>window.__SESSIONS__");
+    expect(html).toMatch(/active sessions\.|\/session\//);
   });
 
   it("client entries contain no manual hydration calls (build shim handles it)", () => {
@@ -59,7 +63,7 @@ describe("web page SSR + client bundle injection", () => {
   it("emits the consolidated sessionView slice on the session route", async () => {
     const html = await getHtml("/my/session/use-code-cli-51");
     expect(html).toContain('<script>window.__REACT_DATA__ = { sessionView: {"name":"use-code-cli-51"');
-    expect(html).not.toContain("<div><script>window.__SESSION_VIEW__"); // legacy emission removed (Phase B)
+    expect(html).not.toContain("<div><script>window.__SESSION_VIEW__");
   });
 
   it("server-renders initial client component markup + hydration payload for projects", async () => {

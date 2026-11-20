@@ -102,7 +102,7 @@ const DELIVER_TIMEOUT_MS = 5000;
  * gate the sender. An absolute deadline caps the whole exchange and rejects
  * with a clear error when the bytes cannot be handed over in time.
  */
-function writeLine(sock: string, payload: string): Promise<void> {
+function writeLine(sock: string, payload: string, timeoutMs: number = DELIVER_TIMEOUT_MS): Promise<void> {
   return new Promise((resolve, reject) => {
     const c = createConnection({ path: sock });
     let settled = false;
@@ -114,8 +114,8 @@ function writeLine(sock: string, payload: string): Promise<void> {
       if (err) reject(err); else resolve();
     };
     const deadline = setTimeout(
-      () => settle(new Error(`Timed out sending to ${sock} after ${DELIVER_TIMEOUT_MS}ms`)),
-      DELIVER_TIMEOUT_MS,
+      () => settle(new Error(`Timed out sending to ${sock} after ${timeoutMs}ms`)),
+      timeoutMs,
     );
     c.on("error", (e) => settle(e));
     c.on("connect", () => {
@@ -152,9 +152,12 @@ export function interruptFrame(requestId: string = randomUUID(), reason = "user-
 export async function interrupt(
   s: LiveSession,
   reason?: string,
-  deps?: { kill?: (pid: number, signal: NodeJS.Signals) => void },
+  deps?: { kill?: (pid: number, signal: NodeJS.Signals) => void; deadlineMs?: number; idleMs?: number; settleMs?: number },
 ): Promise<string> {
   const kill = deps?.kill ?? ((pid, signal) => process.kill(pid, signal));
+  const deadlineMs = deps?.deadlineMs ?? 900;
+  const idleMs = deps?.idleMs ?? 700;
+  const settleMs = deps?.settleMs ?? 150;
   if (s.stopped) {
     try { kill(s.pid, "SIGCONT"); } catch { /* best-effort; don't block delivery */ }
   }
@@ -180,13 +183,13 @@ export async function interrupt(
       try { c.destroy(); } catch { /* already gone */ }
       resolve();
     };
-    const deadline = setTimeout(settle, 900);
-    c.setTimeout(700, () => {
+    const deadline = setTimeout(settle, deadlineMs);
+    c.setTimeout(idleMs, () => {
       if (!sent) {
         sent = true;
         try { c.write(frame); } catch { /* socket may already be gone */ }
       }
-      setTimeout(settle, 150);
+      setTimeout(settle, settleMs);
     });
     c.on("error", (e) => {
       clearTimeout(deadline);
@@ -282,9 +285,10 @@ export async function deliver(
   s: LiveSession,
   message: string,
   msgId: string = randomUUID(),
-  deps?: { kill?: (pid: number, signal: NodeJS.Signals) => void },
+  deps?: { kill?: (pid: number, signal: NodeJS.Signals) => void; timeoutMs?: number },
 ): Promise<string> {
   const kill = deps?.kill ?? ((pid, signal) => process.kill(pid, signal));
+  const timeoutMs = deps?.timeoutMs ?? DELIVER_TIMEOUT_MS;
   if (s.stopped) {
     try { kill(s.pid, "SIGCONT"); } catch { /* best-effort; don't block delivery */ }
   }
@@ -301,6 +305,6 @@ export async function deliver(
   const body = message.replace(/<\/?cross-session-message[^>]*>/g, "").trim();
   const msg = { msgV: 1, msg_id: msgId, type: "user", message: { role: "user", content: body }, priority: "next" };
   const payload = JSON.stringify({ type: "auth", token }) + "\n" + JSON.stringify(msg) + "\n";
-  await writeLine(s.messagingSocketPath, payload);
+  await writeLine(s.messagingSocketPath, payload, timeoutMs);
   return msgId;
 }

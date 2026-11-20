@@ -18,9 +18,12 @@ async function resolveSession(name: string): Promise<SessionInfo | null> {
   return pickBestSession(matches);
 }
 
-export async function resolveTalkTarget(name: string): Promise<string> {
+export async function resolveTalkTarget(
+  name: string,
+  readSessionsFn?: (includeOffline: boolean) => Promise<any[]>,
+): Promise<string> {
   try {
-    const resolved = await resolveSessionTarget(name);
+    const resolved = await resolveSessionTarget(name, readSessionsFn);
     if (resolved) return resolved;
   } catch {
     // fall through with the original name

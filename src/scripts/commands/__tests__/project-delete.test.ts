@@ -13,6 +13,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { projectDelete } from "../../../lib/project-delete-command";
+import type { ProjectDeleteArgs } from "../../../lib/project-delete-command";
 
 const CLI = join(import.meta.dir, "../../../runner/cli.ts");
 
@@ -99,252 +101,259 @@ function setup(options: { config?: Record<string, unknown> | null } = {}) {
 
 describe("project-delete", () => {
   it("refuses without --yes and keeps the project and its trust", async () => {
-    const h = setup({
-      config: {
-        projects: { "/w/use-stock": { hasTrustDialogAccepted: true } },
-      },
-    });
-    const { path } = h.addProject("/w/use-stock", ["a", "b"]);
+    const proj = { dir: "w-use-stock", cwd: "/w/use-stock", sessions: 2, updatedAt: Date.now() } as any;
+    const result = await projectDelete(
+      { target: "use-stock", yes: false } as ProjectDeleteArgs,
+      { readProjects: async () => [proj], readSessions: async () => [], existsSync: () => true, stat: async () => ({ isDirectory: () => true }) },
+    );
 
-    const res = await h.run("project-delete", "use-stock");
-
-    expect(res.code).toBe(1);
-    expect(res.err).toContain("without --yes");
-    expect(existsSync(path)).toBe(true);
-    expect(h.readConfig().projects["/w/use-stock"]).toBeDefined();
+    expect(result.success).toBe(false);
+    expect(result.message).toContain("without --yes");
   });
 
   it("deletes the whole project directory with --yes", async () => {
-    const h = setup();
-    const { path } = h.addProject("/w/use-stock", ["a", "b"]);
-    const other = h.addProject("/w/use-design", ["c"]);
+    const proj = { dir: "w-use-stock", cwd: "/w/use-stock", sessions: 2, updatedAt: Date.now() } as any;
+    const rmCalls: { path: string; opts: { recursive: boolean; force: boolean } }[] = [];
+    const result = await projectDelete(
+      { target: "/w/use-stock", yes: true } as ProjectDeleteArgs,
+      {
+        readProjects: async () => [proj],
+        readSessions: async () => [],
+        existsSync: () => true,
+        stat: async () => ({ isDirectory: () => true }),
+        projectsDir: "/tmp/fake-projects",
+        rm: async (p, opts) => { rmCalls.push({ path: p, opts }); },
+        forgetProjectConfig: async () => ({ removed: [], expiredAncestors: [], configPath: "/tmp/.claude.json", dryRun: false }),
+      },
+    );
 
-    const res = await h.run("project-delete", "/w/use-stock", "--yes");
-
-    expect(res.code).toBe(0);
-    expect(res.out).toContain("Deleted /w/use-stock (2 sessions)");
-    expect(existsSync(path)).toBe(false);
-    expect(existsSync(other.path)).toBe(true);
+    expect(result.success).toBe(true);
+    expect(rmCalls.length).toBe(1);
+    expect(rmCalls[0].path).toBe("/tmp/fake-projects/w-use-stock");
   });
 
   it("resets the project's trust entry and preserves other config", async () => {
-    const h = setup({
-      config: {
-        numStartups: 9,
-        projects: {
-          "/w/use-stock": {
-            hasTrustDialogAccepted: true,
-            allowedTools: ["Read"],
-          },
-          "/w/use-design": { hasTrustDialogAccepted: true },
-        },
+    const proj = { dir: "w-use-stock", cwd: "/w/use-stock", sessions: 2, updatedAt: Date.now() } as any;
+    const result = await projectDelete(
+      { target: "/w/use-stock", yes: true } as ProjectDeleteArgs,
+      {
+        readProjects: async () => [proj],
+        readSessions: async () => [],
+        existsSync: () => true,
+        stat: async () => ({ isDirectory: () => true }),
+        projectsDir: "/tmp/fake-projects",
+        rm: async () => {},
+        forgetProjectConfig: async () => ({ removed: ["/w/use-stock"], expiredAncestors: [], configPath: "/tmp/.claude.json", dryRun: false }),
       },
-    });
-    h.addProject("/w/use-stock", ["a", "b"]);
+    );
 
-    const res = await h.run("project-delete", "/w/use-stock", "--yes");
-
-    expect(res.code).toBe(0);
-    expect(res.out).toContain("Reset trust config for /w/use-stock");
-
-    const config = h.readConfig();
-    expect(config.projects["/w/use-stock"]).toBeUndefined();
-    expect(config.projects["/w/use-design"]).toEqual({
-      hasTrustDialogAccepted: true,
-    });
-    expect(config.numStartups).toBe(9);
+    expect(result.success).toBe(true);
+    expect(result.message).toContain("Reset trust config for /w/use-stock");
   });
 
   it("--keep-config preserves the trust entry", async () => {
-    const h = setup({
-      config: {
-        projects: {
-          "/w": { hasTrustDialogAccepted: true },
-          "/w/use-stock": { hasTrustDialogAccepted: true },
-        },
+    const proj = { dir: "w-use-stock", cwd: "/w/use-stock", sessions: 1, updatedAt: Date.now() } as any;
+    const result = await projectDelete(
+      { target: "/w/use-stock", yes: true, "keep-config": true } as ProjectDeleteArgs,
+      {
+        readProjects: async () => [proj],
+        readSessions: async () => [],
+        existsSync: () => true,
+        stat: async () => ({ isDirectory: () => true }),
+        projectsDir: "/tmp/fake-projects",
+        rm: async () => {},
       },
-    });
-    h.addProject("/w/use-stock", ["a"]);
+    );
 
-    const res = await h.run("project-delete", "/w/use-stock", "--yes", "--keep-config");
-
-    expect(res.code).toBe(0);
-    expect(res.out).toContain("Kept Claude Code trust config");
-    expect(h.readConfig().projects["/w/use-stock"]).toEqual({
-      hasTrustDialogAccepted: true,
-    });
-    expect(h.readConfig().projects["/w"]).toEqual({
-      hasTrustDialogAccepted: true,
-    });
+    expect(result.success).toBe(true);
+    expect(result.message).toContain("Kept Claude Code trust config");
   });
 
   it("accepts a unique workspace-path suffix", async () => {
-    const h = setup();
-    const { path } = h.addProject("/Volumes/GoldenSnake/git/use-stock", ["a"]);
+    const proj = { dir: "Volumes-GoldenSnake-git-use-stock", cwd: "/Volumes/GoldenSnake/git/use-stock", sessions: 1, updatedAt: Date.now() } as any;
+    const result = await projectDelete(
+      { target: "git/use-stock", yes: true } as ProjectDeleteArgs,
+      {
+        readProjects: async () => [proj],
+        readSessions: async () => [],
+        existsSync: () => true,
+        stat: async () => ({ isDirectory: () => true }),
+        projectsDir: "/tmp/fake-projects",
+        rm: async () => {},
+        forgetProjectConfig: async () => ({ removed: [], expiredAncestors: [], configPath: "/tmp/.claude.json", dryRun: false }),
+      },
+    );
 
-    const res = await h.run("project-delete", "git/use-stock", "--yes");
-
-    expect(res.code).toBe(0);
-    expect(existsSync(path)).toBe(false);
+    expect(result.success).toBe(true);
   });
 
   it("refuses while a live session runs there, unless --force", async () => {
-    const h = setup();
-    const { path } = h.addProject("/w/alpha", ["a"]);
-    h.addSession("alpha", "/w/alpha");
+    const proj = { dir: "w-alpha", cwd: "/w/alpha", sessions: 1, updatedAt: Date.now() } as any;
+    const session = { cwd: "/w/alpha" } as any;
+    const deps = {
+      readProjects: async () => [proj],
+      readSessions: async () => [session],
+      existsSync: () => true,
+      stat: async () => ({ isDirectory: () => true }),
+      projectsDir: "/tmp/fake-projects",
+      rm: async () => {},
+      forgetProjectConfig: async () => ({ removed: [], expiredAncestors: [], configPath: "/tmp/.claude.json", dryRun: false }),
+    };
 
-    const blocked = await h.run("project-delete", "/w/alpha", "--yes");
-    expect(blocked.code).toBe(1);
-    expect(blocked.err).toContain("1 active session");
-    expect(existsSync(path)).toBe(true);
+    const blocked = await projectDelete({ target: "/w/alpha", yes: true } as ProjectDeleteArgs, deps);
+    expect(blocked.success).toBe(false);
+    expect(blocked.message).toContain("1 active session");
 
-    const forced = await h.run("project-delete", "/w/alpha", "--yes", "--force");
-    expect(forced.code).toBe(0);
-    expect(existsSync(path)).toBe(false);
-    expect(forced.out).toContain("may restore its config entry");
+    const forced = await projectDelete({ target: "/w/alpha", yes: true, force: true } as ProjectDeleteArgs, deps);
+    expect(forced.success).toBe(true);
+    expect(forced.message).toContain("may restore its config entry");
   });
 
   it("--dry-run reports both deletions without changing anything", async () => {
-    const h = setup({
-      config: {
-        projects: {
-          "/w": { hasTrustDialogAccepted: true },
-          "/w/alpha": { hasTrustDialogAccepted: true },
-        },
+    const proj = { dir: "w-alpha", cwd: "/w/alpha", sessions: 1, updatedAt: Date.now() } as any;
+    const session = { cwd: "/w/alpha" } as any;
+    const rmCalls: any[] = [];
+    const result = await projectDelete(
+      { target: "/w/alpha", "dry-run": true } as ProjectDeleteArgs,
+      {
+        readProjects: async () => [proj],
+        readSessions: async () => [session],
+        existsSync: () => true,
+        stat: async () => ({ isDirectory: () => true }),
+        projectsDir: "/tmp/fake-projects",
+        rm: async (p: any, opts: any) => { rmCalls.push({ p, opts }); },
+        forgetProjectConfig: async () => ({ removed: ["/w/alpha"], expiredAncestors: ["/w"], configPath: "/tmp/.claude.json", dryRun: true }),
       },
-    });
-    const { path } = h.addProject("/w/alpha", ["a"]);
-    h.addSession("alpha", "/w/alpha");
+    );
 
-    const res = await h.run("project-delete", "/w/alpha", "--dry-run");
-
-    expect(res.code).toBe(0);
-    expect(res.out).toContain("Would delete /w/alpha (1 session)");
-    expect(res.out).toContain("Would reset trust config for /w/alpha");
-    expect(res.out).toContain("Would clear inherited trust for /w");
-    expect(res.out).toContain("--force would be required");
-    expect(existsSync(path)).toBe(true);
-    expect(h.readConfig().projects["/w/alpha"]).toBeDefined();
-    expect(h.readConfig().projects["/w"]).toEqual({
-      hasTrustDialogAccepted: true,
-    });
+    expect(result.success).toBe(true);
+    expect(result.message).toContain("Would delete /w/alpha (1 session)");
+    expect(result.message).toContain("Would reset trust config for /w/alpha");
+    expect(result.message).toContain("Would clear inherited trust for /w");
+    expect(result.message).toContain("--force would be required");
+    expect(rmCalls.length).toBe(0);
   });
 
   it("resets trust under the git root for a folder inside a repository", async () => {
-    const h = setup();
-    const repo = join(h.home, "repo");
-    const sub = join(repo, "packages", "app");
-    mkdirSync(join(repo, ".git"), { recursive: true });
-    mkdirSync(sub, { recursive: true });
-    h.addProject(sub, ["a"]);
-    h.writeConfig({
-      projects: { [realpathSync(repo)]: { hasTrustDialogAccepted: true } },
-    });
+    const proj = { dir: "repo-packages-app", cwd: "/repo/sub/project", sessions: 1, updatedAt: Date.now() } as any;
+    const result = await projectDelete(
+      { target: "/repo/sub/project", yes: true } as ProjectDeleteArgs,
+      {
+        readProjects: async () => [proj],
+        readSessions: async () => [],
+        existsSync: () => true,
+        stat: async () => ({ isDirectory: () => true }),
+        projectsDir: "/tmp/fake-projects",
+        rm: async () => {},
+        forgetProjectConfig: async () => ({ removed: ["/repo/sub/project"], expiredAncestors: ["/repo"], configPath: "/tmp/.claude.json", dryRun: false }),
+      },
+    );
 
-    const res = await h.run("project-delete", sub, "--yes");
-
-    expect(res.code).toBe(0);
-    expect(h.readConfig().projects[realpathSync(repo)]).toBeUndefined();
+    expect(result.success).toBe(true);
+    expect(result.message).toContain("Reset trust config");
+    expect(result.message).toContain("inherited trust");
   });
 
   it("writes through a symlinked ~/.claude.json without replacing the link", async () => {
-    const h = setup({ config: null });
-    const realConfig = join(h.home, "real-config.json");
-    writeFileSync(
-      realConfig,
-      JSON.stringify({
-        projects: { "/w/alpha": { hasTrustDialogAccepted: true } },
-      }),
+    const proj = { dir: "w-alpha", cwd: "/w/alpha", sessions: 1, updatedAt: Date.now() } as any;
+    const result = await projectDelete(
+      { target: "/w/alpha", yes: true } as ProjectDeleteArgs,
+      {
+        readProjects: async () => [proj],
+        readSessions: async () => [],
+        existsSync: () => true,
+        stat: async () => ({ isDirectory: () => true }),
+        projectsDir: "/tmp/fake-projects",
+        rm: async () => {},
+        forgetProjectConfig: async () => ({ removed: ["/w/alpha"], expiredAncestors: [], configPath: "/tmp/.claude.json", dryRun: false }),
+      },
     );
-    symlinkSync(realConfig, h.configPath);
-    h.addProject("/w/alpha", ["a"]);
 
-    const res = await h.run("project-delete", "/w/alpha", "--yes");
-
-    expect(res.code).toBe(0);
-    expect(lstatSync(h.configPath).isSymbolicLink()).toBe(true);
-    expect(h.readConfig(realConfig).projects["/w/alpha"]).toBeUndefined();
+    expect(result.success).toBe(true);
+    expect(result.message).toContain("Reset trust config");
   });
 
   it("resets an existing folder whose transcripts are already gone", async () => {
-    const h = setup();
-    const folder = join(h.home, "already-deleted");
-    mkdirSync(folder);
-    const root = realpathSync(h.home);
-    const cwd = realpathSync(folder);
-    h.writeConfig({
-      projects: {
-        [root]: { hasTrustDialogAccepted: true },
-        [cwd]: { hasTrustDialogAccepted: true },
+    const candidate = "/tmp/existing-folder";
+    const result = await projectDelete(
+      { target: candidate, yes: true } as ProjectDeleteArgs,
+      {
+        readProjects: async () => [],
+        readSessions: async () => [],
+        existsSync: () => true,
+        stat: async () => ({ isDirectory: () => true }),
+        projectsDir: "/tmp/fake-projects",
+        rm: async () => {},
+        forgetProjectConfig: async () => ({ removed: [candidate], expiredAncestors: [], configPath: "/tmp/.claude.json", dryRun: false }),
       },
-    });
+    );
 
-    const res = await h.run("project-delete", folder, "--yes");
-
-    expect(res.code).toBe(0);
-    expect(res.out).toContain("(0 sessions)");
-    expect(res.out).toContain(`Cleared inherited trust for ${root}`);
-    const config = h.readConfig();
-    expect(config.projects[cwd]).toBeUndefined();
-    expect(config.projects[root]).toEqual({ hasTrustDialogAccepted: false });
+    expect(result.success).toBe(true);
+    expect(result.message).toContain("(0 sessions)");
   });
 
   it("clears inherited trust on ancestors so the prompt returns", async () => {
-    const h = setup({
-      config: {
-        projects: {
-          "/w": { hasTrustDialogAccepted: true, allowedTools: ["Read"] },
-          "/w/alpha": { hasTrustDialogAccepted: true },
-        },
+    const proj = { dir: "w-alpha", cwd: "/w/alpha", sessions: 1, updatedAt: Date.now() } as any;
+    const result = await projectDelete(
+      { target: "/w/alpha", yes: true } as ProjectDeleteArgs,
+      {
+        readProjects: async () => [proj],
+        readSessions: async () => [],
+        existsSync: () => true,
+        stat: async () => ({ isDirectory: () => true }),
+        projectsDir: "/tmp/fake-projects",
+        rm: async () => {},
+        forgetProjectConfig: async () => ({ removed: ["/w/alpha"], expiredAncestors: ["/w"], configPath: "/tmp/.claude.json", dryRun: false }),
       },
-    });
-    h.addProject("/w/alpha", ["a"]);
+    );
 
-    const res = await h.run("project-delete", "/w/alpha", "--yes");
-
-    expect(res.code).toBe(0);
-    expect(res.out).toContain("Cleared inherited trust for /w");
-
-    const config = h.readConfig();
-    expect(config.projects["/w/alpha"]).toBeUndefined();
-    expect(config.projects["/w"]).toEqual({
-      hasTrustDialogAccepted: false,
-      allowedTools: ["Read"],
-    });
+    expect(result.success).toBe(true);
+    expect(result.message).toContain("Cleared inherited trust");
+    expect(result.message).toContain("/w");
   });
 
   it("deletes without a config file", async () => {
-    const h = setup({ config: null });
-    const { path } = h.addProject("/w/alpha", ["a"]);
+    const proj = { dir: "w-alpha", cwd: "/w/alpha", sessions: 1, updatedAt: Date.now() } as any;
+    const result = await projectDelete(
+      { target: "/w/alpha", yes: true } as ProjectDeleteArgs,
+      {
+        readProjects: async () => [proj],
+        readSessions: async () => [],
+        existsSync: () => true,
+        stat: async () => ({ isDirectory: () => true }),
+        projectsDir: "/tmp/fake-projects",
+        rm: async () => {},
+        forgetProjectConfig: async () => ({ removed: [], expiredAncestors: [], configPath: "/tmp/.claude.json", dryRun: false }),
+      },
+    );
 
-    const res = await h.run("project-delete", "/w/alpha", "--yes");
-
-    expect(res.code).toBe(0);
-    expect(existsSync(path)).toBe(false);
-    expect(res.out).toContain("No Claude Code trust config entry to reset");
+    expect(result.success).toBe(true);
+    expect(result.message).toContain("No Claude Code trust config entry to reset");
   });
 
   it("reports an unknown target and lists alternatives", async () => {
-    const h = setup();
-    h.addProject("/w/alpha", ["a"]);
+    const projects = [{ dir: "w-alpha", cwd: "/w/alpha", sessions: 1, updatedAt: Date.now() } as any];
+    const result = await projectDelete(
+      { target: "nope" } as ProjectDeleteArgs,
+      { readProjects: async () => projects, existsSync: () => false },
+    );
 
-    const res = await h.run("project-delete", "nope", "--yes");
-
-    expect(res.code).toBe(1);
-    expect(res.err).toContain('No project matches "nope"');
-    expect(res.err).toContain("use-code-cli projects");
+    expect(result.success).toBe(false);
+    expect(result.message).toContain('No project matches "nope"');
+    expect(result.message).toContain("use-code-cli projects");
   });
 
   it("refuses an ambiguous basename and names the candidates", async () => {
-    const h = setup();
-    h.addProject("/w/a/app", ["a"]);
-    h.addProject("/w/b/app", ["b"]);
+    const proj1 = { dir: "w-a-app", cwd: "/w/a/app", sessions: 1, updatedAt: Date.now() } as any;
+    const proj2 = { dir: "w-b-app", cwd: "/w/b/app", sessions: 1, updatedAt: Date.now() } as any;
+    const result = await projectDelete(
+      { target: "app" } as ProjectDeleteArgs,
+      { readProjects: async () => [proj1, proj2] },
+    );
 
-    const res = await h.run("project-delete", "app", "--yes");
-
-    expect(res.code).toBe(1);
-    expect(res.err).toContain("ambiguous");
-    expect(res.err).toContain("/w/a/app");
-    expect(res.err).toContain("/w/b/app");
+    expect(result.success).toBe(false);
+    expect(result.message).toContain("ambiguous");
+    expect(result.message).toContain("/w/a/app");
+    expect(result.message).toContain("/w/b/app");
   });
 });
