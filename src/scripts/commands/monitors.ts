@@ -99,7 +99,6 @@ async function monitorRows(list: SessionInfo[], term: string | undefined): Promi
 }
 
 async function monitors(args: MonitorsArgs) {
-  // Stop mode: target is a monitor id.
   if (args.stop) {
     if (!args.target) {
       return { success: false, message: "Monitor id required. Usage: use-code-cli monitor <id> --stop" };

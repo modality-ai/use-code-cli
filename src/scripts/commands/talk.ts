@@ -19,4 +19,3 @@ export const talkCommand: CLICommand = {
   ],
 };
 
-// Re-exports removed to satisfy command-module export contract.

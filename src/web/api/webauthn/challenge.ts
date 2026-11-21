@@ -27,7 +27,6 @@ export function consumeChallenge(id: string): string | null {
 }
 
 export function latestChallengeId(): string | null {
-  // Most recently inserted key
   const keys = Array.from(store.keys());
   return keys.length ? keys[keys.length - 1]! : null;
 }

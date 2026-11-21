@@ -93,9 +93,7 @@ async function project(args: ProjectArgs) {
             updatedAt: 0,
           };
         }
-      } catch {
-        // ignore
-      }
+      } catch {}
     }
     if (!proj) {
       return {

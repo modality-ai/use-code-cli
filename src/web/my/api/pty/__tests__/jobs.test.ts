@@ -67,7 +67,6 @@ describe("job eviction", () => {
     expect(getJob(firstJobId)).toBeDefined();
     for (const m of exited) m.resolveExit(0);
     await Promise.all(exited.map((m) => m.proc.exited));
-    // Trigger eviction with one more registration.
     const { proc: trigger } = mockProc(6000);
     registerJob(trigger);
     expect(getJob(firstJobId)).toBeUndefined();

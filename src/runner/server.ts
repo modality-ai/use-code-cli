@@ -74,7 +74,6 @@ export function createApp(): Hono {
   const app = new Hono();
   app.use("*", staticHandler);
 
-  // Gate everything under /my behind a valid session.
   app.use("/my/*", async (c, next) => {
     // CSRF: browsers always send Origin on state-changing requests, so a
     // cross-site attacker cannot pass this check; reject before auth runs.
@@ -94,7 +93,6 @@ export function createApp(): Hono {
     return c.redirect("/login");
   });
 
-  // Dynamic API routes (Next.js style: src/web/.../route.ts exporting GET/POST/etc.)
   for (const [route, filePath] of apiRoutes) {
     app.all(route, async (c) => {
       const mod: any = await import(filePath);
@@ -107,7 +105,6 @@ export function createApp(): Hono {
     });
   }
 
-  // Dynamic file-based routes
   for (const [route, filePath] of pageRoutes) {
     app.get(route, async (c) => {
       const mod: any = await import(filePath);
@@ -124,7 +121,6 @@ export function createApp(): Hono {
         const script = clientScript(data);
         html = baseHtml.replace("</body>", `${script}</body>`);
       } else {
-        // Auto-inject the compiled client bundle(s) for this page (Next.js-like).
         const relDir = filePath.replace(/.*src\/web\//, "").replace(/\/[^\/]+$/, "");
         const scripts = await clientScriptsFor(relDir);
         if (scripts.length) {
@@ -174,7 +170,6 @@ export function start(options: StartOptions = {}): ReturnType<typeof Bun.serve> 
   // address (getHonoUrl pattern: the runtime bind, not an env-derived guess).
   registerLocalServer(server);
   console.log(`${APP_NAME} server listening on http://${host}:${port}`);
-  // Bootstrap tunnel recovery/auto-reconnect state without requiring a web request.
   void initTunnel();
   return server;
 }

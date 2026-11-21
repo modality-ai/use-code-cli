@@ -72,7 +72,6 @@ export function liveJobCount(): number {
   return live;
 }
 
-// Bounded registry: drop exited jobs beyond the cap
 function evictStaleJobs(max = 50): void {
   if (jobs.size <= max) return;
   for (const [id, job] of jobs) {

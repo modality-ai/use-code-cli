@@ -144,7 +144,6 @@ describe("SessionView optimistic updates", () => {
     // now server has the content
     (window as any).__SERVER_ENTRIES__ = [{ role: "user", text: "hello" }];
     const checkbox = container.querySelector("#autoscroll") as HTMLInputElement;
-    // trigger catchUp via toggle
     await act(() => { checkbox.click(); }, 10);
     await act(() => { checkbox.click(); }, 50);
     expect(container.querySelector("[data-optimistic]")).toBeNull();
@@ -212,7 +211,6 @@ describe("SessionView tool fold refetch", () => {
     const summary = Array.from(container.querySelectorAll("summary")).find((s) => /bash/i.test(s.textContent || "")) as HTMLElement;
     await act(() => { summary.click(); }, 50);
     expect(toolResultCalls.length).toBe(1);
-    // Update button should be present
     const updateBtn = Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.trim() === "Update") as HTMLButtonElement;
     expect(updateBtn).toBeTruthy();
     // click Update -> refetch

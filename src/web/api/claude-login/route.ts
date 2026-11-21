@@ -178,7 +178,6 @@ export async function POST(request: Request): Promise<Response> {
       lastSuccessfulLogin = { at: new Date().toISOString(), mode };
     }
     for (const l of s.listeners) { try { l(`\n[process exited with code ${s.exitCode}]\n`); } catch {} }
-    // Kill hung processes and clean up session after max lifetime
     setTimeout(() => {
       if (!s.done) { try { s.proc.kill(); } catch {} }
       sessions.delete(id);

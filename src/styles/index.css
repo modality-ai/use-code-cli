@@ -103,8 +103,6 @@ details {
   border-bottom: 1px solid var(--color-border);
 }
 
-/* .chat-input converted to Tailwind utility classes in ChatInput.tsx */
-
 /* Global wrap protection (no overflow-x:hidden — that breaks position:sticky
    on the context bar). Long unbreakable tokens wrap instead of stretching,
    so they never push the page wider than the viewport. Applies to every page,

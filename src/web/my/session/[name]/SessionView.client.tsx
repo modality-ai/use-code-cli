@@ -335,7 +335,7 @@ export default function SessionView(props: BootProps) {
       ? { success: true, online: initial.data?.online !== false, status: (initial.data?.status as string | null) || "idle", waitingFor: (initial.data?.waitingFor as string | null) || null }
       : { success: false, online: false, status: "idle", waitingFor: null },
   );
-  const [chatStatus, setChatStatus] = useState(""); // send progress + SSE errors
+  const [chatStatus, setChatStatus] = useState("");
   const [optimistic, setOptimistic] = useState<OptimisticEntry[]>([]);
   const optimisticTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   // Clear any pending optimistic fallback timers on unmount to avoid state
@@ -429,7 +429,7 @@ export default function SessionView(props: BootProps) {
       es = new EventSource("/my/api/session/events?name=" + encodeURIComponent(name));
       es.onmessage = (ev: MessageEvent) => {
         if (!liveRef.current) return;
-        retryDelay = 1000; // reset backoff on successful message
+        retryDelay = 1000;
         try {
           const d = JSON.parse(ev.data);
           if (d.error) {
@@ -471,7 +471,6 @@ export default function SessionView(props: BootProps) {
   useEffect(() => {
     const onScroll = () => setBar((b) => updateBar(contentRef.current, entriesRef.current, b));
     window.addEventListener("scroll", onScroll, { passive: true });
-    // initial pass
     setBar((b) => updateBar(contentRef.current, entries, b));
     return () => window.removeEventListener("scroll", onScroll);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -490,7 +489,6 @@ export default function SessionView(props: BootProps) {
     if (typeof ResizeObserver !== "undefined") {
       const ro = new ResizeObserver(apply);
       ro.observe(bar);
-      // store for cleanup via closure
       (content as any)._ro = ro;
     }
     window.addEventListener("resize", apply);
@@ -528,8 +526,6 @@ export default function SessionView(props: BootProps) {
       window.scrollTo({ top: document.documentElement.scrollHeight });
       return;
     }
-    // When not auto-scrolling, leave the viewport where it is (the page, not an
-    // inner container, now owns scrolling).
   }, [entries]);
 
   const stateText = reconnecting
@@ -552,7 +548,6 @@ export default function SessionView(props: BootProps) {
     setOptimistic((prev) => [...prev, { localId, text, baseCount, status: "sending" }]);
     const input = chatRef.current;
     if (input) input.value = "";
-    // scroll to bottom immediately
     try { window.scrollTo({ top: document.documentElement.scrollHeight }); } catch {}
     setSending(true);
     try {
@@ -621,8 +616,6 @@ export default function SessionView(props: BootProps) {
       if (d?.success) {
         setPaused(true);
         setChatStatus("paused (frozen)");
-        // Refresh session status so the header reflects the return to idle.
-        // statusOnly=1: we only read online/status here — skip the transcript.
         try {
           const metaRes = await fetch("/my/api/session?statusOnly=1&name=" + encodeURIComponent(name));
           const metaJson = await metaRes.json();

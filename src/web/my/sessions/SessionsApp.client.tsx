@@ -30,7 +30,6 @@ function cleanPrompt(text: string): string {
 // On SSR (no window) falls back to the injected initial prop.
 export default function SessionsApp({ initial }: { initial?: Session[] }) {
   const [sessions, setSessions] = useState<Session[]>(() => {
-    // Consolidated data channel (Phase B) with prop fallback for SSR.
     const dehydrated = typeof window !== "undefined" ? window.__REACT_DATA__?.sessions : undefined;
     if (Array.isArray(dehydrated)) return dehydrated;
     return Array.isArray(initial) ? initial : [];
