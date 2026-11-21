@@ -100,7 +100,7 @@ export async function run(deps?: SessionStatusDeps): Promise<void> {
         if (prev === "busy" && status === "idle") {
           try {
             const session = rowById.get(id)!;
-            const name = id;
+            const name = id; // we should always send session id
             const message = `${name} is idle now`;
             const replies = await findRepliesFn(id);
             const live = await liveSessionsFn();
