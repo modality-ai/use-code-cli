@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { sessionStatusRank } from "../../../../lib/status";
-import { findSessionsFuzzy, readSessions } from "../../../../lib/sessions";
+import { findSessionsFuzzy, readSessions, findOfflineTranscriptPath } from "../../../../lib/sessions";
 import { parseTranscript } from "../../../../lib/transcript";
 import { aiTool } from "../../../../scripts/index";
 
@@ -35,6 +35,16 @@ export function stripToolResults(entries: any[]): void {
   }
 }
 
+/** Strip thinking content from every entry (mutates in place). */
+export function stripThinking(entries: any[]): void {
+  for (const e of entries) {
+    if (e && "thinking" in e) {
+      (e as any).hasThinking = !!(e as any).thinking;
+      delete (e as any).thinking;
+    }
+  }
+}
+
 /** Find the tool with the given id across all entries; returns its data or undefined. */
 export function findToolById(entries: any[], toolId: string): { input?: any; result?: string; resultHtml?: string } | undefined {
   for (const e of entries) {
@@ -58,6 +68,11 @@ export async function resolveSessionTarget(
   let all = await readSessionsFn(false);
   let matches = findSessionsFuzzy(all, name);
   if (matches.length === 0) {
+    // Fast offline path: direct lookup by sessionId (O(project dirs)) avoids
+    // the ~1.8s full readSessions(true) scan. Falls back to the full scan for
+    // name/prefix matching.
+    const tp = await findOfflineTranscriptPath(name);
+    if (tp) return name;
     all = await readSessionsFn(true);
     matches = findSessionsFuzzy(all, name);
   }
@@ -97,6 +112,21 @@ export async function fetchSessionData(name: string, options?: { includeEntries?
     let all = await libs.readSessions(false);
     let matches = libs.findSessionsFuzzy(all, name);
     if (matches.length === 0) {
+      const tp = await libs.findOfflineTranscriptPath(name);
+      if (tp) {
+        return {
+          success: true,
+          data: {
+            name: name,
+            transcriptPath: null,
+            entries: [],
+            online: false,
+            status: "offline",
+            waitingFor: null,
+            stopped: false,
+          },
+        };
+      }
       all = await libs.readSessions(true);
       matches = libs.findSessionsFuzzy(all, name);
     }
@@ -151,6 +181,8 @@ export async function fetchSessionData(name: string, options?: { includeEntries?
     // Lazy-load tool results: strip them from the initial payload so the
     // browser only fetches a result when its "CLICK TO SEE" fold is opened.
     stripToolResults(entries);
+    // Lazy-load thinking content: strip it from the initial payload too.
+    stripThinking(entries);
     return {
       success: true,
       data: {
@@ -176,26 +208,57 @@ export interface ToolResultData {
   error?: string;
 }
 
-export async function fetchToolResult(name: string, toolId: string): Promise<ToolResultData> {
-  if (!name || !toolId) return { success: false, error: "missing name or toolId" };
+/** Shared loader: resolve the session and parse its transcript into entries.
+ *  Returns either `{ entries }` on success or `{ error }` on failure, so the
+ *  two lazy-fetch endpoints (tool results and thinking) stay in sync. */
+async function loadTranscriptEntries(name: string): Promise<{ entries: ReturnType<typeof parseTranscript> } | { error: string }> {
   const target = (await resolveSessionTarget(name)) ?? name;
   const result = (await aiTool.execute({ command: "session", target })) as {
     success?: boolean;
     data?: { transcriptPath?: string | null };
     message?: string;
   };
-  if (!result?.success) return { success: false, error: result?.message || "session not found" };
+  if (!result?.success) return { error: result?.message || "session not found" };
   const transcriptPath = result.data?.transcriptPath ?? null;
-  if (!transcriptPath) return { success: false, error: "no transcript" };
+  if (!transcriptPath) return { error: "no transcript" };
   try {
     const lines = readFileSync(transcriptPath, "utf-8").split(/\n/).filter(Boolean);
-    const entries = parseTranscript(lines);
-    const tool = findToolById(entries, toolId);
-    if (tool) {
-      return { success: true, input: tool.input, result: tool.result, resultHtml: tool.resultHtml };
-    }
-    return { success: false, error: "tool not found" };
+    return { entries: parseTranscript(lines) };
   } catch {
-    return { success: false, error: "cannot read transcript" };
+    return { error: "cannot read transcript" };
   }
+}
+
+export async function fetchToolResult(name: string, toolId: string): Promise<ToolResultData> {
+  if (!name || !toolId) return { success: false, error: "missing name or toolId" };
+  const loaded = await loadTranscriptEntries(name);
+  if ("error" in loaded) return { success: false, error: loaded.error };
+  const tool = findToolById(loaded.entries, toolId);
+  if (tool) {
+    return { success: true, input: tool.input, result: tool.result, resultHtml: tool.resultHtml };
+  }
+  return { success: false, error: "tool not found" };
+}
+
+export interface ThinkingData {
+  success: boolean;
+  thinking?: string;
+  error?: string;
+}
+
+export async function fetchThinking(name: string, entryId: number): Promise<ThinkingData> {
+  if (!name || entryId === undefined || entryId === null || Number.isNaN(entryId) || !Number.isInteger(entryId)) {
+    return { success: false, error: "missing name or index" };
+  }
+  const loaded = await loadTranscriptEntries(name);
+  if ("error" in loaded) return { success: false, error: loaded.error };
+  // Prefer identity-based lookup (physical line id) so a shifted transcript
+  // can't return the wrong entry; fall back to positional index for legacy
+  // transcripts whose entries carry no id.
+  const hasIds = loaded.entries.some((e: any) => typeof e?.id === "number");
+  const entry = hasIds
+    ? loaded.entries.find((e: any) => e?.id === entryId)
+    : loaded.entries[entryId];
+  if (!entry) return { success: false, error: "entry not found" };
+  return { success: true, thinking: entry.thinking };
 }

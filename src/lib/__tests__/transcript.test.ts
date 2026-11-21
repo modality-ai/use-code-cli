@@ -101,10 +101,12 @@ describe("parseTranscript", () => {
     expect(out[0]!.text).toBe("TARGET: done | STATUS: ok");
   });
 
-  it("drops a think-only assistant message without tools", () => {
+  it("keeps a think-only assistant message with thinking", () => {
     const lines = [JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "<think>pure reasoning" + "</think>" }] } })];
     const out = parseTranscript(lines);
-    expect(out).toHaveLength(0);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.thinking).toBe("pure reasoning");
+    expect(out[0]!.text).toBe("");
   });
 
   it("keeps a think-only assistant message that has tools, with empty text", () => {
@@ -117,17 +119,44 @@ describe("parseTranscript", () => {
     const out = parseTranscript(lines);
     expect(out).toHaveLength(1);
     expect(out[0]!.text).toBe("");
+    expect(out[0]!.thinking).toBe("reasoning only");
     expect(out[0]!.tools![0]!.name).toBe("bash");
   });
 
-  it("handles a conversation with multiple turns", () => {
+  it("sets hasThinking true when thinking present and false otherwise", () => {
+    const withThink = parseTranscript([JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "<think>r" + "</think>visible" }] } })]);
+    const without = parseTranscript([JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "visible" }] } })]);
+    expect(withThink[0]!.hasThinking).toBe(true);
+    expect(without[0]!.hasThinking).toBe(false);
+  });
+
+  it("joins multiple think blocks with a newline", () => {
+    const lines = [JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "<think>first" + "</think>" + "middle" + "<think>second" + "</think>" + "end" }] } })];
+    const out = parseTranscript(lines);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.thinking).toBe("first\nsecond");
+    expect(out[0]!.text).toBe("middleend");
+  });
+
+  it("extracts thinking from assistant string content", () => {
+    const lines = [JSON.stringify({ type: "assistant", message: { content: "<think>plan" + "</think>answer" } })];
+    const out = parseTranscript(lines);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.thinking).toBe("plan");
+    expect(out[0]!.text).toBe("answer");
+    expect(out[0]!.hasThinking).toBe(true);
+  });
+
+  it("assigns id as the physical line index", () => {
     const lines = [
-      JSON.stringify({ type: "user", message: { content: "q" } }),
-      JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "a" }] } }),
+      JSON.stringify({ type: "user", message: { content: "first" } }),
+      "not json",
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "second" }] } }),
     ];
     const out = parseTranscript(lines);
     expect(out).toHaveLength(2);
-    expect(out.map((e) => e.role)).toEqual(["user", "assistant"]);
+    expect(out[0]!.id).toBe(0);
+    expect(out[1]!.id).toBe(2);
   });
 });
 

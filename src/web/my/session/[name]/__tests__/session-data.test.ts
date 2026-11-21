@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { pickBestSession, stripToolResults, findToolById } from "../session-data";
+import { pickBestSession, stripToolResults, stripThinking, findToolById, fetchThinking } from "../session-data";
 import { sessionStatusRank } from "../../../../../lib/status";
 
 describe("sessionStatusRank", () => {
@@ -59,6 +59,50 @@ describe("stripToolResults", () => {
 
   it("handles empty entries array", () => {
     expect(() => stripToolResults([])).not.toThrow();
+  });
+});
+
+describe("stripThinking", () => {
+  it("moves thinking into hasThinking and removes the body", () => {
+    const entries = [
+      { text: "hi", thinking: "reasoning" },
+      { text: "ho", thinking: "" },
+    ];
+    stripThinking(entries);
+    expect(entries[0]!.hasThinking).toBe(true);
+    expect(entries[0]!.thinking).toBeUndefined();
+    expect(entries[1]!.hasThinking).toBe(false);
+    expect(entries[1]!.thinking).toBeUndefined();
+  });
+
+  it("is a no-op for entries without a thinking key", () => {
+    const entries = [{ text: "hi" }];
+    expect(() => stripThinking(entries)).not.toThrow();
+    expect(entries[0]!.hasThinking).toBeUndefined();
+  });
+
+  it("handles empty entries array", () => {
+    expect(() => stripThinking([])).not.toThrow();
+  });
+});
+
+describe("fetchThinking", () => {
+  it("returns missing name or index when name is empty", async () => {
+    const r = await fetchThinking("", 0);
+    expect(r.success).toBe(false);
+    expect(r.error).toBe("missing name or index");
+  });
+
+  it("returns missing name or index when index is NaN", async () => {
+    const r = await fetchThinking("name", NaN);
+    expect(r.success).toBe(false);
+    expect(r.error).toBe("missing name or index");
+  });
+
+  it("returns missing name or index when index is null", async () => {
+    const r = await fetchThinking("name", null as any);
+    expect(r.success).toBe(false);
+    expect(r.error).toBe("missing name or index");
   });
 });
 

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import "../../../../lib/web/react-data";
 import type { SessionData } from "./session-data";
 import { onlineEmoji, statusEmoji } from "./store";
@@ -16,6 +16,9 @@ interface Entry {
   html?: string;
   text?: string;
   tools?: any[];
+  thinking?: string;
+  hasThinking?: boolean;
+  id?: number;
 }
 
 interface OptimisticEntry {
@@ -61,50 +64,67 @@ export function teaserOf(e: Entry): string {
   return source.replace(/\s+/g, " ").trim().slice(0, 200);
 }
 
-/** A tool-call fold; its body (input + result) mounts on first open, and the
- *  result is fetched on demand if it wasn't shipped in the initial payload. */
-function ToolFold({ tool, sessionName }: { tool: any; sessionName?: string }) {
+/** Shared lazy-fetch state for a fold: mounts its body on first open and
+ *  fetches on demand when the payload wasn't shipped initially. */
+function useLazyFold(initialFetched: boolean, canFetch: boolean, doFetch: () => Promise<void>) {
   const [loaded, setLoaded] = useState(false);
-  const [input, setInput] = useState<any>(tool.input);
-  const [result, setResult] = useState<string | undefined>(tool.result);
-  const [resultHtml, setResultHtml] = useState<string | undefined>(tool.resultHtml);
   const [loading, setLoading] = useState(false);
-  const [fetched, setFetched] = useState(!!(tool.input || tool.result || tool.resultHtml));
-  // Guards against overlapping fetches when the component re-rend hasn't
-  // flipped `loading` yet (e.g. rapid double-clicks on "Update").
+  const [fetched, setFetched] = useState(initialFetched);
   const fetchingRef = useRef(false);
-  const fetchResult = async () => {
-    if (!tool.id || !sessionName) return;
+  const run = useCallback(async () => {
+    if (!canFetch) { setFetched(true); return; }
     if (fetchingRef.current) return;
     fetchingRef.current = true;
     setLoading(true);
     try {
-      const r = await fetch(`/my/api/session/tool-result?name=${encodeURIComponent(sessionName)}&toolId=${encodeURIComponent(tool.id)}`);
-      const d = await r.json();
-      if (d?.success) {
-        setInput(d.input);
-        setResult(d.result);
-        setResultHtml(d.resultHtml);
-      }
+      await doFetch();
     } catch {
       // ignore; keep empty
     } finally {
       setLoading(false);
       fetchingRef.current = false;
     }
-  };
-  const onToggle = async (ev: any) => {
+  }, [canFetch, doFetch]);
+  const onToggle = useCallback(async (ev: any) => {
     if (!ev.currentTarget.open) return;
     setLoaded(true);
     if (fetched) return;
-    if (!tool.id || !sessionName) { setFetched(true); return; }
-    await fetchResult();
+    if (!canFetch) { setFetched(true); return; }
+    await run();
     setFetched(true);
-  };
-  const refetch = async () => {
-    if (loading) return;
-    await fetchResult();
-  };
+  }, [fetched, canFetch, run]);
+  const refetch = useCallback(async () => {
+    if (loading || !canFetch) return;
+    await run();
+  }, [loading, canFetch, run]);
+  return { loaded, loading, fetched, setFetched, onToggle, refetch };
+}
+
+/** A tool-call fold; its body (input + result) mounts on first open, and the
+ *  result is fetched on demand if it wasn't shipped in the initial payload. */
+function ToolFold({ tool, sessionName }: { tool: any; sessionName?: string }) {
+  const [input, setInput] = useState<any>(tool.input);
+  const [result, setResult] = useState<string | undefined>(tool.result);
+  const [resultHtml, setResultHtml] = useState<string | undefined>(tool.resultHtml);
+  const canFetch = !!(tool.id && sessionName);
+  const fetchResult = useCallback(async () => {
+    if (!tool.id || !sessionName) return;
+    const r = await fetch(`/my/api/session/tool-result?name=${encodeURIComponent(sessionName)}&toolId=${encodeURIComponent(tool.id)}`);
+    const d = await r.json();
+    if (d?.success) {
+      setInput(d.input);
+      setResult(d.result);
+      setResultHtml(d.resultHtml);
+    }
+  }, [tool.id, sessionName]);
+  const { loaded, loading, fetched, setFetched, onToggle, refetch } = useLazyFold(
+    !!(tool.input || tool.result || tool.resultHtml),
+    canFetch,
+    fetchResult,
+  );
+  useEffect(() => {
+    if (tool.input || tool.result || tool.resultHtml) setFetched(true);
+  }, [tool.input, tool.result, tool.resultHtml]);
   return (
     <details
       className="pl-4 mt-1 border border-border rounded-sm p-2"
@@ -164,9 +184,73 @@ function ToolFold({ tool, sessionName }: { tool: any; sessionName?: string }) {
   );
 }
 
+/** A lazy fold for an entry's extracted <think> reasoning. Collapsed by
+ *  default; its <pre> body mounts only on first open and, when the thinking
+ *  content wasn't shipped in the initial payload, is fetched on demand. */
+function ThinkingFold({
+  thinking,
+  sessionName,
+  entryId,
+}: {
+  thinking?: string;
+  sessionName?: string;
+  entryId?: number;
+}) {
+  const [content, setContent] = useState<string | undefined>(thinking);
+  const canFetch = !!(entryId !== undefined && sessionName);
+  const fetchThinking = useCallback(async () => {
+    if (entryId === undefined || !sessionName) return;
+    const r = await fetch(
+      `/my/api/session/thinking?name=${encodeURIComponent(sessionName)}&index=${entryId}`,
+    );
+    const d = await r.json();
+    if (d?.success) setContent(d.thinking);
+  }, [entryId, sessionName]);
+  const { loaded, loading, fetched, setFetched, onToggle, refetch } = useLazyFold(
+    thinking !== undefined,
+    canFetch,
+    fetchThinking,
+  );
+  // Keep content in sync if the thinking prop arrives/changes after mount.
+  useEffect(() => {
+    if (thinking !== undefined) {
+      setContent(thinking);
+      setFetched(true);
+    }
+  }, [thinking]);
+  return (
+    <details
+      className="pl-4 mt-1 border border-border rounded-sm p-2"
+      data-entry-id={entryId}
+      onToggle={onToggle}
+    >
+      <summary>CLICK TO SEE thinking</summary>
+      {loaded && (
+        <>
+          {fetched && entryId !== undefined && sessionName && (
+            <button
+              type="button"
+              onClick={refetch}
+              disabled={loading}
+              className="text-xs text-text-muted border border-border rounded-sm px-2 py-0.5 mt-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {loading ? "Updating…" : "Update"}
+            </button>
+          )}
+          {loading && <div className="text-text-muted text-xs mt-1">Loading…</div>}
+          {!loading && content !== undefined && (
+            <pre className="whitespace-pre-wrap text-xs mt-1">{content}</pre>
+          )}
+        </>
+      )}
+    </details>
+  );
+}
+
 /** Entry payload: body + tool folds, shared by the transcript and the
     context chip's expand panel (must never change outer layout). */
-function EntryBody({ e, sessionName }: { e: Entry; sessionName?: string }) {
+function EntryBody({ e, sessionName, entryId }: { e: Entry; sessionName?: string; entryId?: number }) {
+  const showThinking = e.hasThinking === true || e.thinking !== undefined;
   return (
     <>
       {e.html ? (
@@ -174,6 +258,14 @@ function EntryBody({ e, sessionName }: { e: Entry; sessionName?: string }) {
       ) : e.text ? (
         <div className="entry-body pl-4 whitespace-pre-wrap">{e.text}</div>
       ) : null}
+
+      {showThinking && (
+        <ThinkingFold
+          thinking={e.thinking}
+          sessionName={sessionName}
+          entryId={entryId}
+        />
+      )}
 
       {Array.isArray(e.tools) && e.tools.map((t, i) => <ToolFold key={i} tool={t} sessionName={sessionName} />)}
     </>
@@ -185,13 +277,13 @@ function EntryBody({ e, sessionName }: { e: Entry; sessionName?: string }) {
  * heights, no sticky, no collapse) — the pinned context indicator lives in
  * the container's sticky bar below.
  */
-function Entry({ e, sessionName }: { e: Entry; sessionName?: string }) {
+function Entry({ e, sessionName, entryId }: { e: Entry; sessionName?: string; entryId?: number }) {
   return (
     <div className="mb-sm entry" data-role={e.role || ""}>
       <div className={"relative font-semibold " + (e.role === "user" ? " text-accent-collaboration" : e.role === "system" ? " text-text-muted italic" : " text-text-primary")}>
         {label(e)}
       </div>
-      <EntryBody e={e} sessionName={sessionName} />
+      <EntryBody e={e} sessionName={sessionName} entryId={entryId} />
     </div>
   );
 }
@@ -596,7 +688,7 @@ export default function SessionView(props: BootProps) {
             onClick={(ev) => ev.stopPropagation()}
           >
             <div className="mb-1 text-xs text-text-muted uppercase tracking-wide">pinned message</div>
-            <EntryBody e={barEntry} sessionName={name} />
+            <EntryBody e={barEntry} sessionName={name} entryId={barEntry?.id ?? bar?.index} />
           </div>
         )}
       </div>
@@ -604,7 +696,7 @@ export default function SessionView(props: BootProps) {
         <p className="text-text-muted">Loading session transcript...</p>
       ) : (
         <>
-          {entries.map((e, i) => <Entry key={i} e={e} sessionName={name} />)}
+          {entries.map((e, i) => <Entry key={i} e={e} sessionName={name} entryId={e.id ?? i} />)}
           {optimistic.map((o) => (
             <div key={o.localId} className={"mb-sm entry " + (o.status === "failed" ? "opacity-100" : "opacity-60")} data-role="user" data-optimistic={o.localId}>
               <div className="relative font-semibold text-accent-collaboration">

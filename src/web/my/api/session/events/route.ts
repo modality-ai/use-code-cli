@@ -3,7 +3,7 @@ import { basename, dirname } from "node:path";
 import { sseResponse } from "../../../../../lib/sse";
 import { parseTranscript } from "../../../../../lib/transcript";
 import { aiTool } from "../../../../../scripts/index";
-import { fetchSessionData, resolveSessionTarget } from "../../../session/[name]/session-data";
+import { fetchSessionData, resolveSessionTarget, stripToolResults, stripThinking } from "../../../session/[name]/session-data";
 
 /**
  * SSE stream of live transcript entries for one session.
@@ -46,6 +46,10 @@ export async function GET(request: Request): Promise<Response> {
       try {
         const lines = readFile(transcriptPath, "utf-8").split(/\n/).filter(Boolean);
         entries = parseTranscript(lines);
+        // Lazy-load tool results and thinking: strip them from the pushed
+        // payload so the browser only fetches when a fold is opened.
+        stripToolResults(entries);
+        stripThinking(entries);
       } catch {}
       return {
         success: statusResult.success,

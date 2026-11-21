@@ -208,8 +208,8 @@ describe("SessionView tool fold refetch", () => {
     (window as any).__REACT_DATA__ = { sessionView: { name: "Debug --init", initial } };
     const { container } = render(<SessionView name="Debug --init" initial={initial as any} />);
     await act();
-    // open the fold
-    const summary = container.querySelector("summary") as HTMLElement;
+    // open the tool fold (thinking fold may precede it)
+    const summary = Array.from(container.querySelectorAll("summary")).find((s) => /bash/i.test(s.textContent || "")) as HTMLElement;
     await act(() => { summary.click(); }, 50);
     expect(toolResultCalls.length).toBe(1);
     // Update button should be present

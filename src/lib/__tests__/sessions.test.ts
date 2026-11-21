@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { pauseSession, unpauseSession, interruptFrame } from "../peer";
 import { promptFromLine } from "../sessions";
-import { applySessionNames, splitFilterTerms, matchesSessionFilter, describeSessionFilter, sessionLabel, findSessions, findSessionsFuzzy, pauseSessionResult, unpauseSessionResult, encodeProjectDir, parseTranscriptSessionName, trimValue, compressTranscript, isStopped, duplicateSession, readSessionNames, PROJECTS_DIR, SESSIONS_DIR } from "../sessions";
+import { applySessionNames, splitFilterTerms, matchesSessionFilter, describeSessionFilter, sessionLabel, findSessions, findSessionsFuzzy, pauseSessionResult, unpauseSessionResult, encodeProjectDir, parseTranscriptSessionName, trimValue, compressTranscript, isStopped, duplicateSession, readSessionNames, resolveOfflineSession, findOfflineTranscriptPath, PROJECTS_DIR, SESSIONS_DIR } from "../sessions";
 import { liveSessionStatus, liveSessionWaitingFor } from "../status";
 
 describe("applySessionNames", () => {
@@ -618,6 +618,76 @@ describe("duplicateSession", () => {
       await rm(dir, { recursive: true, force: true });
       await mkdir(SESSIONS_DIR, { recursive: true });
       await writeFile(join(SESSIONS_DIR, "names.json"), JSON.stringify(beforeNames), "utf8");
+    }
+  });
+});
+
+describe("findOfflineTranscriptPath", () => {
+  it("returns undefined for empty sessionId", async () => {
+    expect(await findOfflineTranscriptPath("")).toBeUndefined();
+  });
+
+  it("returns the path when a matching transcript exists", async () => {
+    const { mkdir, writeFile, rm } = await import("node:fs/promises");
+    const { randomUUID } = await import("node:crypto");
+    const { join } = await import("node:path");
+    const cwd = `/tmp/offline-test-${randomUUID()}`;
+    const sessionId = randomUUID();
+    const projectDir = encodeProjectDir(cwd);
+    const dir = join(PROJECTS_DIR, projectDir);
+    await mkdir(dir, { recursive: true });
+    const tp = join(dir, `${sessionId}.jsonl`);
+    await writeFile(tp, JSON.stringify({ type: "user", message: { role: "user", content: "hi", cwd } }) + "\n", "utf8");
+
+    try {
+      expect(await findOfflineTranscriptPath(sessionId)).toBe(tp);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns undefined when no matching transcript exists", async () => {
+    const { randomUUID } = await import("node:crypto");
+    expect(await findOfflineTranscriptPath(randomUUID())).toBeUndefined();
+  });
+});
+
+describe("resolveOfflineSession", () => {
+  it("returns null when no transcript exists", async () => {
+    const { randomUUID } = await import("node:crypto");
+    expect(await resolveOfflineSession(randomUUID())).toBeNull();
+  });
+
+  it("returns null for empty sessionId", async () => {
+    expect(await resolveOfflineSession("")).toBeNull();
+  });
+
+  it("builds a minimal SessionInfo when transcript exists", async () => {
+    const { mkdir, writeFile, rm } = await import("node:fs/promises");
+    const { randomUUID } = await import("node:crypto");
+    const { join } = await import("node:path");
+    const cwd = `/tmp/offline-resolve-${randomUUID()}`;
+    const sessionId = randomUUID();
+    const projectDir = encodeProjectDir(cwd);
+    const dir = join(PROJECTS_DIR, projectDir);
+    await mkdir(dir, { recursive: true });
+    const tp = join(dir, `${sessionId}.jsonl`);
+    await writeFile(tp, JSON.stringify({ type: "user", message: { role: "user", content: "hi" }, cwd }) + "\n", "utf8");
+
+    try {
+      const s = await resolveOfflineSession(sessionId);
+      expect(s).not.toBeNull();
+      expect(s!.sessionId).toBe(sessionId);
+      expect(s!.online).toBe(false);
+      expect(s!.status).toBe("offline");
+      expect(s!.pid).toBe(0);
+      expect(s!.stopped).toBe(false);
+      expect(typeof s!.startedAt).toBe("number");
+      expect(typeof s!.updatedAt).toBe("number");
+      // cwd extracted from transcript
+      expect(s!.cwd).toBe(cwd);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
     }
   });
 });

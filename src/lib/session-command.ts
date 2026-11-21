@@ -10,6 +10,7 @@ import {
   readMonitors,
   type SessionMonitor,
   readSessions,
+  resolveOfflineSession,
   deleteSession,
   duplicateSession,
   readTranscriptMeta,
@@ -192,8 +193,14 @@ export async function session(args: SessionArgs, deps?: SessionDeps) {
   const live = await readSessionsFn(false);
   let matches = findSessions(live, args.target);
   if (matches.length === 0) {
-    // Nothing live matched — include offline sessions recovered from transcripts.
-    matches = findSessions(await readSessionsFn(true), args.target);
+    // Fast path: direct lookup by sessionId (offline) avoids the full scan.
+    const off = await resolveOfflineSession(args.target);
+    if (off) {
+      matches = [off];
+    } else {
+      // Fall back to the full scan for name/prefix matching.
+      matches = findSessions(await readSessionsFn(true), args.target);
+    }
   }
 
   if (matches.length === 0) {
@@ -349,10 +356,12 @@ export async function session(args: SessionArgs, deps?: SessionDeps) {
   if (args.rename !== undefined || args.cwd !== undefined) {
     return performSessionUpdate(s, args.rename, args.cwd);
   }
-  const meta = await readTranscriptMeta(s);
   const rawFile = await transcriptPath(s);
-  const crons = await readCronJobs(s);
-  const monitors = await readMonitors(s);
+  // Fast path for offline sessions: skip transcript metadata/cron/monitor reads
+  // (only transcriptPath + basic fields are needed by the web status path).
+  const meta = s.online ? await readTranscriptMeta(s) : { branch: undefined, hero: undefined, lastPrompt: undefined };
+  const crons = s.online ? await readCronJobs(s) : [];
+  const monitors = s.online ? await readMonitors(s) : [];
   const name = label(s);
 
   const state = s.online ? `${s.status ?? "unknown"}${s.status === "waiting" && s.waitingFor ? " — " + s.waitingFor : ""} · active` : "offline";

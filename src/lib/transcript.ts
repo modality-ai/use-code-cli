@@ -15,6 +15,13 @@ export interface TranscriptEntry {
   text: string;
   html?: string;
   tools?: TranscriptTool[];
+  thinking?: string;
+  hasThinking?: boolean;
+  /** Stable-ish id: physical line index in the transcript file. Survives
+   *  append-only growth (existing lines keep their positions); invalidates
+   *  cleanly on rewrite/truncation. Used for lazy fetches instead of array
+   *  index so a shifted transcript can't return the wrong entry. */
+  id?: number;
 }
 
 /**
@@ -141,7 +148,8 @@ export function parseTranscript(lines: string[]): TranscriptEntry[] {
   // map tool_use_id -> index in entries tools for attaching results
   const toolIndex = new Map<string, { entryIdx: number; toolIdx: number }>();
 
-  for (const line of lines) {
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+    const line = lines[lineIndex]!;
     let obj: any;
     try {
       obj = JSON.parse(line);
@@ -202,7 +210,7 @@ export function parseTranscript(lines: string[]): TranscriptEntry[] {
         // otherwise keep the plain-text path (client renders escaped text).
         if (text) {
           const hasBashTags = /<bash-(stdout|stderr)>/.test(text);
-          entries.push({ role: "user", text, html: hasBashTags ? preHtml(text) : undefined });
+          entries.push({ role: "user", text, html: hasBashTags ? preHtml(text) : undefined, id: lineIndex });
         }
       } else {
         let text = "";
@@ -215,7 +223,7 @@ export function parseTranscript(lines: string[]): TranscriptEntry[] {
         // otherwise keep the plain-text path (client renders escaped text).
         if (text) {
           const hasBashTags = /<bash-(stdout|stderr)>/.test(text);
-          entries.push({ role: "user", text, html: hasBashTags ? preHtml(text) : undefined });
+          entries.push({ role: "user", text, html: hasBashTags ? preHtml(text) : undefined, id: lineIndex });
         }
       }
     } else if (obj.type === "assistant" && obj.message) {
@@ -250,14 +258,22 @@ export function parseTranscript(lines: string[]): TranscriptEntry[] {
       } else if (typeof content === "string") {
         texts.push(content);
       }
-      const text = stripThinkTags(texts.join("\n"));
-      if (text || tools.length) {
+      const joined = texts.join("\n");
+      const thinkMatches = [...joined.matchAll(/<think>([\s\S]*?)<\/think>/g)];
+      const thinking = thinkMatches.length
+        ? thinkMatches.map((m) => m[1]!).join("\n")
+        : undefined;
+      const text = stripThinkTags(joined);
+      if (text || tools.length || thinking) {
         // Markdown only for display; text stays the plain fallback.
         entries.push({
           role: "assistant",
           text,
           html: text ? mdHtml(text) : undefined,
           tools: tools.length ? tools : undefined,
+          thinking,
+          hasThinking: !!thinking,
+          id: lineIndex,
         });
       }
     } else if (obj.type === "system" && obj.subtype === "away_summary") {
@@ -265,7 +281,7 @@ export function parseTranscript(lines: string[]): TranscriptEntry[] {
       // Strip internal reasoning tags, keep the recap text
       const cleaned = recapText(content);
       if (cleaned) {
-        entries.push({ role: "system", text: cleaned });
+        entries.push({ role: "system", text: cleaned, id: lineIndex });
       }
     }
   }

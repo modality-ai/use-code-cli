@@ -741,6 +741,50 @@ export async function transcriptPath(s: { cwd: string; sessionId: string }): Pro
   return undefined;
 }
 
+/**
+ * Build a minimal SessionInfo for an offline session identified by sessionId,
+ * without scanning all sessions/transcripts. Returns null if no transcript file.
+ */
+export async function resolveOfflineSession(sessionId: string): Promise<SessionInfo | null> {
+  const tp = await findOfflineTranscriptPath(sessionId);
+  if (!tp) return null;
+  let cwd: string | undefined;
+  try { cwd = await readTranscriptCwd(tp); } catch { cwd = undefined; }
+  let st;
+  try { st = await stat(tp); } catch { st = undefined; }
+  return {
+    pid: 0,
+    sessionId,
+    cwd: cwd ?? "",
+    startedAt: st?.birthtimeMs ?? 0,
+    updatedAt: st?.mtimeMs ?? 0,
+    status: "offline",
+    online: false,
+    stopped: false,
+    waitingFor: undefined,
+  };
+}
+
+/**
+ * Locate an offline session's transcript by sessionId alone, without scanning
+ * every transcript's contents. Scans project directories for `<id>.jsonl`.
+ * Returns the path if found, else undefined. O(number of project dirs).
+ */
+export async function findOfflineTranscriptPath(sessionId: string): Promise<string | undefined> {
+  if (!sessionId) return undefined;
+  let projects: string[];
+  try {
+    projects = await readdir(PROJECTS_DIR);
+  } catch {
+    return undefined;
+  }
+  for (const project of projects) {
+    const candidate = join(PROJECTS_DIR, project, `${sessionId}.jsonl`);
+    if (await exists(candidate)) return candidate;
+  }
+  return undefined;
+}
+
 async function readChunk(path: string, start: number, length: number): Promise<string> {
   const fh = await open(path, "r");
   try {
