@@ -16,7 +16,6 @@ import {
   recoverPersistedUrl,
   stopTunnel,
 } from "../tunnel";
-import { reconnectDelay, watchdogAction } from "../../scripts/scheduler-tasks/auto-connect";
 
 describe("extractTunnelUrl", () => {
   it("returns null when no url present", () => {
@@ -62,28 +61,6 @@ describe("isCloudflaredSpawnSignature", () => {
   });
   it("rejects a line without the cloudflared binary name", () => {
     expect(isCloudflaredSpawnSignature("sleep 300")).toBe(false);
-  });
-});
-
-describe("reconnectDelay", () => {
-  it("attempt 1 → 1000ms", () => {
-    expect(reconnectDelay(1)).toBe(1000);
-  });
-
-  it("attempt 2 → 2000ms", () => {
-    expect(reconnectDelay(2)).toBe(2000);
-  });
-
-  it("attempt 3 → 4000ms", () => {
-    expect(reconnectDelay(3)).toBe(4000);
-  });
-
-  it("caps at 30000ms", () => {
-    expect(reconnectDelay(10)).toBe(30000);
-  });
-
-  it("attempt 5 → 16000ms", () => {
-    expect(reconnectDelay(5)).toBe(16000);
   });
 });
 
@@ -144,54 +121,6 @@ describe("shouldReplacePersistedUrl", () => {
 
   it("replaces a different url with no liveness marker", () => {
     expect(shouldReplacePersistedUrl(state(OLD, undefined), NEW)).toBe(true);
-  });
-});
-
-describe("watchdogAction", () => {
-  const base = {
-    manualStop: false,
-    processAlive: true,
-    hasUrl: true,
-    backoffPending: false,
-    autoReconnect: true,
-    attempts: 0,
-    maxAttempts: 10,
-  };
-
-  it("stops on manual stop", () => {
-    expect(watchdogAction({ ...base, manualStop: true })).toBe("stop");
-  });
-
-  it("touches the marker while the tunnel runs with a URL", () => {
-    expect(watchdogAction(base)).toBe("touch");
-  });
-
-  it("waits while launching before a URL arrives", () => {
-    expect(watchdogAction({ ...base, hasUrl: false })).toBe("wait");
-  });
-
-  it("relaunches a hung launch that never produced a URL", () => {
-    expect(watchdogAction({ ...base, processAlive: true, hasUrl: false, launchTimedOut: true })).toBe("relaunch");
-  });
-
-  it("stops when hung-launch retries hit the attempts cap", () => {
-    expect(watchdogAction({ ...base, processAlive: true, hasUrl: false, launchTimedOut: true, attempts: 10 })).toBe("stop");
-  });
-
-  it("waits while a backoff relaunch is already scheduled", () => {
-    expect(watchdogAction({ ...base, processAlive: false, backoffPending: true })).toBe("wait");
-  });
-
-  it("relaunches when the exit event was missed", () => {
-    expect(watchdogAction({ ...base, processAlive: false })).toBe("relaunch");
-  });
-
-  it("stops after the attempts cap", () => {
-    expect(watchdogAction({ ...base, processAlive: false, attempts: 10 })).toBe("stop");
-  });
-
-  it("stops when auto-reconnect is off", () => {
-    expect(watchdogAction({ ...base, processAlive: false, autoReconnect: false })).toBe("stop");
   });
 });
 

@@ -16,6 +16,5 @@ describe("scheduler discoverTaskModules", () => {
   it("returns an array of .ts paths", () => {
     const files = discoverTaskModules();
     expect(Array.isArray(files)).toBe(true);
-    expect(files.some((f) => f.endsWith("auto-connect.ts"))).toBe(true);
   });
 });

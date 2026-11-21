@@ -94,10 +94,26 @@ export async function startScheduler(intervalMs: number = 60_000, dir?: string):
   stopScheduler();
   for (const t of tasks) arm(t);
   console.log(`[scheduler] started ${tasks.length} task(s): ${tasks.map((t) => t.name.split("/").pop()).join(", ")}`);
+  // Surface second-granularity modules that second.ts will scan at runtime.
+  try {
+    const { readdirSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const secondDir = join(import.meta.dir, "..", "scripts", "scheduler-second");
+    const secondFiles = readdirSync(secondDir).filter((f) => f.endsWith(".ts") || f.endsWith(".js"));
+    if (secondFiles.length) {
+      console.log(`[scheduler] second-level modules: ${secondFiles.join(", ")}`);
+    }
+  } catch {}
   return tasks;
 }
 
 export function stopScheduler(): void {
+  // Stop second-level intervals too.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const sec = require("../scripts/scheduler-tasks/second");
+    if (typeof sec?.stopSecondScheduler === "function") sec.stopSecondScheduler();
+  } catch {}
   for (const [t, timer] of timers) {
     try {
       if (typeof timer?.stop === "function") timer.stop();

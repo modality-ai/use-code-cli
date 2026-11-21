@@ -142,6 +142,7 @@ async function project(args: ProjectArgs) {
       active,
       updatedAt: proj.updatedAt ? new Date(proj.updatedAt).toISOString() : null,
       path,
+      po: getProjectPo(proj.dir, proj.cwd),
     },
   };
 }

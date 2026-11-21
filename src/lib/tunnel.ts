@@ -14,7 +14,7 @@ import {
 import { open, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import scheduler from "../scripts/scheduler-tasks/auto-connect";
+import scheduler from "../scripts/scheduler-second/auto-connect";
 import { startScheduler as startCronScheduler } from "../runner/scheduler";
 const watchdogAction = scheduler.watchdogAction;
 
@@ -135,12 +135,6 @@ const MAX_RECONNECT_ATTEMPTS = scheduler.MAX_RECONNECT_ATTEMPTS;
 // this deadline instead of waiting forever.
 const LAUNCH_URL_TIMEOUT_MS = scheduler.LAUNCH_URL_TIMEOUT_MS;
 let lastLaunchAt = 0;
-
-// Watchdog: a periodic tick that keeps the persisted liveness marker fresh
-// while the tunnel runs, and relaunches when the exit event was missed (the
-// stream-error path below never runs the reconnect logic, so without this the
-// marker would go stale and a dead tunnel could linger unnoticed).
-type WatchdogAction = "touch" | "relaunch" | "wait" | "stop";
 
 /** The canonical persisted state for a tunnel this instance runs or adopts. */
 function writeCurrentState(url: string) {
@@ -749,7 +743,7 @@ export function clearStaleTunnelUrl() {
 // touch; expose it only for the URL this instance currently runs — an older
 // tunnel's marker kept through the grace window must not read as the current
 // tunnel's liveness (same guard as touchLastAlive).
-export function getTunnelStatus(deps?: TunnelDeps) {
+export function getTunnelStatus() {
   const persisted = readPersistedState();
   // tunnelUrl must be non-null too: a normalized state file with url null
   // would otherwise satisfy both-null equality and read as current liveness.

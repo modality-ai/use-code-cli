@@ -11,9 +11,9 @@ import { withLock } from "./file-lock";
  *
  * The file is read-modify-written, so every write takes the lock.
  */
-const STATE_DIR = join(homedir(), ".use-code-cli");
-const REPLY_FILE = join(STATE_DIR, "talk-replies.json");
-const LOCK_FILE = join(STATE_DIR, "talk-state.lock");
+function stateDir(): string { return join(process.env.HOME || homedir(), ".use-code-cli"); }
+function replyFile(): string { return join(stateDir(), "talk-replies.json"); }
+function lockFile(): string { return join(stateDir(), "talk-state.lock"); }
 
 /** Bound the file so a broken caller cannot grow it without limit. */
 const MAX_ENTRIES = 200;
@@ -23,6 +23,10 @@ export interface ReplyRecord {
   inReplyTo: string;
   /** sessionId of the session the answer was delivered to. */
   targetSessionId: string;
+  /** sessionId of the session that originally sent the message. */
+  senderSessionId?: string;
+  /** Name of the original sender. */
+  senderName?: string;
   /** msg_id assigned to the answer. */
   msgId: string;
   /** Milliseconds since the epoch. */
@@ -34,7 +38,7 @@ function keyOf(inReplyTo: string, targetSessionId: string): string {
 }
 
 async function writeJson(path: string, value: unknown): Promise<void> {
-  await mkdir(STATE_DIR, { recursive: true });
+  await mkdir(stateDir(), { recursive: true });
   const tmp = `${path}.tmp.${process.pid}`;
   await writeFile(tmp, prettyJsonFile(value));
   await rename(tmp, path);
@@ -63,7 +67,7 @@ function isReplyRecord(value: unknown): value is ReplyRecord {
 }
 
 async function loadReplies(): Promise<ReplyRecord[]> {
-  const parsed = await readJson(REPLY_FILE);
+  const parsed = await readJson(replyFile());
   return Array.isArray(parsed) ? parsed.filter(isReplyRecord) : [];
 }
 
@@ -80,13 +84,13 @@ export async function findReply(
 
 /** Remember a sent reply. Atomic write: a crash never corrupts the ledger. */
 export async function recordReply(record: ReplyRecord): Promise<void> {
-  await withLock(LOCK_FILE, async () => {
+  await withLock(lockFile(), async () => {
     const key = keyOf(record.inReplyTo, record.targetSessionId);
     const entries = (await loadReplies()).filter(
       (r) => keyOf(r.inReplyTo, r.targetSessionId) !== key,
     );
     entries.push(record);
-    await writeJson(REPLY_FILE, entries.slice(-MAX_ENTRIES));
+    await writeJson(replyFile(), entries.slice(-MAX_ENTRIES));
   });
 }
 
@@ -100,12 +104,32 @@ export function pruneSelfReplies(
 
 /** Remove ledger entries whose target is the sender session (self-replies). */
 export async function cleanRepliesForSender(senderSessionId: string): Promise<number> {
-  return withLock(LOCK_FILE, async () => {
+  return withLock(lockFile(), async () => {
     const before = await loadReplies();
     const kept = pruneSelfReplies(before, senderSessionId);
     const removed = before.length - kept.length;
     if (removed > 0) {
-      await writeJson(REPLY_FILE, kept.slice(-MAX_ENTRIES));
+      await writeJson(replyFile(), kept.slice(-MAX_ENTRIES));
+    }
+    return removed;
+  });
+}
+
+/** All reply records whose target session is `targetSessionId`. */
+export async function findRepliesForTarget(targetSessionId: string): Promise<ReplyRecord[]> {
+  return (await loadReplies()).filter((r) => r.targetSessionId === targetSessionId);
+}
+
+/** Remove reply records matching `inReplyTo` + `targetSessionId`. Returns count removed. */
+export async function removeReply(inReplyTo: string, targetSessionId: string): Promise<number> {
+  return withLock(lockFile(), async () => {
+    const before = await loadReplies();
+    const kept = before.filter(
+      (r) => !(r.inReplyTo === inReplyTo && r.targetSessionId === targetSessionId),
+    );
+    const removed = before.length - kept.length;
+    if (removed > 0) {
+      await writeJson(replyFile(), kept.slice(-MAX_ENTRIES));
     }
     return removed;
   });

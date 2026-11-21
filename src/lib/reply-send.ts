@@ -126,6 +126,8 @@ export async function sendWithReply({
       await recordReplyFn({
         inReplyTo,
         targetSessionId: session.sessionId,
+        senderSessionId: sender?.sessionId,
+        senderName: senderName ?? undefined,
         msgId,
         at: Date.now(),
       });

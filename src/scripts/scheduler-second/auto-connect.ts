@@ -1,44 +1,18 @@
 // Standalone tunnel auto-reconnect scheduling extracted from src/lib/tunnel.ts.
-// Owns the backoff helper, the reconnect/watchdog timing constants, and the
-// timer-management logic (schedule/clear) so it can be reused and tested in
-// isolation. Behavior must stay identical to the previous inline version.
+// Owns the reconnect/watchdog timing constants and the timer-management logic
+// (schedule/clear) so it can be reused and tested in isolation. Behavior must
+// stay identical to the previous inline version.
 
-/** Exponential backoff (capped at 30s) for reconnect attempts (1-based). */
-export function reconnectDelay(attempt: number): number {
-  return Math.min(30000, 1000 * Math.pow(2, attempt - 1));
-}
-
-export const MAX_RECONNECT_ATTEMPTS = 10;
-export const schedule: string = "* * * * *";
+const MAX_RECONNECT_ATTEMPTS = 10;
+const LAUNCH_URL_TIMEOUT_MS = 60_000;
+export const schedule: string = "*/30 * * * * *";
 export const timeZone: string | undefined = undefined;
-export const intervalMs: number | undefined = undefined;
-export const LAUNCH_URL_TIMEOUT_MS = 60_000;
 
-export interface ReconnectState {
+interface ReconnectState {
   reconnectAttempts: number;
   reconnectPending: boolean;
   manualStop: boolean;
   autoReconnectEnabled: boolean;
-}
-
-export interface ReconnectDeps {
-  /** Mutable state container. May be omitted when getter/setter adapters are used. */
-  state?: ReconnectState;
-  getAttempts?: () => number;
-  setAttempts?: (n: number) => void;
-  getPending?: () => boolean;
-  setPending?: (v: boolean) => void;
-  isManualStop?: () => boolean;
-  setManualStop?: (v: boolean) => void;
-  isAutoReconnectEnabled?: () => boolean;
-  setAutoReconnectEnabled?: (v: boolean) => void;
-  manualStop?: boolean;
-  autoReconnectEnabled?: boolean;
-  autoReconnect?: boolean;
-  launch?: () => void | Promise<void>;
-  launchTunnel?: () => void | Promise<void>;
-  tunnelEvent?: (msg: string) => void;
-  log?: (msg: string) => void;
 }
 
 function resolveState(input: any): ReconnectState {
@@ -112,12 +86,6 @@ function resolveState(input: any): ReconnectState {
   };
 }
 
-function resolveLaunch(input: any): () => void | Promise<void> {
-  const fn = input?.launch ?? input?.launchTunnel ?? input?.launchTunnelFn;
-  if (typeof fn === "function") return fn;
-  return () => {};
-}
-
 function resolveEvent(input: any): (msg: string) => void {
   const fn = input?.tunnelEvent ?? input?.log ?? input?.onEvent;
   if (typeof fn === "function") return fn;
@@ -142,9 +110,8 @@ export function scheduleReconnect(...args: any[]): any {
   const state = resolveState(input);
 
   state.reconnectAttempts += 1;
-  const delay = reconnectDelay(state.reconnectAttempts);
   const event = resolveEvent(input);
-  event(`scheduling reconnect attempt ${state.reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS} in ${delay}ms`);
+  event(`scheduling reconnect attempt ${state.reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}`);
 
   // clear any pending reconnect
   state.reconnectPending = false;
@@ -154,7 +121,7 @@ export function scheduleReconnect(...args: any[]): any {
   return state.reconnectPending;
 }
 
-export interface ReconnectScheduler {
+interface ReconnectScheduler {
   scheduleReconnect: () => any;
   clearReconnectTimer: () => void;
   state: ReconnectState;
@@ -182,7 +149,7 @@ export function createReconnectScheduler(options: any = {}): ReconnectScheduler 
 }
 
 
-export type WatchdogAction = "touch" | "relaunch" | "wait" | "stop";
+type WatchdogAction = "touch" | "relaunch" | "wait" | "stop";
 
 /** Pure decision for one watchdog tick (unit-tested without timers). */
 export function watchdogAction(input: {
@@ -209,7 +176,6 @@ export function watchdogAction(input: {
 }
 
 export const scheduler = {
-  reconnectDelay,
   MAX_RECONNECT_ATTEMPTS,
   LAUNCH_URL_TIMEOUT_MS,
   scheduleReconnect,
@@ -217,7 +183,6 @@ export const scheduler = {
   watchdogAction,
   setWatchdogTick,
   run,
-  intervalMs,
   schedule,
   timeZone,
 };

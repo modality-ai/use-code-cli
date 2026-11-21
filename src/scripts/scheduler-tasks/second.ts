@@ -49,7 +49,7 @@ export async function scan(dir?: string): Promise<SecondModule[]> {
   schedules.length = 0;
 
   const base = dir ?? secondDir();
-  const dirs = [base, join(base, "__tests__")];
+  const dirs = [base];
   let files: string[] = [];
   for (const d of dirs) {
     try {
@@ -94,15 +94,57 @@ export async function scan(dir?: string): Promise<SecondModule[]> {
   return loaded;
 }
 
-export async function run(dir?: string): Promise<void> {
-  const mods = await scan(dir);
-  for (const m of mods) {
-    try {
-      await m.run();
-    } catch {
-      // Swallow; task handles its own diagnostics.
+let armed = false;
+const intervals: any[] = [];
+const inFlight = new Set<SecondModule>();
+
+function intervalMsFor(m: SecondModule): number {
+  if (typeof m.intervalMs === "number" && m.intervalMs > 0) return m.intervalMs;
+  const sched = m.schedule;
+  if (typeof sched === "string") {
+    const fields = sched.trim().split(/\s+/);
+    if (fields.length === 6) {
+      const sec = fields[0] as string;
+      if (!sec) return 60000;
+      const mSec = sec.match(/^\*\/(\d+)$/);
+      if (mSec) return Math.max(1000, parseInt(mSec[1] as string, 10) * 1000);
+      if (sec === "*") return 1000;
+      const n = parseInt(sec, 10);
+      if (!isNaN(n)) return 60000; // fixed second → per minute
     }
+  }
+  return 60000;
+}
+
+export function stopSecondScheduler(): void {
+  for (const id of intervals) {
+    try {
+      if (typeof id?.stop === "function") id.stop();
+      else { clearInterval(id); clearTimeout(id); }
+    } catch {}
+  }
+  intervals.length = 0;
+  inFlight.clear();
+  armed = false;
+}
+
+export async function run(dir?: string): Promise<void> {
+  if (armed) stopSecondScheduler(); // restartable: never accumulate timers
+  const mods = await scan(dir);
+  armed = true;
+  for (const m of mods) {
+    const ms = intervalMsFor(m);
+    const tick = async () => {
+      if (inFlight.has(m)) return; // skip overlapping tick
+      inFlight.add(m);
+      try { await m.run(); } catch {} finally { inFlight.delete(m); }
+    };
+    const id = setInterval(() => { void tick(); }, ms);
+    try { id?.unref?.(); } catch {}
+    intervals.push(id);
+    // run once immediately
+    void tick();
   }
 }
 
-export default { schedule, timeZone, parseSchedule, modules, schedules, scan, run };
+export default { schedule, timeZone, parseSchedule, modules, schedules, scan, run, stopSecondScheduler };

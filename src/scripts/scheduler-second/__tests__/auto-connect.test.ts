@@ -1,20 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import {
-  reconnectDelay,
   watchdogAction,
   scheduleReconnect,
   clearReconnectTimer,
   createReconnectScheduler,
 } from "../auto-connect";
-
-describe("auto-connect reconnectDelay", () => {
-  it("attempt 1 → 1000ms", () => {
-    expect(reconnectDelay(1)).toBe(1000);
-  });
-  it("caps at 30000ms", () => {
-    expect(reconnectDelay(10)).toBe(30000);
-  });
-});
 
 describe("auto-connect watchdogAction", () => {
   it("returns stop when manualStop", () => {
