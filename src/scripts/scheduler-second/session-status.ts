@@ -45,7 +45,7 @@ function persist(map: Map<string, string>): void {
 type SessionRow = { sessionId?: string; status?: string; name?: string; cwd?: string };
 
 export interface SessionStatusDeps {
-  aiTool?: { execute: (args: any) => Promise<any> };
+  aiTool?: { execute: (args: unknown) => Promise<unknown> };
   liveSessions?: () => Promise<LiveSession[]>;
   deliver?: (session: LiveSession, message: string, msgId?: string) => Promise<string>;
   findRepliesForTarget?: (targetSessionId: string) => Promise<any[]>;
@@ -77,8 +77,9 @@ export async function run(deps?: SessionStatusDeps): Promise<void> {
   const lockPath = join(stateDir(), "session-status.lock");
   try {
     await withLock(lockPath, async () => {
-    const res: any = await aiToolFn.execute({ command: "sessions", json: true } as any);
-    const rows: SessionRow[] = Array.isArray(res?.data) ? res.data : [];
+    const res: unknown = await aiToolFn.execute({ command: "sessions", json: true } as { command: string; json: boolean });
+    const r = res as { data?: unknown };
+    const rows: SessionRow[] = Array.isArray(r.data) ? (r.data as SessionRow[]) : [];
     const current = new Map<string, string>();
     const rowById = new Map<string, SessionRow>();
     for (const r of rows) {
@@ -94,7 +95,7 @@ export async function run(deps?: SessionStatusDeps): Promise<void> {
       for (const [id, status] of current) {
         const prev = lastStatuses.get(id);
         if (prev !== undefined && prev !== status) {
-          console.log(`session-status: ${id} ${prev} -> ${status}`);
+          console.log(`session-status: ${id} ${prev} -> ${status} @ ${new Date().toISOString()}`);
         }
         // Trigger only on busy -> idle transition.
         if (prev === "busy" && status === "idle") {
@@ -156,7 +157,7 @@ async function alertPo(
   session: SessionRow,
   live: LiveSession[],
   deliverFn: (session: LiveSession, message: string, msgId?: string) => Promise<string>,
-  aiToolFn: { execute: (args: any) => Promise<any> },
+  aiToolFn: { execute: (args: unknown) => Promise<unknown> },
   message: string,
 ): Promise<void> {
   try {

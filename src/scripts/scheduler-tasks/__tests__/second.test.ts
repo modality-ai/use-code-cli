@@ -1,0 +1,32 @@
+import { describe, expect, it } from "bun:test";
+import { join } from "node:path";
+import * as second from "../second";
+
+describe("second parseSchedule", () => {
+  it("validates 5- and 6-field cron expressions", () => {
+    const five = second.parseSchedule("* * * * *");
+    expect(five?.valid).toBe(true);
+    expect(five?.sixStar).toBe(false);
+    expect(five?.fields.length).toBe(5);
+
+    const six = second.parseSchedule("* * * * * *");
+    expect(six?.valid).toBe(true);
+    expect(six?.sixStar).toBe(true);
+    expect(six?.fields.length).toBe(6);
+  });
+
+  it("rejects non-string and wrong field counts", () => {
+    expect(second.parseSchedule(42)).toBeNull();
+    expect(second.parseSchedule("* * *").valid).toBe(false);
+    expect(second.parseSchedule("* * * * * * *").valid).toBe(false);
+  });
+});
+
+describe("second scan", () => {
+  it("returns loaded modules without mutating global modules", async () => {
+    const before = second.modules.length;
+    const loaded = await second.scan(join(import.meta.dir, "fixture"));
+    expect(Array.isArray(loaded)).toBe(true);
+    expect(second.modules.length).toBe(before);
+  });
+});
