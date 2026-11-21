@@ -94,6 +94,13 @@ describe("sendWithReply", () => {
     expect(delivered[0]!.body).toContain("--one-way");
   });
 
+  it("does not record the reply when --one-way even with --in-reply-to", async () => {
+    const { deps, recorded } = makeDeps();
+    const res = await sendWithReply({ session, message: "hi", inReplyTo: "msg-1", oneWay: true, deps });
+    expect(res.success).toBe(true);
+    expect(recorded).toHaveLength(0);
+  });
+
   it("records the reply in the ledger on --in-reply-to", async () => {
     const { deps, recorded } = makeDeps();
     const res = await sendWithReply({ session, message: "hi", inReplyTo: "msg-1", deps });

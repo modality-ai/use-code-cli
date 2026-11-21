@@ -114,7 +114,9 @@ export async function sendWithReply({
     notes.push("message looks like an automatic reply — no reply instruction appended.");
   }
 
-  if (inReplyTo) {
+  // --one-way is fire-and-forget: never record it in the reply ledger, so
+  // the ledger only tracks messages that actually expect an answer.
+  if (inReplyTo && !oneWay) {
     try {
       await recordReplyFn({
         inReplyTo,

@@ -14,6 +14,9 @@ import {
 import { open, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import scheduler from "../scripts/scheduler-tasks/auto-connect";
+import { startScheduler as startCronScheduler } from "../runner/scheduler";
+const watchdogAction = scheduler.watchdogAction;
 
 function tunnelStateDir(): string {
   return join(process.env.HOME || homedir(), ".use-code-cli");
@@ -86,10 +89,6 @@ export function extractTunnelUrl(chunk: string): string | null {
   return m ? m[0] : null;
 }
 
-// Exponential backoff (capped at 30s) for reconnect attempts (1-based).
-export function reconnectDelay(attempt: number): number {
-  return Math.min(30000, 1000 * Math.pow(2, attempt - 1));
-}
 
 const sessions = new Map<string, TunnelSession>();
 let tunnelUrl: string | null = null;
@@ -127,49 +126,21 @@ export function getLocalProjectUrl(): string {
 
 let autoReconnectEnabled = false;
 let manualStop = false;
-let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let reconnectPending = false;
 let reconnectAttempts = 0;
-const MAX_RECONNECT_ATTEMPTS = 10;
+const MAX_RECONNECT_ATTEMPTS = scheduler.MAX_RECONNECT_ATTEMPTS;
 
 // When the current launch started (0 = none). A process that stays alive but
 // never produces a URL is hung: the watchdog kills and relaunches it after
 // this deadline instead of waiting forever.
-const LAUNCH_URL_TIMEOUT_MS = 60_000;
+const LAUNCH_URL_TIMEOUT_MS = scheduler.LAUNCH_URL_TIMEOUT_MS;
 let lastLaunchAt = 0;
 
 // Watchdog: a periodic tick that keeps the persisted liveness marker fresh
 // while the tunnel runs, and relaunches when the exit event was missed (the
 // stream-error path below never runs the reconnect logic, so without this the
 // marker would go stale and a dead tunnel could linger unnoticed).
-const WATCHDOG_INTERVAL_MS = 30_000;
-let watchdogTimer: ReturnType<typeof setInterval> | null = null;
-
 type WatchdogAction = "touch" | "relaunch" | "wait" | "stop";
-
-/** Pure decision for one watchdog tick (unit-tested without timers). */
-export function watchdogAction(input: {
-  manualStop: boolean;
-  processAlive: boolean;
-  hasUrl: boolean;
-  launchTimedOut?: boolean;
-  backoffPending: boolean;
-  autoReconnect: boolean;
-  attempts: number;
-  maxAttempts: number;
-}): WatchdogAction {
-  if (input.manualStop) return "stop";
-  if (input.processAlive) {
-    if (input.hasUrl) return "touch";
-    // A launch that never produced a URL is hung: retry until the cap.
-    if (input.launchTimedOut) {
-      return input.attempts < input.maxAttempts ? "relaunch" : "stop";
-    }
-    return "wait";
-  }
-  if (input.backoffPending) return "wait"; // the exit handler already scheduled a relaunch
-  if (input.autoReconnect && input.attempts < input.maxAttempts) return "relaunch";
-  return "stop";
-}
 
 /** The canonical persisted state for a tunnel this instance runs or adopts. */
 function writeCurrentState(url: string) {
@@ -203,16 +174,22 @@ function touchLastAlive() {
   });
 }
 
-function stopWatchdog() {
-  if (watchdogTimer) {
-    clearInterval(watchdogTimer);
-    watchdogTimer = null;
-  }
-}
+let watchdogDisabled = false;
 
-function startWatchdog() {
-  if (watchdogTimer) return;
-  watchdogTimer = setInterval(() => {
+function runWatchdogTick() {
+  if (watchdogDisabled) return;
+  if (reconnectPending && !manualStop && autoReconnectEnabled) {
+    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      reconnectPending = false;
+      autoReconnectEnabled = false;
+      watchdogDisabled = true;
+      tunnelEvent("reconnect attempts exhausted — auto-reconnect disabled");
+      return;
+    }
+    reconnectPending = false;
+    void launchTunnel().catch(() => {});
+    return;
+  }
     const launchTimedOut =
       !tunnelUrl && isTunnelAlive() && lastLaunchAt > 0 &&
       Date.now() - lastLaunchAt > LAUNCH_URL_TIMEOUT_MS;
@@ -221,7 +198,7 @@ function startWatchdog() {
       processAlive: isTunnelAlive(),
       hasUrl: !!tunnelUrl,
       launchTimedOut,
-      backoffPending: reconnectTimer !== null,
+      backoffPending: reconnectPending,
       autoReconnect: autoReconnectEnabled,
       attempts: reconnectAttempts,
       maxAttempts: MAX_RECONNECT_ATTEMPTS,
@@ -229,10 +206,6 @@ function startWatchdog() {
     if (action === "touch") touchLastAlive();
     else if (action === "relaunch") {
       if (launchTimedOut) {
-        // The process is hung without a URL — kill it and relaunch directly.
-        // scheduleReconnect's timer no-ops here (autoReconnect stays false
-        // until a URL is ever extracted), so the watchdog's own interval is
-        // the pacing, and watchdogAction stops at the attempts cap.
         tunnelEvent(
           `watchdog: launch produced no URL within ${LAUNCH_URL_TIMEOUT_MS / 1000}s — ` +
           `killing the hung process and relaunching (attempt ${reconnectAttempts + 1}/${MAX_RECONNECT_ATTEMPTS})`,
@@ -244,9 +217,6 @@ function startWatchdog() {
         void launchTunnel().catch(() => {});
       } else {
         void (async () => {
-          // An adopted orphan cloudflared can still be serving the URL after a
-          // server restart — only relaunch when nothing answers for it. Validate
-          // the persisted URL before probing it (same guard as reconcile).
           const url = tunnelUrl ?? readPersistedState()?.url ?? null;
           if (url && isPersistableTunnelUrl(url)) {
             const probe = await isUrlAlive(url);
@@ -265,16 +235,11 @@ function startWatchdog() {
         `watchdog: stopping supervision ` +
         `(${launchTimedOut ? "launch-timeout cap reached" : manualStop ? "manual stop" : "reconnect cap reached"})`,
       );
-      // Stopping at the launch-timeout cap leaves a hung process alive with no
-      // further watchdog ticks — kill it so nothing lingers untracked.
       if (launchTimedOut && activeProc && activeProc.exitCode === null) {
         try { activeProc.kill(); } catch {}
       }
-      stopWatchdog();
+      watchdogDisabled = true;
     }
-  }, WATCHDOG_INTERVAL_MS);
-  // Don't keep the process alive just for the watchdog after shutdown.
-  watchdogTimer.unref?.();
 }
 
 export function readPersistedState(): PersistedTunnelState | null {
@@ -505,10 +470,7 @@ function pruneSessions() {
 }
 
 function clearReconnectTimer() {
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
-  }
+  reconnectPending = false;
 }
 
 // Stale untracked cloudflared processes (orphans from a killed server run)
@@ -557,15 +519,16 @@ function killStaleCloudflared(keepPids: Iterable<number>, deps?: TunnelDeps): nu
 // Shared by the exit handler and the watchdog so both reconnect paths follow
 // the same backoff schedule with the same guards.
 function scheduleReconnect() {
-  reconnectAttempts += 1;
-  const delay = reconnectDelay(reconnectAttempts);
-  tunnelEvent(`scheduling reconnect attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS} in ${delay}ms`);
-  clearReconnectTimer();
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    if (manualStop || !autoReconnectEnabled) return;
-    void launchTunnel();
-  }, delay);
+  scheduler.scheduleReconnect({
+    getAttempts: () => reconnectAttempts,
+    setAttempts: (n: number) => { reconnectAttempts = n; },
+    getPending: () => reconnectPending,
+    setPending: (v: boolean) => { reconnectPending = v; },
+    isManualStop: () => manualStop,
+    isAutoReconnectEnabled: () => autoReconnectEnabled,
+    launch: () => { void launchTunnel(); },
+    tunnelEvent,
+  });
 }
 
 
@@ -663,7 +626,6 @@ export async function launchTunnel(deps?: TunnelDeps): Promise<{ id: string; ses
   lastLaunchAt = Date.now();
   tunnelEvent(`launched cloudflared pid ${proc.pid} → ${projectUrl}`);
   try { writeFileSync(cloudflaredPidFile(), String(proc.pid)); } catch {}
-  startWatchdog();
   const s: TunnelSession = { id, proc, output: [], done: false, exitCode: null, listeners: new Set() };
   pruneSessions();
   sessions.set(id, s);
@@ -823,6 +785,7 @@ export async function startTunnel(deps?: TunnelDeps) {
   tunnelEvent("startTunnel: manual start requested");
   manualStop = false;
   autoReconnectEnabled = false;
+  watchdogDisabled = false;
   clearReconnectTimer();
   reconnectAttempts = 0;
   return launchTunnel(deps);
@@ -840,7 +803,7 @@ export async function stopTunnel(deps?: TunnelDeps) {
   manualStop = true;
   autoReconnectEnabled = false;
   clearReconnectTimer();
-  stopWatchdog();
+  watchdogDisabled = true;
   reconnectAttempts = 0;
   if (activeProc) {
     try { activeProc.kill(); } catch {}
@@ -887,7 +850,11 @@ export async function stopTunnel(deps?: TunnelDeps) {
 
 // Server-side bootstrap entry: ensure module loaded and recover any persisted
 // tunnel URL so status is accurate without requiring a web request.
-export async function initTunnel() {
+export async function initTunnel(server?: { hostname?: string; port?: number } | null) {
+  if (server) registerLocalServer(server);
+  watchdogDisabled = false;
+  scheduler.setWatchdogTick(runWatchdogTick);
+  void startCronScheduler();
   const state = await restoreTunnel();
   // The detached cloudflared often outlives the server — restoreTunnel adopts
   // it when its URL still answers. Only when no URL survived (nothing to

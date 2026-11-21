@@ -5,7 +5,6 @@ import { join } from "node:path";
 import {
   extractTunnelUrl,
   redactTunnelUrl,
-  reconnectDelay,
   getTunnelStatus,
   getSession,
   readPersistedState,
@@ -14,10 +13,10 @@ import {
   isRecentlyAlive,
   shouldReplacePersistedUrl,
   isCloudflaredSpawnSignature,
-  watchdogAction,
   recoverPersistedUrl,
   stopTunnel,
 } from "../tunnel";
+import { reconnectDelay, watchdogAction } from "../../scripts/scheduler-tasks/auto-connect";
 
 describe("extractTunnelUrl", () => {
   it("returns null when no url present", () => {
