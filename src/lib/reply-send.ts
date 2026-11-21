@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { currentSession, deliver, interrupt, liveSessions, type LiveSession } from "./peer";
 import { appendReplyInstruction, hasReplyInstruction, isAutoReply } from "./reply";
-import { findReply, recordReply } from "./reply-ledger";
+import { cleanRepliesForSender, findReply, recordReply } from "./reply-ledger";
 import { sessionLabel as label } from "./sessions";
 
 type ReplyHint =
@@ -26,6 +26,7 @@ interface SendWithReplyArgs {
 export interface SendWithReplyDeps {
   findReply?: (inReplyTo: string, targetSessionId: string) => Promise<{ at: number; msgId: string } | undefined>;
   recordReply?: (record: { inReplyTo: string; targetSessionId: string; msgId: string; at: number }) => Promise<void>;
+  cleanRepliesForSender?: (senderSessionId: string) => Promise<number>;
   currentSession?: (sessions?: LiveSession[]) => Promise<LiveSession | undefined>;
   liveSessions?: () => Promise<LiveSession[]>;
   deliver?: (session: LiveSession, body: string, msgId?: string, deps?: { kill?: (pid: number, signal: NodeJS.Signals) => void }) => Promise<string>;
@@ -50,6 +51,7 @@ export async function sendWithReply({
 }: SendWithReplyArgs) {
   const findReplyFn = deps?.findReply ?? findReply;
   const recordReplyFn = deps?.recordReply ?? recordReply;
+  const cleanRepliesForSenderFn = deps?.cleanRepliesForSender ?? cleanRepliesForSender;
   const currentSessionFn = deps?.currentSession ?? currentSession;
   const liveSessionsFn = deps?.liveSessions ?? liveSessions;
   const deliverFn = deps?.deliver ?? deliver;
@@ -68,6 +70,9 @@ export async function sendWithReply({
 
   const sender = await currentSessionFn(sessions ?? (await liveSessionsFn()));
   const senderName = sender ? labelFn(sender) : undefined;
+  if (sender) {
+    try { await cleanRepliesForSenderFn(sender.sessionId); } catch {}
+  }
 
   let replyHint: ReplyHint;
   if (oneWay) {

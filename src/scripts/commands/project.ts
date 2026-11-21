@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { CLICommand } from "modality-cli-kit";
 import { formatTime, plural } from "../../lib/output/format";
 import { findProject, readProjects, type ProjectInfo } from "../../lib/projects";
-import { getProjectPo, setProjectPo } from "../../lib/project-po";
+import { getProjectPo, setProjectPoAsync } from "../../lib/project-po";
 import { encodeProjectDir, PROJECTS_DIR, readSessions } from "../../lib/sessions";
 import { autoclean } from "../../lib/autoclean";
 
@@ -110,7 +110,7 @@ async function project(args: ProjectArgs) {
   }
 
   if (args.po) {
-    setProjectPo(proj.dir, args.po);
+    await setProjectPoAsync(proj.dir, args.po);
     return {
       success: true,
       message: `po set to "${args.po}" for ${proj.cwd}`,

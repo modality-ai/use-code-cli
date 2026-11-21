@@ -1,8 +1,8 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { mkdir, open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
-import { setTimeout as sleep } from "node:timers/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { prettyJsonFile } from "./output/json";
+import { withLock } from "./file-lock";
 
 /**
  * Small per-user state file for loop safety: which msg_ids this machine
@@ -17,10 +17,6 @@ const LOCK_FILE = join(STATE_DIR, "talk-state.lock");
 
 /** Bound the file so a broken caller cannot grow it without limit. */
 const MAX_ENTRIES = 200;
-
-const LOCK_TIMEOUT_MS = 2000;
-const LOCK_STALE_MS = 5000;
-const LOCK_RETRY_MS = 25;
 
 export interface ReplyRecord {
   /** msg_id of the message being answered. */
@@ -53,48 +49,7 @@ async function readJson(path: string): Promise<unknown> {
   }
 }
 
-/**
- * Take the state lock before a read-modify-write. `open(..., "wx")` is atomic,
- * so two concurrent replies cannot both read the same old ledger and drop one
- * entry. A lock left by a crashed process is broken after LOCK_STALE_MS.
- */
-async function withLock<T>(fn: () => Promise<T>): Promise<T> {
-  await mkdir(STATE_DIR, { recursive: true });
-  const deadline = Date.now() + LOCK_TIMEOUT_MS;
 
-  for (;;) {
-    try {
-      const handle = await open(LOCK_FILE, "wx");
-      await handle.writeFile(String(process.pid));
-      await handle.close();
-      break;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-      if (await isStaleLock()) {
-        await unlink(LOCK_FILE).catch(() => {});
-        continue;
-      }
-      if (Date.now() >= deadline) {
-        throw new Error(`Timed out waiting for the state lock (${LOCK_FILE})`);
-      }
-      await sleep(LOCK_RETRY_MS);
-    }
-  }
-
-  try {
-    return await fn();
-  } finally {
-    await unlink(LOCK_FILE).catch(() => {});
-  }
-}
-
-async function isStaleLock(): Promise<boolean> {
-  try {
-    return Date.now() - (await stat(LOCK_FILE)).mtimeMs > LOCK_STALE_MS;
-  } catch {
-    return false;
-  }
-}
 
 function isReplyRecord(value: unknown): value is ReplyRecord {
   if (typeof value !== "object" || value === null) return false;
@@ -125,12 +80,33 @@ export async function findReply(
 
 /** Remember a sent reply. Atomic write: a crash never corrupts the ledger. */
 export async function recordReply(record: ReplyRecord): Promise<void> {
-  await withLock(async () => {
+  await withLock(LOCK_FILE, async () => {
     const key = keyOf(record.inReplyTo, record.targetSessionId);
     const entries = (await loadReplies()).filter(
       (r) => keyOf(r.inReplyTo, r.targetSessionId) !== key,
     );
     entries.push(record);
     await writeJson(REPLY_FILE, entries.slice(-MAX_ENTRIES));
+  });
+}
+
+/** Pure core: drop ledger entries whose target is the sender session (self-replies). */
+export function pruneSelfReplies(
+  records: ReplyRecord[],
+  senderSessionId: string,
+): ReplyRecord[] {
+  return records.filter((r) => r.targetSessionId !== senderSessionId);
+}
+
+/** Remove ledger entries whose target is the sender session (self-replies). */
+export async function cleanRepliesForSender(senderSessionId: string): Promise<number> {
+  return withLock(LOCK_FILE, async () => {
+    const before = await loadReplies();
+    const kept = pruneSelfReplies(before, senderSessionId);
+    const removed = before.length - kept.length;
+    if (removed > 0) {
+      await writeJson(REPLY_FILE, kept.slice(-MAX_ENTRIES));
+    }
+    return removed;
   });
 }

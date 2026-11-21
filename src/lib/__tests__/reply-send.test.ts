@@ -16,6 +16,7 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
   const deps = {
     findReply: async () => undefined,
     recordReply: async (r: unknown) => { recorded.push(r); },
+    cleanRepliesForSender: async () => 0,
     currentSession: async () => ({ pid: 7, sessionId: "sender-session", name: "sender", cwd: "/tmp/proj" } as LiveSession),
     liveSessions: async () => [],
     deliver: async (_s: LiveSession, body: string, msgId: string) => {
@@ -156,5 +157,26 @@ describe("sendWithReply", () => {
     const res = await sendWithReply({ session: busySession, message: "hi", deps });
     expect(res.success).toBe(true);
     expect(delivered).toHaveLength(1);
+  });
+
+  it("cleans self-replies for the sender when a sender is present", async () => {
+    const cleaned: string[] = [];
+    const { deps } = makeDeps({
+      cleanRepliesForSender: async (sid: string) => { cleaned.push(sid); return 2; },
+    });
+    const res = await sendWithReply({ session, message: "hi", deps });
+    expect(res.success).toBe(true);
+    expect(cleaned).toEqual(["sender-session"]);
+  });
+
+  it("does not clean self-replies when there is no sender", async () => {
+    const cleaned: string[] = [];
+    const { deps } = makeDeps({
+      currentSession: async () => undefined,
+      cleanRepliesForSender: async (sid: string) => { cleaned.push(sid); return 0; },
+    });
+    const res = await sendWithReply({ session, message: "hi", deps });
+    expect(res.success).toBe(true);
+    expect(cleaned).toHaveLength(0);
   });
 });
