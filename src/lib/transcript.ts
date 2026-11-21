@@ -206,8 +206,6 @@ export function parseTranscript(lines: string[]): TranscriptEntry[] {
             ? content.filter((b: any) => b && b.type === "text").map((b: any) => b.text || "").join("\n")
             : ""
         );
-        // User messages carrying bash output tags get colourised HTML;
-        // otherwise keep the plain-text path (client renders escaped text).
         if (text) {
           const hasBashTags = /<bash-(stdout|stderr)>/.test(text);
           entries.push({ role: "user", text, html: hasBashTags ? preHtml(text) : undefined, id: lineIndex });
@@ -219,8 +217,6 @@ export function parseTranscript(lines: string[]): TranscriptEntry[] {
           text = content.filter((b: any) => b && b.type === "text").map((b: any) => b.text || "").join("\n");
         }
         text = cleanPrompt(text);
-        // User messages carrying bash output tags get colourised HTML;
-        // otherwise keep the plain-text path (client renders escaped text).
         if (text) {
           const hasBashTags = /<bash-(stdout|stderr)>/.test(text);
           entries.push({ role: "user", text, html: hasBashTags ? preHtml(text) : undefined, id: lineIndex });

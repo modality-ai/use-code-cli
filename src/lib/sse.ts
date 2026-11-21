@@ -85,7 +85,6 @@ export function sseResponse(request: Request, options: SsePushOptions): Response
         poll = setInterval(() => { if (!closed) schedule(); }, pollMs);
       }
 
-      // immediate initial snapshot
       doPush();
 
       const cleanup = () => {

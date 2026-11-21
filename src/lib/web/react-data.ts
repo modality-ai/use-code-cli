@@ -21,7 +21,6 @@ export interface ReactDataEnvelope {
   passkey?: {
     hasCredentials: boolean;
   };
-  // Future slices appended here as new hydrated routes are added.
 }
 
 declare global {

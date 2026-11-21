@@ -12,7 +12,6 @@ export function preHtml(text: string): string {
   // emitted by bash tool results: strip the tags and colourise the streams.
   const tagRe = /<bash-(stdout|stderr)>([\s\S]*?)<\/bash-\1>/g;
   if (!tagRe.test(text)) {
-    // No tags: render as before (escaped + linkified).
     const escaped = escHtml(text);
     const linked = escaped.replace(
       /(https?:\/\/[^\s<>"']+)/g,
@@ -26,7 +25,6 @@ export function preHtml(text: string): string {
   let last = 0;
   let m: RegExpExecArray | null;
   while ((m = tagRe.exec(text)) !== null) {
-    // Render any plain text between tags as before.
     if (m.index > last) {
       const between = text.slice(last, m.index);
       const escaped = escHtml(between);
@@ -42,7 +40,6 @@ export function preHtml(text: string): string {
     out += `<span class="${cls}">${escaped}</span>`;
     last = m.index + m[0].length;
   }
-  // Trailing plain text.
   if (last < text.length) {
     const between = text.slice(last);
     const escaped = escHtml(between);
