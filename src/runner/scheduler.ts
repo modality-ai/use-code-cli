@@ -93,6 +93,7 @@ export async function startScheduler(intervalMs: number = 60_000, dir?: string):
   const tasks = await loadTasks(dir);
   stopScheduler();
   for (const t of tasks) arm(t);
+  console.log(`[scheduler] started ${tasks.length} task(s): ${tasks.map((t) => t.name.split("/").pop()).join(", ")}`);
   return tasks;
 }
 

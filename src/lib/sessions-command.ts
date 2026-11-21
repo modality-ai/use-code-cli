@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { optionalValueFlag, renderTable, type CLICommand } from "modality-cli-kit";
+import { isJsonMode, optionalValueFlag, renderTable, type CLICommand } from "modality-cli-kit";
 import { oneLine } from "./output/format";
 import { filterStatusField } from "./flags";
 import {
@@ -197,7 +197,7 @@ export async function sessions(args: SessionsArgs, deps?: SessionsDeps) {
     );
   }
 
-  if (rows.length > 0) {
+  if (rows.length > 0 && !((args as any)?.json === true ? true : (args as any)?.human === true ? false : isJsonMode())) {
     const headers =
       args.search !== undefined
         ? ["state", "name", "hero", "status", "pid", "matches", "line"]
@@ -240,7 +240,7 @@ export async function sessions(args: SessionsArgs, deps?: SessionsDeps) {
       for (const l of largeLines) console.log(l);
     }
   }
-  if (hidden > 0) {
+  if (hidden > 0 && !((args as any)?.json === true ? true : (args as any)?.human === true ? false : isJsonMode())) {
     console.log(`\u2026 ${hidden} older session${hidden === 1 ? "" : "s"} hidden; raise --recent to see more.`);
   }
 

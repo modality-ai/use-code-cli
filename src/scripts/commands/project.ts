@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { CLICommand } from "modality-cli-kit";
 import { formatTime, plural } from "../../lib/output/format";
 import { findProject, readProjects, type ProjectInfo } from "../../lib/projects";
+import { getProjectPo, setProjectPo } from "../../lib/project-po";
 import { encodeProjectDir, PROJECTS_DIR, readSessions } from "../../lib/sessions";
 import { autoclean } from "../../lib/autoclean";
 
@@ -39,6 +40,11 @@ const ProjectArgsSchema = z.object({
     .optional()
     .default(false)
     .describe("Delete without stopping at the confirmation gate"),
+  po: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Set a custom PO session name for this project (stored in ~/.use-code-cli/projects.json)"),
   project: z
     .string()
     .optional()
@@ -103,6 +109,15 @@ async function project(args: ProjectArgs) {
     }
   }
 
+  if (args.po) {
+    setProjectPo(proj.dir, args.po);
+    return {
+      success: true,
+      message: `po set to "${args.po}" for ${proj.cwd}`,
+      data: { dir: proj.dir, cwd: proj.cwd, po: args.po },
+    };
+  }
+
   const path = join(PROJECTS_DIR, proj.dir);
   const live = await readSessions(false);
   const active = live.filter((s) => s.cwd === proj!.cwd).length;
@@ -113,6 +128,7 @@ async function project(args: ProjectArgs) {
     row("sessions", `${plural(proj.sessions, "session")} (${active} active)`),
     row("active", String(active)),
     row("updated", proj.updatedAt ? formatTime(proj.updatedAt) : undefined),
+    row("po", getProjectPo(proj.dir, proj.cwd)),
     row("path", path),
   ];
 

@@ -9,6 +9,7 @@ import { projectDeleteCommand } from "./commands/project-delete";
 import { projectCommand } from "./commands/project";
 import { projectsCommand } from "./commands/projects";
 import { promptsCommand } from "./commands/prompts";
+import { schedulerCommand } from "./commands/scheduler";
 import { sessionCommand } from "./commands/session";
 import { sessionsCommand } from "./commands/sessions";
 import { startCommand } from "./commands/start";
@@ -17,4 +18,4 @@ import { talkPermitCommand } from "./commands/talk-permit";
 import { talkToAllCommand } from "./commands/talk-to-all";
 import { talkCommand } from "./commands/talk";
 
-export const commands: CLICommand[] = [compactCommand, memoryCommand, monitorsCommand, projectDeleteCommand, projectCommand, projectsCommand, promptsCommand, sessionCommand, sessionsCommand, startCommand, talkHeroCommand, talkPermitCommand, talkToAllCommand, talkCommand];
+export const commands: CLICommand[] = [compactCommand, memoryCommand, monitorsCommand, projectDeleteCommand, projectCommand, projectsCommand, promptsCommand, schedulerCommand, sessionCommand, sessionsCommand, startCommand, talkHeroCommand, talkPermitCommand, talkToAllCommand, talkCommand];
