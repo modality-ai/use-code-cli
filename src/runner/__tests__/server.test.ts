@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { pageTitle, routeSegment } from "../server";
+import { pageTitle, routeSegment, relDirFromFilePath } from "../server";
 
 describe("routeSegment", () => {
   it("converts bracketed dir names to colon params", () => {
@@ -39,5 +39,31 @@ describe("pageTitle", () => {
   it("passes static routes through unchanged", () => {
     expect(pageTitle("/help")).toBe("help");
     expect(pageTitle("/tunnel")).toBe("tunnel");
+  });
+});
+
+describe("relDirFromFilePath", () => {
+  it("derives the web-relative dir for a src layout path", () => {
+    expect(relDirFromFilePath("/repo/src/web/my/session/[name]/page.tsx")).toBe("my/session/[name]");
+  });
+
+  it("derives the web-relative dir for a dist layout path (no src segment)", () => {
+    expect(relDirFromFilePath("/repo/dist/web/my/session/[name]/page.tsx")).toBe("my/session/[name]");
+  });
+
+  it("strips the trailing file name", () => {
+    expect(relDirFromFilePath("/x/web/api/foo/route.ts")).toBe("api/foo");
+  });
+
+  it("keeps a nested web route dir", () => {
+    expect(relDirFromFilePath("/repo/src/web/my/web/foo/page.tsx")).toBe("my/web/foo");
+  });
+
+  it("ignores a web segment in the path prefix", () => {
+    expect(relDirFromFilePath("/home/web/repo/dist/web/my/sessions/page.js")).toBe("my/sessions");
+  });
+
+  it("returns an empty dir for a file directly under web", () => {
+    expect(relDirFromFilePath("/repo/dist/web/page.js")).toBe("");
   });
 });

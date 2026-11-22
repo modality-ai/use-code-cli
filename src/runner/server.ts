@@ -13,6 +13,15 @@ export function routeSegment(name: string): string {
   return /^\[(.*)\]$/.test(name) ? `:${name.slice(1, -1)}` : name;
 }
 
+// client-manifest.json is keyed by web-relative dir, for both src/ and dist/ paths.
+export function relDirFromFilePath(filePath: string): string {
+  const rootWeb = /(?:^|\/)(?:src|dist)\/web\//.exec(filePath) ?? /(?:^|\/)web\//.exec(filePath);
+  if (!rootWeb) return "";
+  const rest = filePath.slice(rootWeb.index + rootWeb[0].length);
+  const lastSlash = rest.lastIndexOf("/");
+  return lastSlash === -1 ? "" : rest.slice(0, lastSlash);
+}
+
 export function pageTitle(route: string, params: Record<string, string> = {}): string {
   if (route === "/") return APP_NAME;
   return route.slice(1).replace(/:([A-Za-z0-9_]+)/g, (_, key: string) => params[key] ?? `:${key}`);
@@ -20,15 +29,28 @@ export function pageTitle(route: string, params: Record<string, string> = {}): s
 
 const webDir = new URL("../web", import.meta.url).pathname;
 
-// Client bundle URLs to inject for a route dir. client-manifest.json (written by
-// tools/build-client.ts) maps route dir -> entry script URLs.
+// client-manifest.json (written by tools/build-client.ts) maps route dir -> entry script URLs.
+// Reload on mtime change so client rebuilds take effect without a server restart.
+const manifestPath = join(import.meta.dir, "..", "..", "public", "dist", "client-manifest.json");
+let cachedManifest: Record<string, string[]> = {};
+let cachedMtime = -1;
+
 async function clientScriptsFor(relDir: string): Promise<string[]> {
-  const distDir = join(import.meta.dir, "..", "..", "public", "dist");
+  let mtime = -1;
   try {
-    const manifest = JSON.parse(await readFile(join(distDir, "client-manifest.json"), "utf8"));
-    if (Array.isArray(manifest[relDir])) return manifest[relDir];
+    mtime = statSync(manifestPath).mtimeMs;
   } catch {}
-  return [];
+  if (mtime !== cachedMtime) {
+    try {
+      const parsed = JSON.parse(await readFile(manifestPath, "utf8"));
+      cachedManifest = parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      cachedManifest = {};
+    }
+    cachedMtime = mtime;
+  }
+  const scripts = cachedManifest[relDir];
+  return Array.isArray(scripts) ? scripts : [];
 }
 
 function discoverFiles(dir: string, base = "", pattern: RegExp): Map<string, string> {
@@ -121,10 +143,10 @@ export function createApp(): Hono {
         const script = clientScript(data);
         html = baseHtml.replace("</body>", `${script}</body>`);
       } else {
-        const relDir = filePath.replace(/.*src\/web\//, "").replace(/\/[^\/]+$/, "");
+        const relDir = relDirFromFilePath(filePath);
         const scripts = await clientScriptsFor(relDir);
         if (scripts.length) {
-          const tags = scripts.map((url) => `<script type="module" src="${url}"></script>`).join("");
+          const tags = scripts.map((url) => `<script type="module" src="${Bun.escapeHTML(url)}"></script>`).join("");
           html = baseHtml.replace("</body>", tags + "</body>");
         }
       }

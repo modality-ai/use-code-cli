@@ -1,8 +1,7 @@
 import { z } from "zod";
 import type { CLICommand } from "modality-cli-kit";
 import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import { join } from "node:path";
+import { resolveServerEntry } from "../../lib/server-entry";
 
 const StartArgsSchema = z.object({
   port: z
@@ -24,7 +23,7 @@ type StartArgs = z.infer<typeof StartArgsSchema>;
 async function startCommandExecute(args: StartArgs) {
   const port = args.port ?? Number(process.env.PORT ?? 3000);
   const host = args.host ?? process.env.HOST ?? "127.0.0.1";
-  const serverPath = join(fileURLToPath(new URL("../../", import.meta.url)), "runner", "server.ts");
+  const serverPath = resolveServerEntry(import.meta.url);
 
   const child = spawn(process.execPath, [serverPath], {
     stdio: "inherit",

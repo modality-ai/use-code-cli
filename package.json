@@ -57,11 +57,12 @@
     "build:cli": "bun build ./src/runner/cli.ts ./src/index.ts --target=bun --outdir=./dist --root=./src --external @modality-counter/core",
     "build:css": "bun tools/build-css.ts",
     "build:client": "bun tools/build-client.ts",
-    "build": "bun run build:commands && bun run build:css && bun run build:client && bun run clean && bun run build:types && bun run build:cli && chmod +x ./dist/runner/cli.js",
+    "build": "bun run build:commands && bun run build:css && bun run build:client && bun run clean && bun run build:types && bun run build:server && bun run build:cli && chmod +x ./dist/runner/cli.js",
     "test": "bun run build:commands && npm run build && bun test",
     "start": "bun src/runner/server.ts",
     "dev": "bun tools/dev.ts",
-    "watch:css": "bun tools/watch-css.ts"
+    "watch:css": "bun tools/watch-css.ts",
+    "build:server": "bun build $(find src -type f \\( -name '*.ts' -o -name '*.tsx' \\) ! -path '*/__tests__/*') --target=bun --outdir=./dist --root=./src --no-bundle --external @modality-counter/core"
   },
   "files": [
     "dist",
