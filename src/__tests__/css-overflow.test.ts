@@ -38,4 +38,12 @@ describe("long English overflow (css)", () => {
     expect(cs.overflowWrap).toBe("anywhere");
     expect(cs.wordBreak).toBe("break-word");
   });
+
+  it("keeps native date/time picker indicators pointer-clickable", () => {
+    const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "styles", "index.css"), "utf8");
+    for (const id of ["schedule-pick-date", "schedule-time", "schedule-end-date"]) {
+      expect(css).toContain(`#${id}`);
+    }
+    expect(css).toMatch(/::-webkit-calendar-picker-indicator\s*\{[^}]*cursor:\s*pointer/);
+  });
 });

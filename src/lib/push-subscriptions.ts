@@ -58,3 +58,8 @@ export async function removeSubscription(endpoint: string): Promise<void> {
     await writeAll(filtered);
   });
 }
+export async function isSubscribed(endpoint: string): Promise<boolean> {
+  if (!endpoint) return false;
+  const all = await readAll();
+  return all.some((r) => r.endpoint === endpoint);
+}

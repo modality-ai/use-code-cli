@@ -44,6 +44,12 @@ describe("web page SSR + client bundle injection", () => {
     expect(html).toContain('<script type="module" src="/dist/my/sessions/SessionsApp.client.js">');
   });
 
+  it("injects the co-located client component bundle for schedule", async () => {
+    const html = await getHtml("/my/schedule");
+    expect(html).toContain('<script type="module" src="/dist/my/schedule/ScheduleApp.client.js">');
+    expect(html).toContain("<script>window.__REACT_DATA__ = { schedule:");
+  });
+
   it("server-renders initial client component markup + hydration payload for sessions", async () => {
     const html = await getHtml("/my/sessions");
     expect(html).toContain("<script>window.__REACT_DATA__ = { sessions:");

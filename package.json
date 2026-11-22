@@ -50,14 +50,14 @@
     "use-code-cli": "./dist/runner/cli.js"
   },
   "scripts": {
-    "po": "bash -lic 'open-yolo --resume po-use-code-cli'",
+    "po": "bash -lic 'open-yolo --resume po-use-code-cli \"$@\"' _",
     "clean": "find ./dist -name '*.*' | xargs rm -rf",
     "build:types": "bun tsc -p ./",
     "build:commands": "modality-cli generate-commands",
     "build:cli": "bun build ./src/runner/cli.ts ./src/index.ts --target=bun --outdir=./dist --root=./src --external @modality-counter/core",
-    "build:styles": "bun tools/build-css.ts",
+    "build:css": "bun tools/build-css.ts",
     "build:client": "bun tools/build-client.ts",
-    "build": "bun run build:commands && bun run build:styles && bun run build:client && bun run clean && bun run build:types && bun run build:cli && chmod +x ./dist/runner/cli.js",
+    "build": "bun run build:commands && bun run build:css && bun run build:client && bun run clean && bun run build:types && bun run build:cli && chmod +x ./dist/runner/cli.js",
     "test": "bun run build:commands && npm run build && bun test",
     "start": "bun src/runner/server.ts",
     "dev": "bun tools/dev.ts",

@@ -16,6 +16,9 @@ export const REPLY_MARKER_TAG = "use-code-cli:auto-reply";
 /** Application / relying-party name used for WebAuthn registration. */
 export const APP_NAME = "use-code-cli";
 
+/** Maximum size (in bytes) accepted by the upload endpoint. */
+export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
+
 /** Route-to-route redirects served by the runner. */
 export const REDIRECTS: Record<string, string> = {
   "/": "/help",

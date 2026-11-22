@@ -3,6 +3,7 @@ import { ancestorPids, liveSessions, type LiveSession } from "./peer";
 import { sendWithReply } from "./reply-send";
 import { readStdinMessageOrUndefined } from "./talk-argv";
 import { sessionLabel as label } from "./sessions";
+import { isUploaded } from "./uploads";
 
 export const TalkArgsSchema = z.object({
   target: z
@@ -33,6 +34,10 @@ export const TalkArgsSchema = z.object({
     .optional()
     .default(false)
     .describe("Send even when this session already answered --in-reply-to"),
+  image: z
+    .string()
+    .optional()
+    .describe("Optional uploaded image path (must be under ~/.use-code-cli/uploads) to attach to the message"),
 });
 
 export type TalkArgs = z.infer<typeof TalkArgsSchema>;
@@ -145,9 +150,14 @@ export async function talk(args: TalkArgs, deps?: TalkDeps) {
     }
   }
 
+  let finalMessage = message;
+  if (args.image && isUploaded(args.image)) {
+    finalMessage = `${message}\n\n[image: ${args.image}]`;
+  }
+
   return sendWithReplyFn({
     session,
-    message,
+    message: finalMessage,
     sessions,
     oneWay: args["one-way"],
     inReplyTo,

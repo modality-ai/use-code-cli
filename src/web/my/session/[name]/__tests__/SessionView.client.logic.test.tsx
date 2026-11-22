@@ -57,11 +57,11 @@ describe("teaserOf", () => {
 describe("updateBar", () => {
   function makeRoot(bottoms: number[]) {
     const els = bottoms.map((b) => ({
-      getBoundingClientRect: () => ({ bottom: b, top: 0, left: 0, right: 0, width: 0, height: 0 }) as any,
+      offsetTop: b,
+      offsetHeight: 0,
       dataset: {} as any,
     }));
     const root: any = {
-      getBoundingClientRect: () => ({ top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 }) as any,
       querySelectorAll: (_sel: string) => ({
         length: els.length,
         item: (i: number) => els[i] ?? null,
@@ -103,11 +103,11 @@ describe("updateBar", () => {
 
   it("uses dataset.role fallback for role detection", () => {
     const el: any = {
-      getBoundingClientRect: () => ({ bottom: -5, top: 0, left: 0, right: 0, width: 0, height: 0 }),
+      offsetTop: -5,
+      offsetHeight: 0,
       dataset: { role: "user" },
     };
     const root: any = {
-      getBoundingClientRect: () => ({ top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 }),
       querySelectorAll: () => ({ length: 1, item: () => el }),
     };
     const entries = [{}] as any;
@@ -120,11 +120,11 @@ describe("updateBar", () => {
     // An entry whose bottom sits between the viewport top (0) and the
     // container's top must NOT count as scrolled past under the new semantics.
     const elBetween: any = {
-      getBoundingClientRect: () => ({ bottom: 50, top: 0, left: 0, right: 0, width: 0, height: 0 }),
+      offsetTop: 50,
+      offsetHeight: 0,
       dataset: {} as any,
     };
     const rootBetween: any = {
-      getBoundingClientRect: () => ({ top: 100, bottom: 200, left: 0, right: 0, width: 0, height: 0 }),
       querySelectorAll: () => ({ length: 1, item: () => elBetween }),
     };
     const entries = [{ role: "user", text: "hi" }] as any;
@@ -132,11 +132,11 @@ describe("updateBar", () => {
 
     // An entry whose bottom is at/above the viewport top counts as scrolled past.
     const elPast: any = {
-      getBoundingClientRect: () => ({ bottom: -5, top: 0, left: 0, right: 0, width: 0, height: 0 }),
+      offsetTop: -5,
+      offsetHeight: 0,
       dataset: {} as any,
     };
     const rootPast: any = {
-      getBoundingClientRect: () => ({ top: 100, bottom: 200, left: 0, right: 0, width: 0, height: 0 }),
       querySelectorAll: () => ({ length: 1, item: () => elPast }),
     };
     const res = updateBar(rootPast, entries, null);

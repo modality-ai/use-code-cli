@@ -7,6 +7,17 @@ import { onlineEmoji, statusEmoji } from "./store";
 import ChatInput from "./ChatInput";
 import { prettyJson, tryPrettyJson } from "../../../../lib/output/json";
 
+// rAF is absent in SSR and some test DOMs — keep the throttling where it
+// exists, but fall back to a macrotask elsewhere.
+const scheduleFrame = (cb: () => void): number =>
+  typeof requestAnimationFrame === "function"
+    ? requestAnimationFrame(() => cb())
+    : (setTimeout(cb, 0) as unknown as number);
+const cancelFrame = (id: number): void => {
+  if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(id);
+  else clearTimeout(id as unknown as ReturnType<typeof setTimeout>);
+};
+
 // Client-side view for one session, Next.js style: page.tsx imports this
 // 'use client' component. The server renders the initial transcript; this
 // hydrates it and streams live SSE updates + chat (previously client.ts).
@@ -297,16 +308,28 @@ export const BAR_BAND = 34; // px — reserved layout space, matches the bar's h
 
 export function updateBar(root: HTMLElement | null, entries: Entry[], last: BarState): BarState {
   if (!root) return null;
+  // Throttle guard: skip DOM reads entirely when scroll position is unchanged
+  // since the last pass (common during momentum/programmatic no-ops).
+  const scrollY = typeof window !== "undefined" ? window.scrollY : 0;
+  const cache = (root as any).__barCache || ((root as any).__barCache = { scrollY: -1, els: null as NodeList | null, len: -1, entries: null as Entry[] | null });
+  if (cache.scrollY === scrollY && cache.len === entries.length && cache.entries === entries) return last;
+  cache.scrollY = scrollY;
   // The page (viewport) is the scroll container, so an entry is "fully
   // scrolled past" once its bottom is at/above the viewport top.
   const edge = 0;
-  const els = root.querySelectorAll<HTMLElement>(".entry");
+  if (!cache.els || cache.entries !== entries || cache.len !== entries.length) {
+    cache.els = root.querySelectorAll<HTMLElement>(".entry");
+    cache.len = entries.length;
+    cache.entries = entries;
+  }
+  const els = cache.els as NodeListOf<HTMLElement>;
   let candidate = -1;
   for (let i = 0; i < els.length; i++) {
     const el = els.item(i);
     if (!el) continue;
     if ((entries[i]?.role || el.dataset.role) !== "user") continue;
-    if (el.getBoundingClientRect().bottom <= edge) candidate = i;
+    // offsetTop/offsetHeight avoid forced layout (getBoundingClientRect).
+    if (el.offsetTop + el.offsetHeight <= scrollY + edge) candidate = i;
   }
   const picked: Entry | undefined = candidate >= 0 ? entries[candidate] : undefined;
   const next: BarState = picked ? { index: candidate, teaser: teaserOf(picked) } : null;
@@ -336,6 +359,7 @@ export default function SessionView(props: BootProps) {
       : { success: false, online: false, status: "idle", waitingFor: null },
   );
   const [chatStatus, setChatStatus] = useState("");
+  const [uploadedImage, setUploadedImage] = useState<string | null>(null);
   const [optimistic, setOptimistic] = useState<OptimisticEntry[]>([]);
   const optimisticTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   // Clear any pending optimistic fallback timers on unmount to avoid state
@@ -347,6 +371,7 @@ export default function SessionView(props: BootProps) {
     };
   }, []);
   const [sending, setSending] = useState(false);
+  const [sendCount, setSendCount] = useState(0); // tells ChatInput to reset auto-grow height after a clear
   const [pausing, setPausing] = useState(false);
   const [resuming, setResuming] = useState(false);
   // A SIGSTOP'd session is reported as idle by the server; seed the paused
@@ -434,6 +459,7 @@ export default function SessionView(props: BootProps) {
           const d = JSON.parse(ev.data);
           if (d.error) {
             setChatStatus("Error: " + d.error);
+            setReconnecting(false);
           } else {
             if (Array.isArray(d.data?.entries)) {
               const next = d.data.entries as Entry[];
@@ -467,12 +493,28 @@ export default function SessionView(props: BootProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [name]);
 
-  // Context bar follows scrolling.
+  // Context bar follows scrolling (throttled via rAF to avoid layout thrash
+  // on mobile Safari; updateBar is also internally guarded).
   useEffect(() => {
-    const onScroll = () => setBar((b) => updateBar(contentRef.current, entriesRef.current, b));
+    let raf = 0;
+    let pending = false;
+    const run = () => {
+      pending = false;
+      raf = 0;
+      if (!liveRef.current) return;
+      setBar((b) => updateBar(contentRef.current, entriesRef.current, b));
+    };
+    const onScroll = () => {
+      if (pending) return;
+      pending = true;
+      raf = scheduleFrame(run);
+    };
     window.addEventListener("scroll", onScroll, { passive: true });
-    setBar((b) => updateBar(contentRef.current, entries, b));
-    return () => window.removeEventListener("scroll", onScroll);
+    if (liveRef.current) setBar((b) => updateBar(contentRef.current, entries, b));
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (raf) cancelFrame(raf);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entries]);
 
@@ -482,8 +524,18 @@ export default function SessionView(props: BootProps) {
     const bar = bottomBarRef.current;
     const content = contentRef.current;
     if (!bar || !content) return;
+    let raf = 0;
+    let lastPb = "";
     const apply = () => {
-      content.style.paddingBottom = `${bar.offsetHeight + 8}px`;
+      if (raf) return;
+      raf = scheduleFrame(() => {
+        raf = 0;
+        const next = `${bar.offsetHeight + 8}px`;
+        if (next !== lastPb) {
+          lastPb = next;
+          content.style.paddingBottom = next;
+        }
+      });
     };
     apply();
     if (typeof ResizeObserver !== "undefined") {
@@ -493,6 +545,7 @@ export default function SessionView(props: BootProps) {
     }
     window.addEventListener("resize", apply);
     return () => {
+      if (raf) cancelFrame(raf);
       if ((content as any)._ro) (content as any)._ro.disconnect();
       window.removeEventListener("resize", apply);
     };
@@ -508,9 +561,11 @@ export default function SessionView(props: BootProps) {
   }, []);
 
   // Post-paint pass: refresh the context-bar target (guarded set in updateBar).
+  // Only re-run when entries change, not every render.
   useEffect(() => {
+    if (!liveRef.current) return;
     setBar((b) => updateBar(contentRef.current, entries, b));
-  });
+  }, [entries]);
 
   // Scroll maintenance on transcript growth (entries only — bar changes must
   // never yank the scroll position while the user reads history):
@@ -546,8 +601,12 @@ export default function SessionView(props: BootProps) {
     const localId = "optimistic-" + (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
     const baseCount = entriesRef.current.length;
     setOptimistic((prev) => [...prev, { localId, text, baseCount, status: "sending" }]);
+    // Optimistically flag reconnecting until the next SSE server update arrives.
+    // Keep the mobile perf guard: don't flip state while the view is frozen.
+    if (liveRef.current) setReconnecting(true);
     const input = chatRef.current;
     if (input) input.value = "";
+    setSendCount((n) => n + 1);
     try { window.scrollTo({ top: document.documentElement.scrollHeight }); } catch {}
     setSending(true);
     try {
@@ -562,12 +621,13 @@ export default function SessionView(props: BootProps) {
       const r = await fetch("/my/api/talk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, message: text }),
+        body: JSON.stringify({ name, message: text, image: uploadedImage || undefined }),
       });
       const d = await r.json();
       const inner = d?.data;
       if (d.success && inner?.success !== false) {
         setChatStatus("sent");
+        setUploadedImage(null);
         setOptimistic((prev) => prev.map((o) => (o.localId === localId ? { ...o, status: "sent" } : o)));
         // Fallback: clear a sent optimistic item after 30s if server batch never matches.
         const timer = setTimeout(() => {
@@ -668,9 +728,19 @@ export default function SessionView(props: BootProps) {
       </div>
       <div
         id="context-bar"
-        className="sticky top-0 z-10 flex items-baseline gap-2 h-8 bg-surface text-sm cursor-pointer shadow-md"
+        role="button"
+        tabIndex={bar ? 0 : -1}
+        aria-expanded={barOpen === bar?.index}
+        aria-label={bar ? `Pinned message: ${bar.teaser}` : "Pinned message"}
+        className="sticky top-0 z-10 flex items-baseline gap-2 h-8 bg-surface text-sm cursor-pointer shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-collaboration"
         style={{ visibility: bar ? "visible" : "hidden" }}
         onClick={() => setBarOpen((i) => (bar && i === bar.index ? null : bar?.index ?? null))}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setBarOpen((i) => (bar && i === bar.index ? null : bar?.index ?? null));
+          }
+        }}
       >
         <span className="shrink-0 font-semibold text-accent-collaboration">❯ You</span>
         <span className="flex-1 min-w-0 truncate font-normal text-text-muted">{bar ? bar.teaser : " "}</span>
@@ -705,9 +775,15 @@ export default function SessionView(props: BootProps) {
           ))}
         </>
       )}
-      <div ref={bottomBarRef} className="flex flex-col gap-2 fixed bottom-0 left-0 right-0 z-20 bg-surface p-2" role="region" aria-label="Session controls">
-        <div className="flex items-center gap-2" role="toolbar" aria-label="Session scroll controls">
-        <label className="flex items-center gap-1 text-xs text-text-muted cursor-pointer">
+      <div
+        ref={bottomBarRef}
+        className="flex flex-col gap-2 fixed bottom-0 left-0 right-0 z-20 bg-surface p-2"
+        style={{ paddingBottom: "calc(0.5rem + env(safe-area-inset-bottom, 0px))" }}
+        role="region"
+        aria-label="Session controls"
+      >
+        <div className="flex items-center gap-1" role="toolbar" aria-label="Session scroll controls">
+        <label className="flex items-center gap-1.5 min-h-11 px-1 text-xs text-text-muted cursor-pointer rounded-lg focus-within:ring-2 focus-within:ring-accent-collaboration/25">
           <input
             id="autoscroll"
             ref={autoscrollRef}
@@ -725,7 +801,7 @@ export default function SessionView(props: BootProps) {
           type="button"
           id="scroll-top"
           aria-label="Scroll to top"
-          className="text-xs text-text-muted border border-border rounded-sm px-2 py-0.5 cursor-pointer"
+          className="min-h-11 px-3 text-xs text-text-muted border border-border rounded-lg cursor-pointer hover:bg-border/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-collaboration"
           onClick={() => window.scrollTo({ top: 0 })}
         >
           ↑ Top
@@ -734,12 +810,12 @@ export default function SessionView(props: BootProps) {
           type="button"
           id="scroll-bottom"
           aria-label="Scroll to bottom"
-          className="text-xs text-text-muted border border-border rounded-sm px-2 py-0.5 cursor-pointer"
+          className="min-h-11 px-3 text-xs text-text-muted border border-border rounded-lg cursor-pointer hover:bg-border/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-collaboration"
           onClick={() => window.scrollTo({ top: document.documentElement.scrollHeight })}
         >
           ↓ Bottom
         </button>
-        <span id="session-state" role="status" aria-live="polite" className="text-xs text-text-muted ml-auto">{stateText}</span>
+        <span id="session-state" role="status" aria-live="polite" className="text-xs text-text-muted ml-auto whitespace-nowrap">{stateText}</span>
         </div>
       <ChatInput
         chatOpen={chatOpen}
@@ -747,8 +823,11 @@ export default function SessionView(props: BootProps) {
         chatStatus={chatStatus}
         sending={sending}
         busy={meta.status === "busy"}
+        uploadedImage={uploadedImage}
+        onImageChange={setUploadedImage}
         onSend={send}
         onPause={pause}
+        resetSignal={sendCount}
       />
     </div>
     </div>

@@ -4,7 +4,13 @@
 import { aiTool } from "../../scripts/index";
 import { homedir } from "os";
 import { join } from "path";
-import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, renameSync } from "fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  renameSync,
+} from "fs";
 import { deliver, liveSessions, type LiveSession } from "../../lib/peer";
 import { findRepliesForTarget, removeReply } from "../../lib/reply-ledger";
 import { withLock } from "../../lib/file-lock";
@@ -14,8 +20,12 @@ import { withLock } from "../../lib/file-lock";
 export const schedule: string = "*/30 * * * * *";
 export const timeZone: string = "UTC";
 
-function stateDir(): string { return join(process.env.HOME || homedir(), ".use-code-cli"); }
-function statusFile(): string { return join(stateDir(), "last-statuses.json"); }
+function stateDir(): string {
+  return join(process.env.HOME || homedir(), ".use-code-cli");
+}
+function statusFile(): string {
+  return join(stateDir(), "last-statuses.json");
+}
 
 function loadPersisted(): Map<string, string> | null {
   try {
@@ -42,12 +52,21 @@ function persist(map: Map<string, string>): void {
     console.error("session-status: persist failed", e);
   }
 }
-type SessionRow = { sessionId?: string; status?: string; name?: string; cwd?: string };
+type SessionRow = {
+  sessionId?: string;
+  status?: string;
+  name?: string;
+  cwd?: string;
+};
 
 export interface SessionStatusDeps {
   aiTool?: { execute: (args: unknown) => Promise<unknown> };
   liveSessions?: () => Promise<LiveSession[]>;
-  deliver?: (session: LiveSession, message: string, msgId?: string) => Promise<string>;
+  deliver?: (
+    session: LiveSession,
+    message: string,
+    msgId?: string
+  ) => Promise<string>;
   findRepliesForTarget?: (targetSessionId: string) => Promise<any[]>;
   removeReply?: (inReplyTo: string, targetSessionId: string) => Promise<any>;
 }
@@ -57,7 +76,9 @@ let lastStatuses: Map<string, string> | null = null;
 /** Reset internal state (test helper). */
 export function resetSessionStatusState(): void {
   lastStatuses = null;
-  try { if (existsSync(statusFile())) writeFileSync(statusFile(), "{}"); } catch {}
+  try {
+    if (existsSync(statusFile())) writeFileSync(statusFile(), "{}");
+  } catch {}
 }
 
 function basenameOf(cwd: string | undefined): string {
@@ -76,78 +97,108 @@ export async function run(deps?: SessionStatusDeps): Promise<void> {
 
   const lockPath = join(stateDir(), "session-status.lock");
   try {
-    await withLock(lockPath, async () => {
-    const res: unknown = await aiToolFn.execute({ command: "sessions", json: true } as { command: string; json: boolean });
-    const r = res as { data?: unknown };
-    const rows: SessionRow[] = Array.isArray(r.data) ? (r.data as SessionRow[]) : [];
-    const current = new Map<string, string>();
-    const rowById = new Map<string, SessionRow>();
-    for (const r of rows) {
-      if (r?.sessionId) {
-        current.set(r.sessionId, r.status ?? "");
-        rowById.set(r.sessionId, r);
-      }
-    }
-
-    if (lastStatuses === null) lastStatuses = loadPersisted();
-    console.log(`session-status: ${current.size} session(s) tracked${lastStatuses ? "" : " (baseline)"}`);
-    if (lastStatuses) {
-      for (const [id, status] of current) {
-        const prev = lastStatuses.get(id);
-        if (prev !== undefined && prev !== status) {
-          console.log(`session-status: ${id} ${prev} -> ${status} @ ${new Date().toISOString()}`);
-        }
-        // Trigger only on busy -> idle transition.
-        if (prev === "busy" && status === "idle") {
-          try {
-            const session = rowById.get(id)!;
-            const name = id; // we should always send session id
-            const message = `${name} is idle now`;
-            const replies = await findRepliesFn(id);
-            const live = await liveSessionsFn();
-
-            if (Array.isArray(replies) && replies.length > 0) {
-              let fallThrough = false;
-              for (const rec of replies) {
-                const sender = rec?.senderSessionId
-                  ? live.find((s) => s.sessionId === rec.senderSessionId)
-                  : undefined;
-                if (sender) {
-                  try {
-                    await deliverFn(sender, message);
-                  } catch {
-                    // best-effort
-                  }
-                  try {
-                    await removeReplyFn(rec.inReplyTo, id);
-                  } catch {
-                    // best-effort
-                  }
-                } else {
-                  fallThrough = true;
-                }
-              }
-              if (fallThrough) {
-                await alertPo(session, live, deliverFn, aiToolFn, message);
-              }
-            } else {
-              await alertPo(session, live, deliverFn, aiToolFn, message);
-            }
-          } catch {
-            // never throw
+    await withLock(
+      lockPath,
+      async () => {
+        const res: unknown = await aiToolFn.execute({
+          command: "sessions",
+          json: true,
+        } as { command: string; json: boolean });
+        const r = res as { data?: unknown };
+        const rows: SessionRow[] = Array.isArray(r.data)
+          ? (r.data as SessionRow[])
+          : [];
+        const current = new Map<string, string>();
+        const rowById = new Map<string, SessionRow>();
+        for (const r of rows) {
+          if (r?.sessionId) {
+            current.set(r.sessionId, r.status ?? "");
+            rowById.set(r.sessionId, r);
           }
         }
-      }
-      for (const id of lastStatuses.keys()) {
-        if (!current.has(id)) {
-          console.log(`session-status: ${id} removed`);
-        }
-      }
-    }
 
-    lastStatuses = current;
-    persist(current);
-    }, { staleMs: 60000 });
+        if (lastStatuses === null) lastStatuses = loadPersisted();
+        console.log(
+          `session-status: ${current.size} session(s) tracked${lastStatuses ? "" : " (baseline)"}`
+        );
+        if (lastStatuses) {
+          for (const [id, status] of current) {
+            const prev = lastStatuses.get(id);
+            if (prev !== undefined && prev !== status) {
+              console.log(
+                `session-status: ${id} ${prev} -> ${status} @ ${new Date().toISOString()}`
+              );
+            }
+            // Trigger only on busy -> idle transition.
+            if (prev === "busy" && status === "idle") {
+              try {
+                const session = rowById.get(id)!;
+                const name = id;
+                // Fetch the session's whole content via aiTool execute and dispatch that.
+                let message = `${name} is idle now`;
+                try {
+                  const r: any = await aiToolFn.execute({
+                    command: "session",
+                    target: name,
+                  });
+                  if (r && typeof r.message === "string" && r.message.trim())
+                    message = r.message;
+                  else if (
+                    r?.data &&
+                    typeof r.data.message === "string" &&
+                    r.data.message.trim()
+                  )
+                    message = r.data.message;
+                } catch {
+                  // fall back to the hint message
+                }
+                const replies = await findRepliesFn(id);
+                const live = await liveSessionsFn();
+
+                if (Array.isArray(replies) && replies.length > 0) {
+                  let fallThrough = false;
+                  for (const rec of replies) {
+                    const sender = rec?.senderSessionId
+                      ? live.find((s) => s.sessionId === rec.senderSessionId)
+                      : undefined;
+                    if (sender) {
+                      try {
+                        await deliverFn(sender, message);
+                      } catch {
+                        // best-effort
+                      }
+                      try {
+                        await removeReplyFn(rec.inReplyTo, id);
+                      } catch {
+                        // best-effort
+                      }
+                    } else {
+                      fallThrough = true;
+                    }
+                  }
+                  if (fallThrough) {
+                    await alertPo(session, live, deliverFn, aiToolFn, message);
+                  }
+                } else {
+                  await alertPo(session, live, deliverFn, aiToolFn, message);
+                }
+              } catch {
+                // never throw
+              }
+            }
+          }
+          for (const id of lastStatuses.keys()) {
+            if (!current.has(id)) {
+              console.log(`session-status: ${id} removed`);
+            }
+          }
+        }
+
+        lastStatuses = current;
+        persist(current);
+      },
+      { staleMs: 60000 }
+    );
   } catch {
     // Swallow: status polling must never break the host process.
   }
@@ -156,14 +207,25 @@ export async function run(deps?: SessionStatusDeps): Promise<void> {
 async function alertPo(
   session: SessionRow,
   live: LiveSession[],
-  deliverFn: (session: LiveSession, message: string, msgId?: string) => Promise<string>,
+  deliverFn: (
+    session: LiveSession,
+    message: string,
+    msgId?: string
+  ) => Promise<string>,
   aiToolFn: { execute: (args: unknown) => Promise<unknown> },
-  message: string,
+  message: string
 ): Promise<void> {
   try {
-    const res: any = await aiToolFn.execute({ command: "project", target: session.cwd } as any);
+    const res: any = await aiToolFn.execute({
+      command: "project",
+      target: session.cwd,
+    } as any);
     const po = res?.data?.po ?? `po-${basenameOf(session.cwd)}`;
-    const poSession = live.find((s) => (s.name === po || s.sessionId === po) && s.sessionId !== session.sessionId);
+    const poSession = live.find(
+      (s) =>
+        (s.name === po || s.sessionId === po) &&
+        s.sessionId !== session.sessionId
+    );
     if (poSession) {
       try {
         await deliverFn(poSession, message);

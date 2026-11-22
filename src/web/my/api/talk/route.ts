@@ -1,6 +1,7 @@
 import { aiTool } from "../../../../scripts/index";
 import { appendPrompt, appendPromptHistory, findSessions, readSessions, SessionInfo } from "../../../../lib/sessions";
 import { pickBestSession, resolveSessionTarget } from "../../session/[name]/session-data";
+import { isUploaded } from "../../../../lib/uploads";
 
 /**
  * The page sends a session's display name, but the talk command matches against
@@ -40,12 +41,14 @@ export async function POST(request: Request): Promise<Response> {
   }
   const name = String(body?.name || "").trim();
   const message = String(body?.message || "").trim();
+  const image = typeof body?.image === "string" && isUploaded(body.image) ? body.image : undefined;
   if (!name || !message) {
     return Response.json({ success: false, error: "missing name or message" }, { status: 400 });
   }
+  const fullMessage = image ? `${message}\n\n[image: ${image}]` : message;
   try {
     const target = await resolveTalkTarget(name);
-    const result = await aiTool.execute({ command: "talk", target, message, "one-way": true });
+    const result = await aiTool.execute({ command: "talk", target, message, "one-way": true, image });
 
     // Record the submitted prompt best-effort so it feeds `use-code-cli
     // prompts` and Claude Code's up-arrow history. Neither write touches the
@@ -54,8 +57,8 @@ export async function POST(request: Request): Promise<Response> {
     try {
       const session = await resolveSession(name);
       if (session) {
-        await appendPrompt(session, message);
-        await appendPromptHistory(session, message);
+        await appendPrompt(session, fullMessage);
+        await appendPromptHistory(session, fullMessage);
       }
     } catch {
       // ignore: recording is best-effort

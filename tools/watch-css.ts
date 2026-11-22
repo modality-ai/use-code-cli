@@ -10,7 +10,7 @@ function rebuild() {
   if (timer) clearTimeout(timer);
   timer = setTimeout(() => {
     console.log("[watch-css] rebuilding...");
-    const p = spawn(process.execPath, ["run", "build:styles"], { cwd: root, stdio: "inherit" });
+    const p = spawn(process.execPath, ["run", "build:css"], { cwd: root, stdio: "inherit" });
     p.on("exit", (code) => {
       if (code !== 0) console.error("[watch-css] build failed:", code);
     });

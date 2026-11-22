@@ -19,4 +19,4 @@ process.on("SIGINT", cleanup);
 process.on("SIGTERM", cleanup);
 
 css.on("exit", (code) => { if (code !== 0 && code !== null) console.error("watch-css exited", code); });
-server.on("exit", (code) => { cleanup(); });
+server.on("exit", () => { cleanup(); });

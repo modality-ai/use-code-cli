@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "bun:test";
-import { addSubscription, listSubscriptions, removeSubscription } from "../push-subscriptions";
+import { addSubscription, isSubscribed, listSubscriptions, removeSubscription } from "../push-subscriptions";
 
 const tmpHome = mkdtempSync(join(tmpdir(), "ps-"));
 
@@ -38,5 +38,19 @@ describe("push-subscriptions", () => {
     const list = await listSubscriptions();
     expect(list).toHaveLength(1);
     expect(list[0]!.endpoint).toBe("https://e/2");
+  });
+
+  it("isSubscribed returns false for empty endpoint", async () => {
+    expect(await isSubscribed("")).toBe(false);
+  });
+
+  it("isSubscribed returns true for a stored endpoint", async () => {
+    await addSubscription({ endpoint: "https://e/1", keys: { p256dh: "p", auth: "a" }, createdAt: 1 });
+    expect(await isSubscribed("https://e/1")).toBe(true);
+  });
+
+  it("isSubscribed returns false for an unknown endpoint", async () => {
+    await addSubscription({ endpoint: "https://e/1", keys: { p256dh: "p", auth: "a" }, createdAt: 1 });
+    expect(await isSubscribed("https://e/999")).toBe(false);
   });
 });

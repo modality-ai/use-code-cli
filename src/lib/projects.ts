@@ -62,7 +62,22 @@ export function findProject(projects: ProjectInfo[], target: string): ProjectInf
   const exact = projects.filter(
     (p) => p.cwd === target || p.dir === target || basename(p.cwd) === target,
   );
-  if (exact.length > 0) return exact;
+  if (exact.length > 0) {
+    // Collapse duplicate records that resolve to the same workspace so a
+    // rename / re-encode does not look like an ambiguity. Merge session
+    // counts and keep the newest activity.
+    const byCwd = new Map<string, ProjectInfo>();
+    for (const p of exact) {
+      const prev = byCwd.get(p.cwd);
+      if (!prev) byCwd.set(p.cwd, { ...p });
+      else byCwd.set(p.cwd, {
+        ...prev,
+        sessions: prev.sessions + p.sessions,
+        updatedAt: Math.max(prev.updatedAt, p.updatedAt),
+      });
+    }
+    return [...byCwd.values()];
+  }
   return projects.filter((p) => p.cwd.endsWith(`/${target}`));
 }
 
