@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { defaultProjectPo } from "../project-po";
+import { defaultProjectPo } from "../project-store";
 
 describe("defaultProjectPo", () => {
   it("uses the last path segment of cwd", () => {

@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { CLICommand } from "modality-cli-kit";
 import { formatTime, plural } from "../../lib/output/format";
 import { findProject, readProjects, type ProjectInfo } from "../../lib/projects";
-import { getProjectPo, setProjectPoAsync } from "../../lib/project-po";
+import { getProjectConfig, getProjectPo, setProjectPoAsync } from "../../lib/project-store";
 import { encodeProjectDir, PROJECTS_DIR, readSessions } from "../../lib/sessions";
 import { autoclean } from "../../lib/autoclean";
 
@@ -121,6 +121,8 @@ async function project(args: ProjectArgs) {
   const path = join(PROJECTS_DIR, proj.dir);
   const live = await readSessions(false);
   const active = live.filter((s) => s.cwd === proj!.cwd).length;
+  const storedAgentBin = getProjectConfig(proj.dir).agentBin;
+  const agentBin = storedAgentBin?.trim() ? storedAgentBin : (Bun.which("claude") ?? "");
 
   const lines = [
     proj.cwd,
@@ -129,6 +131,7 @@ async function project(args: ProjectArgs) {
     row("active", String(active)),
     row("updated", proj.updatedAt ? formatTime(proj.updatedAt) : undefined),
     row("po", getProjectPo(proj.dir, proj.cwd)),
+    row("agentBin", agentBin),
     row("path", path),
   ];
 
@@ -143,6 +146,7 @@ async function project(args: ProjectArgs) {
       updatedAt: proj.updatedAt ? new Date(proj.updatedAt).toISOString() : null,
       path,
       po: getProjectPo(proj.dir, proj.cwd),
+      agentBin,
     },
   };
 }

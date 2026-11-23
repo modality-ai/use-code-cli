@@ -323,4 +323,17 @@ describe("ScheduleApp create UI", () => {
     expect(query(container, '[role="dialog"]')).toBeNull();
     expect(container.textContent).toContain("Ends Dec 1");
   });
+  it("limits routine preview runs to the end date", async () => {
+    const { container } = await mount();
+    await openCreate(container);
+    const routineTab = [...container.querySelectorAll('[role="tab"]')].find((node) => node.textContent === "Routine") as HTMLButtonElement;
+    await act(() => { routineTab.click(); });
+    const dialog = query(container, '[role="dialog"]')!;
+    const ends = query(dialog, "#schedule-ends") as HTMLSelectElement;
+    await act(() => { setFieldValue(ends, "On a date"); });
+    const endDate = query(dialog, "#schedule-end-date") as HTMLInputElement;
+    await act(() => { setFieldValue(endDate, "2026-11-25"); });
+    expect(dialog.textContent).toContain("Wed 25 Nov • 09:00");
+    expect(dialog.textContent).not.toContain("Thu 26 Nov • 09:00");
+  });
 });

@@ -181,7 +181,7 @@ export function cronSummary(rule: string): string {
 }
 
 /** Next local-time occurrences of a cron rule. */
-export function nextCronRuns(rule: string, now: Date, count = 3): Date[] {
+export function nextCronRuns(rule: string, now: Date, count = 3, until?: Date): Date[] {
   if (!isCronValid(rule)) return [];
   const { fields, minutes, hours, days, months, weekdays } = allFields(rule);
   const start = new Date(now);
@@ -190,8 +190,8 @@ export function nextCronRuns(rule: string, now: Date, count = 3): Date[] {
 
   const results: Date[] = [];
   const cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
-  const limit = new Date(start);
-  limit.setFullYear(limit.getFullYear() + 2);
+  const limit = until ? new Date(until) : new Date(start);
+  if (!until) limit.setFullYear(limit.getFullYear() + 2);
 
   for (; cursor <= limit && results.length < count; cursor.setDate(cursor.getDate() + 1)) {
     if (!months.includes(cursor.getMonth() + 1)) continue;
@@ -201,6 +201,7 @@ export function nextCronRuns(rule: string, now: Date, count = 3): Date[] {
       for (const minute of minutes) {
         const candidate = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate(), hour, minute, 0, 0);
         if (candidate < start) continue;
+        if (until && candidate > until) return results;
         results.push(candidate);
         if (results.length === count) return results;
       }

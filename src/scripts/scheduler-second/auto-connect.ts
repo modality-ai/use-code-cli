@@ -5,7 +5,7 @@
 
 const MAX_RECONNECT_ATTEMPTS = 10;
 const LAUNCH_URL_TIMEOUT_MS = 60_000;
-export const schedule: string = "*/30 * * * * *";
+export const schedule: string = "*/15 * * * * *";
 export const timeZone: string | undefined = undefined;
 
 interface ReconnectState {

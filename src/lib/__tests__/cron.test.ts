@@ -32,6 +32,14 @@ describe("cron helpers", () => {
     ]);
   });
 
+  it("respects an inclusive upper bound", () => {
+    const until = new Date(2026, 10, 23, 23, 59, 59, 999);
+    const runs = nextCronRuns("0 8 * * *", now, 3, until);
+    expect(runs.map((date) => `${date.getMonth() + 1}/${date.getDate()} ${date.getHours()}:${date.getMinutes()}`)).toEqual([
+      "11/23 8:0",
+    ]);
+  });
+
   it("computes weekday-restricted and named-day runs", () => {
     const weekdayRuns = nextCronRuns("30 7 * * 1-5", now, 2);
     expect(weekdayRuns.map((date) => `${date.getDay()} ${date.getDate()} ${date.getHours()}:${date.getMinutes()}`)).toEqual([

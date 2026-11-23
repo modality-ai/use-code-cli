@@ -336,11 +336,13 @@ function SchedulePreview({
   runs,
   expression,
   showExpression = true,
+  emptyLabel,
 }: {
   summary: string;
   runs: Date[];
   expression: string;
   showExpression?: boolean;
+  emptyLabel?: string;
 }) {
   return (
     <section className="mt-5 rounded-[16px] bg-shell p-1.5 ring-1 ring-black/5" aria-label="Schedule preview">
@@ -354,7 +356,7 @@ function SchedulePreview({
         <h3 className={`${eyebrow} mt-4`}>Next runs</h3>
         <ul className="mt-2 space-y-1 text-xs tabular-nums text-text-muted">
           {runs.length === 0 ? (
-            <li>No upcoming runs in the next 2 years</li>
+            <li>{emptyLabel ?? "No upcoming runs in the next 2 years"}</li>
           ) : runs.map((run) => (
             <li key={run.toISOString()}>{formatRun(run)}</li>
           ))}
@@ -526,10 +528,18 @@ export default function ScheduleApp({ initial }: { initial?: ScheduleData }) {
     return timeCron(time, repeats === "weekly" ? weekDays : undefined);
   }, [repeats, cronRule, time, weekDays]);
 
-  const routineRuns = useMemo(
-    () => isCronValid(routineExpression) ? nextCronRuns(routineExpression, new Date(), 3) : [],
-    [routineExpression],
-  );
+  const routineRuns = useMemo(() => {
+    if (!isCronValid(routineExpression)) return [];
+    let until: Date | undefined;
+    if (ends === "On a date" && endDate) {
+      const parsed = parseDate(endDate);
+      if (!Number.isNaN(parsed.getTime())) {
+        parsed.setHours(23, 59, 59, 999);
+        until = parsed;
+      }
+    }
+    return nextCronRuns(routineExpression, new Date(), 3, until);
+  }, [routineExpression, ends, endDate]);
 
   const routineSummary = repeats === "daily"
     ? `Every day at ${time}`
@@ -999,6 +1009,7 @@ export default function ScheduleApp({ initial }: { initial?: ScheduleData }) {
                   runs={routineRuns}
                   expression={routineExpression}
                   showExpression={repeats !== "cron"}
+                  emptyLabel={ends === "On a date" ? "No upcoming runs before this end date" : "No upcoming runs in the next 2 years"}
                 />
 
                 {repeats === "cron" && (

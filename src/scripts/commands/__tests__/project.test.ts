@@ -73,6 +73,21 @@ describe("project", () => {
     expect(res.out).toContain("2 sessions");
   });
 
+  it("uses a stored agent binary override", async () => {
+    const h = setup();
+    const { dir } = h.addProject("/w/proj", ["a"]);
+    mkdirSync(join(h.home, ".use-code-cli"), { recursive: true });
+    writeFileSync(
+      join(h.home, ".use-code-cli", "projects.json"),
+      JSON.stringify({ [dir]: { agentBin: "/custom/claude" } }),
+    );
+
+    const res = await h.run("project", "/w/proj", "--json");
+
+    expect(res.code).toBe(0);
+    expect(JSON.parse(res.out).data.agentBin).toBe("/custom/claude");
+  });
+
   it("reports an ambiguous target", async () => {
     const h = setup();
     h.addProject("/w/proj", ["a"]);

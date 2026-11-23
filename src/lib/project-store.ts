@@ -5,20 +5,34 @@ import { prettyJsonFile } from "./output/json";
 import { withLock } from "./file-lock";
 
 export interface ProjectPoEntry {
+  dir?: string;
+  cwd?: string;
+  sessions?: number;
+  active?: number;
+  updatedAt?: string | number | null;
+  path?: string;
+  agentBin?: string;
   po?: string;
 }
 
 export type ProjectPoMap = Record<string, ProjectPoEntry>;
 
-const STATE_DIR = join(process.env.HOME || homedir(), ".use-code-cli");
-const PO_FILE = join(STATE_DIR, "projects.json");
-const LOCK_FILE = join(STATE_DIR, "projects.lock");
+function stateDir(): string {
+  return join(process.env.HOME || homedir(), ".use-code-cli");
+}
 
+function poFile(): string {
+  return join(stateDir(), "projects.json");
+}
+
+function lockFile(): string {
+  return join(stateDir(), "projects.lock");
+}
 
 function readMapSync(): ProjectPoMap {
   try {
-    if (!existsSync(PO_FILE)) return {};
-    const raw = readFileSync(PO_FILE, "utf8");
+    if (!existsSync(poFile())) return {};
+    const raw = readFileSync(poFile(), "utf8");
     if (!raw.trim()) return {};
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
@@ -31,29 +45,30 @@ function readMapSync(): ProjectPoMap {
 }
 
 export function projectsPoPath(): string {
-  return PO_FILE;
+  return poFile();
 }
 
 export function readProjectPoMap(): ProjectPoMap {
   return readMapSync();
 }
 
+function writeMap(map: ProjectPoMap): void {
+  mkdirSync(stateDir(), { recursive: true });
+  const tmp = `${poFile()}.tmp.${process.pid}`;
+  writeFileSync(tmp, prettyJsonFile(map));
+  renameSync(tmp, poFile());
+}
+
 export function writeProjectPoMap(map: ProjectPoMap): void {
   // sync convenience; prefer async setter for locking
-  mkdirSync(STATE_DIR, { recursive: true });
-  const tmp = `${PO_FILE}.tmp.${process.pid}`;
-  writeFileSync(tmp, prettyJsonFile(map));
-  renameSync(tmp, PO_FILE);
+  writeMap(map);
 }
 
 export async function setProjectPoAsync(dirName: string, po: string): Promise<void> {
-  await withLock(LOCK_FILE, () => {
+  await withLock(lockFile(), () => {
     const map = readMapSync();
     map[dirName] = { ...(map[dirName] || {}), po };
-    mkdirSync(STATE_DIR, { recursive: true });
-    const tmp = `${PO_FILE}.tmp.${process.pid}`;
-    writeFileSync(tmp, prettyJsonFile(map));
-    renameSync(tmp, PO_FILE);
+    writeMap(map);
   });
 }
 
@@ -72,4 +87,17 @@ export function getProjectPo(dirName: string, cwd: string): string {
 
 export function setProjectPo(dirName: string, po: string): void {
   writeProjectPoMap({ ...readMapSync(), [dirName]: { ...(readMapSync()[dirName] || {}), po } });
+}
+
+export function getProjectConfig(dirName: string): ProjectPoEntry {
+  const map = readMapSync();
+  return map[dirName] || {};
+}
+
+export async function setProjectConfigAsync(dirName: string, config: ProjectPoEntry): Promise<void> {
+  await withLock(lockFile(), () => {
+    const map = readMapSync();
+    map[dirName] = { ...(map[dirName] || {}), ...config };
+    writeMap(map);
+  });
 }
