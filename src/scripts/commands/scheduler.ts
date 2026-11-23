@@ -1,5 +1,3 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { z } from "zod";
 import { isJsonMode, optionalValueFlag, renderTable, type CLICommand } from "modality-cli-kit";
 import { loadTasks } from "../../runner/scheduler";
@@ -14,16 +12,8 @@ const SchedulerArgsSchema = z.object({
 type SchedulerArgs = z.infer<typeof SchedulerArgsSchema>;
 
 async function scheduler(args: SchedulerArgs) {
-  const defaultDir = existsSync(join(process.cwd(), "src", "scripts", "scheduler-tasks"))
-    ? join(process.cwd(), "src", "scripts", "scheduler-tasks")
-    : undefined;
-  const targetDir = args.dir ?? defaultDir;
-  const tasks = await loadTasks(targetDir);
-
-  const defaultSecondDir = existsSync(join(process.cwd(), "src", "scripts", "scheduler-second"))
-    ? join(process.cwd(), "src", "scripts", "scheduler-second")
-    : undefined;
-  const secondModules = await scan(defaultSecondDir);
+  const tasks = await loadTasks(args.dir);
+  const secondModules = await scan();
 
   const runArg = args.run === undefined || args.run === "" ? undefined : args.run;
   const runTarget = args.target ?? (typeof runArg === "string" && runArg.length > 0 ? runArg : undefined);

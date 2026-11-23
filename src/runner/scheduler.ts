@@ -25,6 +25,12 @@ export function nextRun(schedule: string, timeZone?: string, from: Date = new Da
   }
 }
 
+// Both bundled and unbundled entrypoints resolve this module under <package>/runner,
+// so task roots stay correct regardless of the caller's cwd.
+export function schedulerScriptsDir(name: "scheduler-tasks" | "scheduler-second"): string {
+  return join(import.meta.dir, "..", "scripts", name);
+}
+
 const timers = new Map<ScheduledTask, any>();
 
 function arm(task: ScheduledTask): void {
@@ -44,7 +50,7 @@ function arm(task: ScheduledTask): void {
   }
 }
 
-export function discoverTaskModules(dir: string = join(import.meta.dir, "..", "scripts", "scheduler-tasks")): string[] {
+export function discoverTaskModules(dir: string = schedulerScriptsDir("scheduler-tasks")): string[] {
   try {
     return readdirSync(dir)
       .filter((f) => f.endsWith(".ts") || f.endsWith(".js"))
@@ -98,7 +104,7 @@ export async function startScheduler(intervalMs: number = 60_000, dir?: string):
   try {
     const { readdirSync } = await import("node:fs");
     const { join } = await import("node:path");
-    const secondDir = join(import.meta.dir, "..", "scripts", "scheduler-second");
+    const secondDir = schedulerScriptsDir("scheduler-second");
     const secondFiles = readdirSync(secondDir).filter((f) => f.endsWith(".ts") || f.endsWith(".js"));
     if (secondFiles.length) {
       console.log(`[scheduler] second-level modules: ${secondFiles.join(", ")}`);

@@ -10,6 +10,7 @@
 import { readdirSync, openSync, closeSync, statSync, writeFileSync, mkdirSync, unlinkSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { schedulerScriptsDir } from "../../runner/scheduler";
 
 // Hot-reload safety: a re-evaluated module must not leave the previous
 // instance's timers running (module state resets, but setInterval keeps firing).
@@ -54,7 +55,7 @@ export const modules: SecondModule[] = [];
 export const schedules: string[] = [];
 
 function secondDir(): string {
-  return join(import.meta.dir, "..", "scheduler-second");
+  return schedulerScriptsDir("scheduler-second");
 }
 
 function stateDir(): string {
