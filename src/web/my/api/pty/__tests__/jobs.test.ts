@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -102,6 +102,26 @@ describe("backgroundLogPath", () => {
     expect(a.startsWith(`${tmpdir()}/use-code-cli-exec-`)).toBe(true);
     expect(a.endsWith(".log")).toBe(true);
     expect(a).not.toBe(b); // counter suffix guards against same-ms collisions
+  });
+});
+
+describe("exit persistence resilience", () => {
+  it("does not surface an unhandled error when the state dir is removed before exit", async () => {
+    const errors: unknown[] = [];
+    const handler = (reason: unknown) => errors.push(reason);
+    process.on("unhandledRejection", handler);
+    try {
+      const { proc, resolveExit } = mockProc(9001);
+      await registerJob(proc);
+      rmSync(testHome, { recursive: true, force: true });
+      resolveExit(0);
+      await proc.exited;
+      await new Promise((r) => setTimeout(r, 50));
+      expect(errors).toHaveLength(0);
+    } finally {
+      process.off("unhandledRejection", handler);
+      mkdirSync(testHome, { recursive: true });
+    }
   });
 });
 

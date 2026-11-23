@@ -1,7 +1,16 @@
-import { readSessions, findSessionsFuzzy, type SessionInfo } from "../../../../../lib/sessions";
+import { readSessions, findSessionsFuzzy } from "../../../../../lib/sessions";
 import { readJsonBody } from "../../../../../lib/web/request";
 import { pickBestSession } from "../../../session/[name]/session-data";
 import { aiTool } from "../../../../../scripts/index";
+
+function statusForFailure(message: string): number {
+  const m = (message || "").toLowerCase();
+  // The route targets a pid, so a numeric no-match means it exited after resolution.
+  if (/no session matches "\d+"/.test(m)) return 409;
+  if (/not found|no session matches/.test(m)) return 404;
+  if (/no such process|esrch|offline|ambiguous|already gone|already stopped/.test(m)) return 409;
+  return 500;
+}
 
 export async function POST(request: Request): Promise<Response> {
   const body = await readJsonBody(request);
@@ -18,19 +27,25 @@ export async function POST(request: Request): Promise<Response> {
   if (!s) return Response.json({ success: false, error: "session not found" }, { status: 404 });
   if (!s.online) return Response.json({ success: false, error: "session is offline; cannot stop it" }, { status: 409 });
 
-  const result = (await aiTool.execute({ command: "session", target: name, stop: true })) as {
-    success?: boolean;
-    message?: string;
-    data?: { pid?: number; name?: string };
-  };
-  if (!result?.success) {
-    return Response.json({ success: false, error: result?.message || "stop failed" }, { status: 500 });
+  let result: { success?: boolean; message?: string; data?: { pid?: number; name?: string; sessionId?: string } };
+  try {
+    result = (await aiTool.execute({ command: "session", target: String(s.pid), stop: true })) as typeof result;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const status = statusForFailure(message);
+    return Response.json({ success: false, error: message }, { status });
   }
 
-  const data = result.data as { pid?: number; name?: string } | undefined;
+  if (!result?.success) {
+    const message = result?.message || "stop failed";
+    return Response.json({ success: false, error: message }, { status: statusForFailure(message) });
+  }
+
+  const data = result.data as { pid?: number; name?: string; sessionId?: string } | undefined;
   return Response.json({
     success: true,
     pid: data?.pid ?? s.pid,
     name: data?.name ?? s.name ?? name,
+    sessionId: data?.sessionId ?? s.sessionId,
   });
 }

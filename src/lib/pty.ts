@@ -58,13 +58,30 @@ function readPersistedJobsSync(): PtyJobRecord[] {
 // One lock covers the whole read-modify-write; separate locks would let
 // concurrent registrations and exits overwrite each other's records.
 async function updatePersistedJobs(update: (records: PtyJobRecord[]) => void): Promise<PtyJobRecord[]> {
-  return withLock(jobsLock(), () => {
-    const records = readPersistedJobsSync();
-    update(records);
-    ensureStateDir();
-    writeFileSync(jobsFile(), JSON.stringify(records, null, 2));
-    return records;
-  }, { staleMs: 60000 });
+  let updated: PtyJobRecord[] | undefined;
+  try {
+    return await withLock(jobsLock(), () => {
+      const records = readPersistedJobsSync();
+      update(records);
+      updated = records;
+      ensureStateDir();
+      try { writeFileSync(jobsFile(), JSON.stringify(records, null, 2)); } catch {}
+      return records;
+    }, { staleMs: 60000 });
+  } catch {
+    // State dir (or HOME) may be gone (e.g. temp dir cleaned up during tests);
+    // persistence is best-effort and must never surface as an unhandled error.
+    // A lock-release failure can happen after the callback already ran; reusing
+    // its result avoids applying the update a second time.
+    if (updated) return updated;
+    try {
+      const records = readPersistedJobsSync();
+      update(records);
+      return records;
+    } catch {
+      return [];
+    }
+  }
 }
 
 function isPidAlive(pid: number): boolean {

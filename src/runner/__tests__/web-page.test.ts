@@ -77,4 +77,9 @@ describe("web page SSR + client bundle injection", () => {
     expect(html).toContain("<script>window.__REACT_DATA__ = { projects:");
     expect(html).toMatch(/\/my\/project\//);
   });
+
+  it("renders the project config page shell", async () => {
+    const html = await getHtml("/my/project/foo/config");
+    expect(html).toContain("Project config");
+  });
 });
