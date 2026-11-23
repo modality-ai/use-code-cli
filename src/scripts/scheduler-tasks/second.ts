@@ -104,7 +104,9 @@ export async function scan(dir?: string): Promise<SecondModule[]> {
 let armed = false;
 let leader = false;
 let exitHandlersRegistered = false;
+let lastRunDir: string | undefined;
 const intervals: ReturnType<typeof setInterval>[] = [];
+const exitHandlers: { exit?: () => void; sigterm?: () => void; sigint?: () => void } = {};
 const inFlight = new Set<SecondModule>();
 
 // Publish to globalThis so a hot-reloaded instance can stop this one.
@@ -144,6 +146,17 @@ export function stopSecondScheduler(): void {
     try { unlinkSync(lockPath()); } catch {}
   }
   leader = false;
+}
+
+function unregisterExitHandlers(): void {
+  if (!exitHandlersRegistered) return;
+  if (exitHandlers.exit) process.off("exit", exitHandlers.exit);
+  if (exitHandlers.sigterm) process.off("SIGTERM", exitHandlers.sigterm);
+  if (exitHandlers.sigint) process.off("SIGINT", exitHandlers.sigint);
+  delete exitHandlers.exit;
+  delete exitHandlers.sigterm;
+  delete exitHandlers.sigint;
+  exitHandlersRegistered = false;
 }
 
 // Keep globalThis in sync for hot-reload cleanup.
@@ -205,7 +218,7 @@ export async function run(dir?: string): Promise<{ armed: boolean; moduleCount: 
   if (!(await tryAcquireLeader())) {
     return { armed: false, moduleCount: 0, leader: false };
   }
-
+  lastRunDir = dir;
   const mods = await scan(dir);
   modules.length = 0;
   modules.push(...mods);
@@ -220,9 +233,15 @@ export async function run(dir?: string): Promise<{ armed: boolean; moduleCount: 
   if (!exitHandlersRegistered) {
     exitHandlersRegistered = true;
     const cleanup = () => { try { stopSecondScheduler(); } catch {} };
-    process.on("exit", cleanup);
-    process.on("SIGTERM", () => { cleanup(); process.exit(0); });
-    process.on("SIGINT", () => { cleanup(); process.exit(0); });
+    const onExit = cleanup;
+    const onSigterm = () => { cleanup(); process.exit(0); };
+    const onSigint = () => { cleanup(); process.exit(0); };
+    process.on("exit", onExit);
+    process.on("SIGTERM", onSigterm);
+    process.on("SIGINT", onSigint);
+    exitHandlers.exit = onExit;
+    exitHandlers.sigterm = onSigterm;
+    exitHandlers.sigint = onSigint;
   }
   for (const m of mods) {
     const ms = intervalMsFor(m);
@@ -241,6 +260,22 @@ export async function run(dir?: string): Promise<{ armed: boolean; moduleCount: 
     void tick();
   }
   return { armed: true, moduleCount: mods.length, leader: true };
+}
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    if (import.meta.hot) {
+      import.meta.hot.data.armed = armed;
+      import.meta.hot.data.lastDir = lastRunDir;
+    }
+    try { unregisterExitHandlers(); } catch {}
+    try { stopSecondScheduler(); } catch {}
+  });
+}
+
+if (import.meta.hot?.data?.armed) {
+  const persistedDir = import.meta.hot.data.lastDir as string | undefined;
+  setTimeout(() => { void run(persistedDir); }, 0);
 }
 
 export default { schedule, timeZone, parseSchedule, modules, schedules, scan, run, stopSecondScheduler };

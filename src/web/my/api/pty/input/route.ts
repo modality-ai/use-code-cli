@@ -1,26 +1,17 @@
-import { getJob } from "../jobs";
+import { aiTool } from "../../../../../scripts/index";
 import { readJsonBody } from "../../../../../lib/web/request";
 
-// Send keystrokes to a live PTY job spawned by the project exec endpoint.
 export async function POST(request: Request): Promise<Response> {
   const body = await readJsonBody(request);
-  const jobId = String(body?.jobId || "").trim();
-  const data = body?.data;
-  if (!jobId || typeof data !== "string") {
-    return Response.json({ success: false, error: "missing jobId or data" }, { status: 400 });
+  const result = (await aiTool.execute({
+    command: "pty-input",
+    jobId: String(body?.jobId || "").trim(),
+    data: body?.data,
+  })) as { success?: boolean; message?: string; data?: { statusCode?: number } };
+
+  const status = result?.data?.statusCode ?? (result?.success ? 200 : 500);
+  if (!result?.success) {
+    return Response.json({ success: false, error: result?.message || "request failed" }, { status });
   }
-  // A giant paste is written to the subprocess terminal in one call — cap it.
-  if (data.length > 65_536) {
-    return Response.json({ success: false, error: "data too large" }, { status: 413 });
-  }
-  const job = getJob(jobId);
-  if (!job) {
-    return Response.json({ success: false, error: "job not found or already exited" }, { status: 404 });
-  }
-  try {
-    job.proc.terminal.write(data);
-    return Response.json({ success: true });
-  } catch (e) {
-    return Response.json({ success: false, error: String(e) }, { status: 500 });
-  }
+  return Response.json({ success: true }, { status });
 }

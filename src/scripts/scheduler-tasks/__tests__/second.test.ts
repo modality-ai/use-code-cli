@@ -30,3 +30,22 @@ describe("second scan", () => {
     expect(second.modules.length).toBe(before);
   });
 });
+
+describe("second run", () => {
+  it("re-runs without accumulating (restartable)", async () => {
+    const dir = join(import.meta.dir, "fixture");
+    const g = globalThis as { __secondIntervals?: unknown[] };
+
+    const r1 = await second.run(dir);
+    expect(r1.armed).toBe(true);
+    expect(Array.isArray(g.__secondIntervals)).toBe(true);
+    expect(g.__secondIntervals?.length).toBe(1);
+
+    const r2 = await second.run(dir);
+    expect(r2.armed).toBe(true);
+    expect(g.__secondIntervals?.length).toBe(1);
+
+    second.stopSecondScheduler();
+    expect(g.__secondIntervals?.length).toBe(0);
+  });
+});

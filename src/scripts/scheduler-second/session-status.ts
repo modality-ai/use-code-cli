@@ -117,7 +117,9 @@ export async function run(deps?: SessionStatusDeps): Promise<void> {
           }
         }
 
-        if (lastStatuses === null) lastStatuses = loadPersisted();
+        // Reload from shared persisted state on every run so concurrent
+        // processes cannot act on stale in-memory snapshots.
+        lastStatuses = loadPersisted();
         console.log(
           `session-status: ${current.size} session(s) tracked${lastStatuses ? "" : " (baseline)"}`
         );

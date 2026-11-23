@@ -1,6 +1,19 @@
-import { describe, expect, it } from "bun:test";
-import { registerJob, type PtyProc } from "../jobs";
+import { afterAll, describe, expect, it } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { registerJob, type PtyProc } from "../../../../../lib/pty";
 import { POST } from "../input/route";
+
+const testHome = mkdtempSync(join(tmpdir(), "pty-input-"));
+const originalHome = process.env.HOME;
+process.env.HOME = testHome;
+
+afterAll(() => {
+  if (originalHome === undefined) delete process.env.HOME;
+  else process.env.HOME = originalHome;
+  rmSync(testHome, { recursive: true, force: true });
+});
 
 function request(body: unknown): Request {
   return new Request("http://localhost/my/api/pty/input", {
@@ -40,11 +53,22 @@ describe("POST /my/api/pty/input", () => {
 
   it("writes keystrokes to the registered job's terminal", async () => {
     const { proc, written } = mockProc(31337);
-    const jobId = registerJob(proc);
+    const jobId = await registerJob(proc);
     const res = await POST(request({ jobId, data: "echo hi\n" }));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.success).toBe(true);
     expect(written).toEqual(["echo hi\n"]);
+  });
+
+  it("rejects jobs without a terminal with 400", async () => {
+    const proc = {
+      pid: 31338,
+      exited: new Promise<number | null>(() => {}),
+      exitCode: null,
+    } as unknown as PtyProc;
+    const jobId = await registerJob(proc);
+    const res = await POST(request({ jobId, data: "x" }));
+    expect(res.status).toBe(400);
   });
 });

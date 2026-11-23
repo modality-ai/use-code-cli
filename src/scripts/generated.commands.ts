@@ -3,12 +3,17 @@
 // single source of truth.
 import type { CLICommand } from "modality-cli-kit";
 import { compactCommand } from "./commands/compact";
+import { logCommand } from "./commands/log";
 import { memoryCommand } from "./commands/memory";
 import { monitorsCommand } from "./commands/monitors";
 import { projectDeleteCommand } from "./commands/project-delete";
+import { projectPsCommand } from "./commands/project-ps";
+import { projectRunStreamCommand } from "./commands/project-run-stream";
+import { projectRunCommand } from "./commands/project-run";
 import { projectCommand } from "./commands/project";
 import { projectsCommand } from "./commands/projects";
 import { promptsCommand } from "./commands/prompts";
+import { ptyInputCommand } from "./commands/pty-input";
 import { pushWebCommand } from "./commands/push-web";
 import { schedulerCommand } from "./commands/scheduler";
 import { sessionCommand } from "./commands/session";
@@ -19,4 +24,4 @@ import { talkPermitCommand } from "./commands/talk-permit";
 import { talkToAllCommand } from "./commands/talk-to-all";
 import { talkCommand } from "./commands/talk";
 
-export const commands: CLICommand[] = [compactCommand, memoryCommand, monitorsCommand, projectDeleteCommand, projectCommand, projectsCommand, promptsCommand, pushWebCommand, schedulerCommand, sessionCommand, sessionsCommand, startCommand, talkHeroCommand, talkPermitCommand, talkToAllCommand, talkCommand];
+export const commands: CLICommand[] = [compactCommand, logCommand, memoryCommand, monitorsCommand, projectDeleteCommand, projectPsCommand, projectRunStreamCommand, projectRunCommand, projectCommand, projectsCommand, promptsCommand, ptyInputCommand, pushWebCommand, schedulerCommand, sessionCommand, sessionsCommand, startCommand, talkHeroCommand, talkPermitCommand, talkToAllCommand, talkCommand];

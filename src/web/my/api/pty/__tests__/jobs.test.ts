@@ -1,13 +1,26 @@
-import { describe, expect, it } from "bun:test";
+import { afterAll, describe, expect, it } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   MAX_LIVE_JOBS,
   backgroundLogPath,
   getJob,
+  listJobs,
   liveJobCount,
   registerJob,
   type PtyProc,
-} from "../jobs";
+} from "../../../../../lib/pty";
+
+const testHome = mkdtempSync(join(tmpdir(), "pty-jobs-"));
+const originalHome = process.env.HOME;
+process.env.HOME = testHome;
+
+afterAll(() => {
+  if (originalHome === undefined) delete process.env.HOME;
+  else process.env.HOME = originalHome;
+  rmSync(testHome, { recursive: true, force: true });
+});
 
 // Minimal PtyProc stand-in: only pid / exited / exitCode / terminal
 // are touched by the jobs registry and its callers.
@@ -29,24 +42,33 @@ function mockProc(pid: number, opts: { exitCode?: number | null } = {}) {
 }
 
 describe("registerJob / getJob", () => {
-  it("returns a pty-<seq>-<pid> jobId and registers the job", () => {
+  it("returns a pty-<seq>-<pid> jobId and registers the job", async () => {
     const { proc } = mockProc(4242);
-    const jobId = registerJob(proc);
+    const jobId = await registerJob(proc);
     expect(jobId).toMatch(/^pty-\d+-4242$/);
     expect(getJob(jobId)?.proc).toBe(proc);
   });
 
-  it("stores the background log path alongside the job", () => {
+  it("stores the background log path alongside the job", async () => {
     const { proc } = mockProc(4243);
-    const jobId = registerJob(proc, "/tmp/exec.log");
+    const jobId = await registerJob(proc, "/tmp/exec.log");
     expect(getJob(jobId)?.log).toBe("/tmp/exec.log");
+  });
+
+  it("keeps both records when registrations run concurrently", async () => {
+    const a = mockProc(8001);
+    const b = mockProc(8002);
+    const [jobA, jobB] = await Promise.all([registerJob(a.proc), registerJob(b.proc)]);
+    const ids = (await listJobs()).map((j) => j.jobId);
+    expect(ids).toContain(jobA);
+    expect(ids).toContain(jobB);
   });
 });
 
 describe("job eviction", () => {
   it("drops a job once its process exits", async () => {
     const { proc, resolveExit } = mockProc(4244);
-    const jobId = registerJob(proc);
+    const jobId = await registerJob(proc);
     expect(getJob(jobId)).toBeDefined();
     resolveExit(0);
     await proc.exited;
@@ -59,7 +81,7 @@ describe("job eviction", () => {
     let firstJobId = "";
     for (let i = 0; i < 60; i++) {
       const m = mockProc(5000 + i);
-      const jobId = registerJob(m.proc);
+      const jobId = await registerJob(m.proc);
       if (i === 0) firstJobId = jobId;
       exited.push({ jobId, proc: m.proc, resolveExit: m.resolveExit });
     }
@@ -68,7 +90,7 @@ describe("job eviction", () => {
     for (const m of exited) m.resolveExit(0);
     await Promise.all(exited.map((m) => m.proc.exited));
     const { proc: trigger } = mockProc(6000);
-    registerJob(trigger);
+    await registerJob(trigger);
     expect(getJob(firstJobId)).toBeUndefined();
   });
 });
@@ -89,9 +111,9 @@ describe("liveJobCount", () => {
     const done = mockProc(7002);
     const live1 = mockProc(7001);
     const live2 = mockProc(7003);
-    registerJob(live1.proc);
-    registerJob(done.proc);
-    registerJob(live2.proc);
+    await registerJob(live1.proc);
+    await registerJob(done.proc);
+    await registerJob(live2.proc);
     done.resolveExit(0);
     await done.proc.exited;
     await new Promise((r) => setTimeout(r, 0));
