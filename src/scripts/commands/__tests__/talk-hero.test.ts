@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
-import { talkHero } from "../../../lib/talk-hero-command";
+import { talkHeroCommand } from "../talk-hero";
+import type { TalkHeroArgs, TalkHeroDeps } from "../talk-hero";
 
 const cleanups: (() => void)[] = [];
 
@@ -63,12 +64,12 @@ function makeArgs(extra: Record<string, unknown> = {}) {
 describe("talk-hero", () => {
   it("sends an argument message to the session whose hero matches", async () => {
     const h = setup();
-    const res = await talkHero(makeArgs({ message: "status?" }), {
+    const res = await talkHeroCommand.create({
       readSessions: async () => [h.session as any],
       readTranscriptMeta: async () => ({ hero: "JAMES" }),
       cwd: () => h.session.cwd,
       readStdinMessageOrUndefined: async () => undefined,
-    });
+    })(makeArgs({ message: "status?" }));
     await Bun.sleep(1);
     expect(res.success).toBe(true);
     expect(h.received()).toContain("status?");
@@ -76,12 +77,12 @@ describe("talk-hero", () => {
 
   it("reads the message from piped stdin when the argument is omitted", async () => {
     const h = setup();
-    const res = await talkHero(makeArgs({}), {
+    const res = await talkHeroCommand.create({
       readSessions: async () => [h.session as any],
       readTranscriptMeta: async () => ({ hero: "JAMES" }),
       cwd: () => h.session.cwd,
       readStdinMessageOrUndefined: async () => "hello via pipe\n",
-    });
+    })(makeArgs({}));
     await Bun.sleep(1);
     expect(res.success).toBe(true);
     expect(h.received()).toContain("hello via pipe");
@@ -89,12 +90,12 @@ describe("talk-hero", () => {
 
   it("errors when piped stdin is empty", async () => {
     const h = setup();
-    const res = await talkHero(makeArgs({}), {
+    const res = await talkHeroCommand.create({
       readSessions: async () => [h.session as any],
       readTranscriptMeta: async () => ({ hero: "JAMES" }),
       cwd: () => h.session.cwd,
       readStdinMessageOrUndefined: async () => undefined,
-    });
+    })(makeArgs({}));
     expect(res.success).toBe(false);
     expect(res.message).toContain("Message required");
     expect(h.received()).toBe("");
@@ -102,12 +103,12 @@ describe("talk-hero", () => {
 
   it("prefers the message argument over piped stdin", async () => {
     const h = setup();
-    const res = await talkHero(makeArgs({ message: "arg message" }), {
+    const res = await talkHeroCommand.create({
       readSessions: async () => [h.session as any],
       readTranscriptMeta: async () => ({ hero: "JAMES" }),
       cwd: () => h.session.cwd,
       readStdinMessageOrUndefined: async () => "piped message",
-    });
+    })(makeArgs({ message: "arg message" }));
     await Bun.sleep(1);
     expect(res.success).toBe(true);
     expect(h.lastContent(h.received())).toContain("arg message");
@@ -116,12 +117,12 @@ describe("talk-hero", () => {
 
   it("passes multiline stdin content verbatim", async () => {
     const h = setup();
-    const res = await talkHero(makeArgs({ "one-way": true }), {
+    const res = await talkHeroCommand.create({
       readSessions: async () => [h.session as any],
       readTranscriptMeta: async () => ({ hero: "JAMES" }),
       cwd: () => h.session.cwd,
       readStdinMessageOrUndefined: async () => "line one\n中文行\n`backtick`\n",
-    });
+    })(makeArgs({ "one-way": true }));
     await Bun.sleep(1);
     expect(res.success).toBe(true);
     expect(h.lastContent(h.received())).toContain("line one\n中文行\n`backtick`");
@@ -129,12 +130,12 @@ describe("talk-hero", () => {
 
   it("still requires a message when stdin is a terminal", async () => {
     const h = setup();
-    const res = await talkHero(makeArgs({}), {
+    const res = await talkHeroCommand.create({
       readSessions: async () => [h.session as any],
       readTranscriptMeta: async () => ({ hero: "JAMES" }),
       cwd: () => h.session.cwd,
       readStdinMessageOrUndefined: async () => undefined,
-    });
+    })(makeArgs({}));
     expect(res.success).toBe(false);
     expect(res.message).toContain("Message required");
     expect(h.received()).toBe("");

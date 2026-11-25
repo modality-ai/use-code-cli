@@ -6,8 +6,8 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs";
-import { memory, MemoryArgsSchema } from "../../../lib/memory-command";
-import type { MemoryArgs } from "../../../lib/memory-command";
+import { memoryCommand } from "../memory";
+import type { MemoryArgs } from "../memory";
 import { tmpdir, homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -78,7 +78,7 @@ describe("memory", () => {
     writeFileSync(path, memoryFile("Prefer bun over node."));
     cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
     const memFile = { project: "w-alpha", cwd: "/w/alpha", file: "feedback-thing.md", path, updatedAt: Date.now() } as any;
-    const result = await memory({} as MemoryArgs, { readMemoryFiles: async () => [memFile] });
+    const result = await memoryCommand.create({ readMemoryFiles: async () => [memFile] })({} as MemoryArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain("memory/feedback-thing.md");
@@ -98,7 +98,7 @@ describe("memory", () => {
       path,
       updatedAt: Date.now(),
     } as any;
-    const result = await memory({} as MemoryArgs, { readMemoryFiles: async () => [memFile] });
+    const result = await memoryCommand.create({ readMemoryFiles: async () => [memFile] })({} as MemoryArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain("A plain heading");
@@ -110,7 +110,7 @@ describe("memory", () => {
     writeFileSync(path, "line one\nline two has Deploy here\nline three\n");
     cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
     const memFile = { project: "w-alpha", cwd: "/w/alpha", file: "note.md", path, updatedAt: Date.now() } as any;
-    const result = await memory({ search: "deploy" } as MemoryArgs, { readMemoryFiles: async () => [memFile] });
+    const result = await memoryCommand.create({ readMemoryFiles: async () => [memFile] })({ search: "deploy" } as MemoryArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain("match: 1 hit · line 2");
@@ -123,7 +123,7 @@ describe("memory", () => {
     writeFileSync(path, "Deploy the Missile\n");
     cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
     const memFile = { project: "w-alpha", cwd: "/w/alpha", file: "note.md", path, updatedAt: Date.now() } as any;
-    const result = await memory({ search: "MISSILE" } as MemoryArgs, { readMemoryFiles: async () => [memFile] });
+    const result = await memoryCommand.create({ readMemoryFiles: async () => [memFile] })({ search: "MISSILE" } as MemoryArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain("Deploy the Missile");
@@ -135,7 +135,7 @@ describe("memory", () => {
     writeFileSync(path, memoryFile("deploy notes"));
     cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
     const memFile = { project: "w-alpha", cwd: "/w/alpha", file: "note.md", path, updatedAt: Date.now() } as any;
-    const result = await memory({ search: "deploy" } as MemoryArgs, { readMemoryFiles: async () => [memFile] });
+    const result = await memoryCommand.create({ readMemoryFiles: async () => [memFile] })({ search: "deploy" } as MemoryArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain("deploy notes");
@@ -152,7 +152,7 @@ describe("memory", () => {
     cleanups.push(() => rmSync(dirMiss, { recursive: true, force: true }));
     const hitMem = { project: "w-alpha", cwd: "/w/alpha", file: "hit.md", path: pathHit, updatedAt: Date.now() } as any;
     const missMem = { project: "w-beta", cwd: "/w/beta", file: "miss.md", path: pathMiss, updatedAt: Date.now() } as any;
-    const result = await memory({ search: "parser" } as MemoryArgs, { readMemoryFiles: async () => [hitMem, missMem] });
+    const result = await memoryCommand.create({ readMemoryFiles: async () => [hitMem, missMem] })({ search: "parser" } as MemoryArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain("hit.md");
@@ -165,7 +165,7 @@ describe("memory", () => {
     writeFileSync(path, memoryFile("nested memory"));
     cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
     const memFile = { project: "w-alpha", cwd: "/w/alpha", file: "nested/deep.md", path, updatedAt: Date.now() } as any;
-    const result = await memory({ search: "nested memory" } as MemoryArgs, { readMemoryFiles: async () => [memFile] });
+    const result = await memoryCommand.create({ readMemoryFiles: async () => [memFile] })({ search: "nested memory" } as MemoryArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain("memory/nested/deep.md");
@@ -183,7 +183,7 @@ describe("memory", () => {
       path,
       updatedAt: Date.now(),
     } as any;
-    const result = await memory({ search: "not memory" } as MemoryArgs, { readMemoryFiles: async () => [memFile] });
+    const result = await memoryCommand.create({ readMemoryFiles: async () => [memFile] })({ search: "not memory" } as MemoryArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain('No memory files contain "not memory"');
@@ -205,7 +205,7 @@ describe("memory", () => {
     const oneMem = { project: "w-alpha", cwd: "/w/alpha", file: "one.md", path: p1, updatedAt: Date.parse("2026-10-20T10:00:00Z") } as any;
     const twoMem = { project: "w-alpha", cwd: "/w/alpha", file: "two.md", path: p2, updatedAt: Date.parse("2026-10-24T10:00:00Z") } as any;
     const threeMem = { project: "w-alpha", cwd: "/w/alpha", file: "three.md", path: p3, updatedAt: Date.parse("2026-10-26T10:00:00Z") } as any;
-    const result = await memory({ limit: "2" } as MemoryArgs, { readMemoryFiles: async () => [threeMem, twoMem, oneMem] });
+    const result = await memoryCommand.create({ readMemoryFiles: async () => [threeMem, twoMem, oneMem] })({ limit: "2" } as MemoryArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain("three.md");
@@ -225,7 +225,7 @@ describe("memory", () => {
     cleanups.push(() => rmSync(dirB, { recursive: true, force: true }));
     const memA = { project: "w-alpha", cwd: "/w/alpha", file: "a.md", path: pathA, updatedAt: Date.now() } as any;
     const memB = { project: "w-beta", cwd: "/w/beta", file: "b.md", path: pathB, updatedAt: Date.now() } as any;
-    const result = await memory({ search: "zzz-nope" } as MemoryArgs, { readMemoryFiles: async () => [memA, memB] });
+    const result = await memoryCommand.create({ readMemoryFiles: async () => [memA, memB] })({ search: "zzz-nope" } as MemoryArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain('No memory files contain "zzz-nope"');
@@ -233,7 +233,7 @@ describe("memory", () => {
   });
 
   it("reports an empty memory tree", async () => {
-    const result = await memory({} as MemoryArgs, { readMemoryFiles: async () => [] });
+    const result = await memoryCommand.create({ readMemoryFiles: async () => [] })({} as MemoryArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain("No memory files found");
@@ -242,7 +242,7 @@ describe("memory", () => {
   it("rejects a non-positive --limit value", () => {
     let thrown: unknown;
     try {
-      MemoryArgsSchema.parse({ limit: "0" });
+      memoryCommand.inputSchema.parse({ limit: "0" });
     } catch (e) {
       thrown = e;
     }
@@ -258,7 +258,7 @@ describe("memory", () => {
     writeFileSync(path, memoryFile("json memory"));
     cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
     const memFile = { project: "w-alpha", cwd: "/w/alpha", file: "note.md", path, updatedAt: Date.now() } as any;
-    const result = await memory({ search: "json" } as MemoryArgs, { readMemoryFiles: async () => [memFile] });
+    const result = await memoryCommand.create({ readMemoryFiles: async () => [memFile] })({ search: "json" } as MemoryArgs);
 
     expect(result.success).toBe(true);
     const rows = result.data ?? [];
@@ -289,7 +289,7 @@ describe("memory — files", () => {
     }
     cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
 
-    const result = await memory({ files: true } as MemoryArgs, { readMemoryFiles: async () => memFiles });
+    const result = await memoryCommand.create({ readMemoryFiles: async () => memFiles })({ files: true } as MemoryArgs);
 
     expect(result.success).toBe(true);
     const lines = result.message.trimEnd().split("\n");
@@ -303,7 +303,7 @@ describe("memory — files", () => {
   it("shortens the home prefix to ~", async () => {
     const path = join(homedir(), ".claude", "projects", "w-alpha", "memory", "note.md");
     const memFile = { project: "w-alpha", cwd: "/w/alpha", file: "note.md", path, updatedAt: Date.now() } as any;
-    const result = await memory({ files: true } as MemoryArgs, { readMemoryFiles: async () => [memFile] });
+    const result = await memoryCommand.create({ readMemoryFiles: async () => [memFile] })({ files: true } as MemoryArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain("~/.claude/projects/");
@@ -321,7 +321,7 @@ describe("memory — files", () => {
     cleanups.push(() => rmSync(dirMiss, { recursive: true, force: true }));
     const hitMem = { project: "w-alpha", cwd: "/w/alpha", file: "hit.md", path: pathHit, updatedAt: Date.now() } as any;
     const missMem = { project: "w-beta", cwd: "/w/beta", file: "miss.md", path: pathMiss, updatedAt: Date.now() } as any;
-    const result = await memory({ search: "parser", files: true } as MemoryArgs, { readMemoryFiles: async () => [hitMem, missMem] });
+    const result = await memoryCommand.create({ readMemoryFiles: async () => [hitMem, missMem] })({ search: "parser", files: true } as MemoryArgs);
 
     expect(result.success).toBe(true);
     const lines = result.message.trimEnd().split("\n");
@@ -341,7 +341,7 @@ describe("memory — files", () => {
     cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
     const oneMem = { project: "w-alpha", cwd: "/w/alpha", file: "one.md", path: p1, updatedAt: Date.parse("2026-10-20T10:00:00Z") } as any;
     const twoMem = { project: "w-alpha", cwd: "/w/alpha", file: "two.md", path: p2, updatedAt: Date.parse("2026-10-26T10:00:00Z") } as any;
-    const result = await memory({ files: true, limit: "1" } as MemoryArgs, { readMemoryFiles: async () => [oneMem, twoMem] });
+    const result = await memoryCommand.create({ readMemoryFiles: async () => [oneMem, twoMem] })({ files: true, limit: "1" } as MemoryArgs);
 
     expect(result.success).toBe(true);
     const lines = result.message.trimEnd().split("\n");

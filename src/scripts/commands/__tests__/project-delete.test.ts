@@ -13,8 +13,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { projectDelete } from "../../../lib/project-delete-command";
-import type { ProjectDeleteArgs } from "../../../lib/project-delete-command";
+import { projectDeleteCommand } from "../project-delete";
+import type { ProjectDeleteArgs, ProjectDeleteDeps } from "../project-delete";
 
 const CLI = join(import.meta.dir, "../../../runner/cli.ts");
 
@@ -102,10 +102,7 @@ function setup(options: { config?: Record<string, unknown> | null } = {}) {
 describe("project-delete", () => {
   it("refuses without --yes and keeps the project and its trust", async () => {
     const proj = { dir: "w-use-stock", cwd: "/w/use-stock", sessions: 2, updatedAt: Date.now() } as any;
-    const result = await projectDelete(
-      { target: "use-stock", yes: false } as ProjectDeleteArgs,
-      { readProjects: async () => [proj], readSessions: async () => [], existsSync: () => true, stat: async () => ({ isDirectory: () => true }) },
-    );
+    const result = await projectDeleteCommand.create({ readProjects: async () => [proj], readSessions: async () => [], existsSync: () => true, stat: async () => ({ isDirectory: () => true }) })({ target: "use-stock", yes: false } as ProjectDeleteArgs);
 
     expect(result.success).toBe(false);
     expect(result.message).toContain("without --yes");
@@ -114,9 +111,7 @@ describe("project-delete", () => {
   it("deletes the whole project directory with --yes", async () => {
     const proj = { dir: "w-use-stock", cwd: "/w/use-stock", sessions: 2, updatedAt: Date.now() } as any;
     const rmCalls: { path: string; opts: { recursive: boolean; force: boolean } }[] = [];
-    const result = await projectDelete(
-      { target: "/w/use-stock", yes: true } as ProjectDeleteArgs,
-      {
+    const result = await projectDeleteCommand.create({
         readProjects: async () => [proj],
         readSessions: async () => [],
         existsSync: () => true,
@@ -124,8 +119,7 @@ describe("project-delete", () => {
         projectsDir: "/tmp/fake-projects",
         rm: async (p, opts) => { rmCalls.push({ path: p, opts }); },
         forgetProjectConfig: async () => ({ removed: [], expiredAncestors: [], configPath: "/tmp/.claude.json", dryRun: false }),
-      },
-    );
+      })({ target: "/w/use-stock", yes: true } as ProjectDeleteArgs);
 
     expect(result.success).toBe(true);
     expect(rmCalls.length).toBe(1);
@@ -134,9 +128,7 @@ describe("project-delete", () => {
 
   it("resets the project's trust entry and preserves other config", async () => {
     const proj = { dir: "w-use-stock", cwd: "/w/use-stock", sessions: 2, updatedAt: Date.now() } as any;
-    const result = await projectDelete(
-      { target: "/w/use-stock", yes: true } as ProjectDeleteArgs,
-      {
+    const result = await projectDeleteCommand.create({
         readProjects: async () => [proj],
         readSessions: async () => [],
         existsSync: () => true,
@@ -144,8 +136,7 @@ describe("project-delete", () => {
         projectsDir: "/tmp/fake-projects",
         rm: async () => {},
         forgetProjectConfig: async () => ({ removed: ["/w/use-stock"], expiredAncestors: [], configPath: "/tmp/.claude.json", dryRun: false }),
-      },
-    );
+      })({ target: "/w/use-stock", yes: true } as ProjectDeleteArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain("Reset trust config for /w/use-stock");
@@ -153,17 +144,14 @@ describe("project-delete", () => {
 
   it("--keep-config preserves the trust entry", async () => {
     const proj = { dir: "w-use-stock", cwd: "/w/use-stock", sessions: 1, updatedAt: Date.now() } as any;
-    const result = await projectDelete(
-      { target: "/w/use-stock", yes: true, "keep-config": true } as ProjectDeleteArgs,
-      {
+    const result = await projectDeleteCommand.create({
         readProjects: async () => [proj],
         readSessions: async () => [],
         existsSync: () => true,
         stat: async () => ({ isDirectory: () => true }),
         projectsDir: "/tmp/fake-projects",
         rm: async () => {},
-      },
-    );
+      })({ target: "/w/use-stock", yes: true, "keep-config": true } as ProjectDeleteArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain("Kept Claude Code trust config");
@@ -171,9 +159,7 @@ describe("project-delete", () => {
 
   it("accepts a unique workspace-path suffix", async () => {
     const proj = { dir: "Volumes-GoldenSnake-git-use-stock", cwd: "/Volumes/GoldenSnake/git/use-stock", sessions: 1, updatedAt: Date.now() } as any;
-    const result = await projectDelete(
-      { target: "git/use-stock", yes: true } as ProjectDeleteArgs,
-      {
+    const result = await projectDeleteCommand.create({
         readProjects: async () => [proj],
         readSessions: async () => [],
         existsSync: () => true,
@@ -181,8 +167,7 @@ describe("project-delete", () => {
         projectsDir: "/tmp/fake-projects",
         rm: async () => {},
         forgetProjectConfig: async () => ({ removed: [], expiredAncestors: [], configPath: "/tmp/.claude.json", dryRun: false }),
-      },
-    );
+      })({ target: "git/use-stock", yes: true } as ProjectDeleteArgs);
 
     expect(result.success).toBe(true);
   });
@@ -200,11 +185,11 @@ describe("project-delete", () => {
       forgetProjectConfig: async () => ({ removed: [], expiredAncestors: [], configPath: "/tmp/.claude.json", dryRun: false }),
     };
 
-    const blocked = await projectDelete({ target: "/w/alpha", yes: true } as ProjectDeleteArgs, deps);
+    const blocked = await projectDeleteCommand.create(deps)({ target: "/w/alpha", yes: true } as ProjectDeleteArgs);
     expect(blocked.success).toBe(false);
     expect(blocked.message).toContain("1 active session");
 
-    const forced = await projectDelete({ target: "/w/alpha", yes: true, force: true } as ProjectDeleteArgs, deps);
+    const forced = await projectDeleteCommand.create(deps)({ target: "/w/alpha", yes: true, force: true } as ProjectDeleteArgs);
     expect(forced.success).toBe(true);
     expect(forced.message).toContain("may restore its config entry");
   });
@@ -213,9 +198,7 @@ describe("project-delete", () => {
     const proj = { dir: "w-alpha", cwd: "/w/alpha", sessions: 1, updatedAt: Date.now() } as any;
     const session = { cwd: "/w/alpha" } as any;
     const rmCalls: any[] = [];
-    const result = await projectDelete(
-      { target: "/w/alpha", "dry-run": true } as ProjectDeleteArgs,
-      {
+    const result = await projectDeleteCommand.create({
         readProjects: async () => [proj],
         readSessions: async () => [session],
         existsSync: () => true,
@@ -223,8 +206,7 @@ describe("project-delete", () => {
         projectsDir: "/tmp/fake-projects",
         rm: async (p: any, opts: any) => { rmCalls.push({ p, opts }); },
         forgetProjectConfig: async () => ({ removed: ["/w/alpha"], expiredAncestors: ["/w"], configPath: "/tmp/.claude.json", dryRun: true }),
-      },
-    );
+      })({ target: "/w/alpha", "dry-run": true } as ProjectDeleteArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain("Would delete /w/alpha (1 session)");
@@ -236,9 +218,7 @@ describe("project-delete", () => {
 
   it("resets trust under the git root for a folder inside a repository", async () => {
     const proj = { dir: "repo-packages-app", cwd: "/repo/sub/project", sessions: 1, updatedAt: Date.now() } as any;
-    const result = await projectDelete(
-      { target: "/repo/sub/project", yes: true } as ProjectDeleteArgs,
-      {
+    const result = await projectDeleteCommand.create({
         readProjects: async () => [proj],
         readSessions: async () => [],
         existsSync: () => true,
@@ -246,8 +226,7 @@ describe("project-delete", () => {
         projectsDir: "/tmp/fake-projects",
         rm: async () => {},
         forgetProjectConfig: async () => ({ removed: ["/repo/sub/project"], expiredAncestors: ["/repo"], configPath: "/tmp/.claude.json", dryRun: false }),
-      },
-    );
+      })({ target: "/repo/sub/project", yes: true } as ProjectDeleteArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain("Reset trust config");
@@ -256,9 +235,7 @@ describe("project-delete", () => {
 
   it("writes through a symlinked ~/.claude.json without replacing the link", async () => {
     const proj = { dir: "w-alpha", cwd: "/w/alpha", sessions: 1, updatedAt: Date.now() } as any;
-    const result = await projectDelete(
-      { target: "/w/alpha", yes: true } as ProjectDeleteArgs,
-      {
+    const result = await projectDeleteCommand.create({
         readProjects: async () => [proj],
         readSessions: async () => [],
         existsSync: () => true,
@@ -266,8 +243,7 @@ describe("project-delete", () => {
         projectsDir: "/tmp/fake-projects",
         rm: async () => {},
         forgetProjectConfig: async () => ({ removed: ["/w/alpha"], expiredAncestors: [], configPath: "/tmp/.claude.json", dryRun: false }),
-      },
-    );
+      })({ target: "/w/alpha", yes: true } as ProjectDeleteArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain("Reset trust config");
@@ -275,9 +251,7 @@ describe("project-delete", () => {
 
   it("resets an existing folder whose transcripts are already gone", async () => {
     const candidate = "/tmp/existing-folder";
-    const result = await projectDelete(
-      { target: candidate, yes: true } as ProjectDeleteArgs,
-      {
+    const result = await projectDeleteCommand.create({
         readProjects: async () => [],
         readSessions: async () => [],
         existsSync: () => true,
@@ -285,8 +259,7 @@ describe("project-delete", () => {
         projectsDir: "/tmp/fake-projects",
         rm: async () => {},
         forgetProjectConfig: async () => ({ removed: [candidate], expiredAncestors: [], configPath: "/tmp/.claude.json", dryRun: false }),
-      },
-    );
+      })({ target: candidate, yes: true } as ProjectDeleteArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain("(0 sessions)");
@@ -294,9 +267,7 @@ describe("project-delete", () => {
 
   it("clears inherited trust on ancestors so the prompt returns", async () => {
     const proj = { dir: "w-alpha", cwd: "/w/alpha", sessions: 1, updatedAt: Date.now() } as any;
-    const result = await projectDelete(
-      { target: "/w/alpha", yes: true } as ProjectDeleteArgs,
-      {
+    const result = await projectDeleteCommand.create({
         readProjects: async () => [proj],
         readSessions: async () => [],
         existsSync: () => true,
@@ -304,8 +275,7 @@ describe("project-delete", () => {
         projectsDir: "/tmp/fake-projects",
         rm: async () => {},
         forgetProjectConfig: async () => ({ removed: ["/w/alpha"], expiredAncestors: ["/w"], configPath: "/tmp/.claude.json", dryRun: false }),
-      },
-    );
+      })({ target: "/w/alpha", yes: true } as ProjectDeleteArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain("Cleared inherited trust");
@@ -314,9 +284,7 @@ describe("project-delete", () => {
 
   it("deletes without a config file", async () => {
     const proj = { dir: "w-alpha", cwd: "/w/alpha", sessions: 1, updatedAt: Date.now() } as any;
-    const result = await projectDelete(
-      { target: "/w/alpha", yes: true } as ProjectDeleteArgs,
-      {
+    const result = await projectDeleteCommand.create({
         readProjects: async () => [proj],
         readSessions: async () => [],
         existsSync: () => true,
@@ -324,8 +292,7 @@ describe("project-delete", () => {
         projectsDir: "/tmp/fake-projects",
         rm: async () => {},
         forgetProjectConfig: async () => ({ removed: [], expiredAncestors: [], configPath: "/tmp/.claude.json", dryRun: false }),
-      },
-    );
+      })({ target: "/w/alpha", yes: true } as ProjectDeleteArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain("No Claude Code trust config entry to reset");
@@ -333,10 +300,7 @@ describe("project-delete", () => {
 
   it("reports an unknown target and lists alternatives", async () => {
     const projects = [{ dir: "w-alpha", cwd: "/w/alpha", sessions: 1, updatedAt: Date.now() } as any];
-    const result = await projectDelete(
-      { target: "nope" } as ProjectDeleteArgs,
-      { readProjects: async () => projects, existsSync: () => false },
-    );
+    const result = await projectDeleteCommand.create({ readProjects: async () => projects, existsSync: () => false })({ target: "nope" } as ProjectDeleteArgs);
 
     expect(result.success).toBe(false);
     expect(result.message).toContain('No project matches "nope"');
@@ -346,10 +310,7 @@ describe("project-delete", () => {
   it("refuses an ambiguous basename and names the candidates", async () => {
     const proj1 = { dir: "w-a-app", cwd: "/w/a/app", sessions: 1, updatedAt: Date.now() } as any;
     const proj2 = { dir: "w-b-app", cwd: "/w/b/app", sessions: 1, updatedAt: Date.now() } as any;
-    const result = await projectDelete(
-      { target: "app" } as ProjectDeleteArgs,
-      { readProjects: async () => [proj1, proj2] },
-    );
+    const result = await projectDeleteCommand.create({ readProjects: async () => [proj1, proj2] })({ target: "app" } as ProjectDeleteArgs);
 
     expect(result.success).toBe(false);
     expect(result.message).toContain("ambiguous");

@@ -180,12 +180,27 @@ describe("schedule add page", () => {
   });
 
   it("limits routine preview runs to the inclusive end date", async () => {
+    const start = new Date();
+    start.setSeconds(0, 0);
+    start.setMinutes(start.getMinutes() + 1);
+    const firstRun = new Date(start.getFullYear(), start.getMonth(), start.getDate(), 9, 0, 0, 0);
+    if (firstRun < start) firstRun.setDate(firstRun.getDate() + 1);
+    const endRun = new Date(firstRun);
+    endRun.setDate(endRun.getDate() + 2);
+    const endDate = `${endRun.getFullYear()}-${String(endRun.getMonth() + 1).padStart(2, "0")}-${String(endRun.getDate()).padStart(2, "0")}`;
+    const formatRunLabel = (run: Date) => {
+      const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][run.getDay()];
+      return `${weekday} ${run.getDate()} ${run.toLocaleString("en", { month: "short" })} • 09:00`;
+    };
+
     const { container } = await mount();
     await clickButton(container, "Routine");
     await act(() => { setFieldValue(query(container, "#schedule-ends") as HTMLSelectElement, "On a date"); });
-    await act(() => { setFieldValue(query(container, "#schedule-end-date") as HTMLInputElement, "2026-11-25"); });
-    expect(container.textContent).toContain("Wed 25 Nov • 09:00");
-    expect(container.textContent).not.toContain("Thu 26 Nov • 09:00");
+    await act(() => { setFieldValue(query(container, "#schedule-end-date") as HTMLInputElement, endDate); });
+    expect(container.textContent).toContain(formatRunLabel(endRun));
+    const afterEnd = new Date(endRun);
+    afterEnd.setDate(afterEnd.getDate() + 1);
+    expect(container.textContent).not.toContain(formatRunLabel(afterEnd));
   });
 
   it("adds a daily routine locally", async () => {

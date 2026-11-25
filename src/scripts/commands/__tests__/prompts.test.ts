@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { prompts, PromptsArgsSchema } from "../../../lib/prompts-command";
-import type { PromptsArgs } from "../../../lib/prompts-command";
+import { promptsCommand } from "../prompts";
+import type { PromptsArgs } from "../prompts";
 
 const CLI = join(import.meta.dir, "../../../runner/cli.ts");
 
@@ -132,13 +132,10 @@ describe("prompts", () => {
       online: true,
       status: "idle",
     } as any;
-    const result = await prompts(
-      {} as PromptsArgs,
-      {
+    const result = await promptsCommand.create({
         readSessions: async () => [session],
         readPrompts: async () => [{ kind: "typed", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "first question" }],
-      },
-    );
+      })({} as PromptsArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain("first question");
@@ -157,16 +154,13 @@ describe("prompts", () => {
       online: true,
       status: "idle",
     } as any;
-    const result = await prompts(
-      {} as PromptsArgs,
-      {
+    const result = await promptsCommand.create({
         readSessions: async () => [session],
         readPrompts: async () => [
           { kind: "typed", line: 1, timestamp: Date.parse("2026-10-20T10:00:00.000Z"), text: "older prompt" },
           { kind: "typed", line: 2, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "newer prompt" },
         ],
-      },
-    );
+      })({} as PromptsArgs);
 
     expect(result.success).toBe(true);
     expect(result.message.indexOf("newer prompt")).toBeLessThan(result.message.indexOf("older prompt"));
@@ -188,11 +182,11 @@ describe("prompts", () => {
       readPrompts: async () => [{ kind: "typed" as const, line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "please fix the parser" }],
     };
 
-    const hit = await prompts({ search: "parser" } as PromptsArgs, deps);
+    const hit = await promptsCommand.create(deps)({ search: "parser" } as PromptsArgs);
     expect(hit.success).toBe(true);
     expect(hit.message).toContain("please fix the parser");
 
-    const miss = await prompts({ search: "missile" } as PromptsArgs, deps);
+    const miss = await promptsCommand.create(deps)({ search: "missile" } as PromptsArgs);
     expect(miss.success).toBe(true);
     expect(miss.message).toContain('No prompts contain "missile"');
   });
@@ -208,13 +202,10 @@ describe("prompts", () => {
       online: true,
       status: "idle",
     } as any;
-    const result = await prompts(
-      { search: "MISSILE" } as PromptsArgs,
-      {
+    const result = await promptsCommand.create({
         readSessions: async () => [session],
         readPrompts: async () => [{ kind: "typed", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "Deploy the Missile" }],
-      },
-    );
+      })({ search: "MISSILE" } as PromptsArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain("Deploy the Missile");
@@ -231,13 +222,10 @@ describe("prompts", () => {
       online: true,
       status: "idle",
     } as any;
-    const result = await prompts(
-      { search: "check the build" } as PromptsArgs,
-      {
+    const result = await promptsCommand.create({
         readSessions: async () => [session],
         readPrompts: async () => [{ kind: "peer", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "check the build" }],
-      },
-    );
+      })({ search: "check the build" } as PromptsArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain("[peer]");
@@ -257,17 +245,14 @@ describe("prompts", () => {
       online: true,
       status: "idle",
     } as any;
-    const result = await prompts(
-      { limit: "2" } as PromptsArgs,
-      {
+    const result = await promptsCommand.create({
         readSessions: async () => [session],
         readPrompts: async () => [
           { kind: "typed", line: 1, timestamp: Date.parse("2026-10-24T10:00:00.000Z"), text: "one" },
           { kind: "typed", line: 2, timestamp: Date.parse("2026-10-25T10:00:00.000Z"), text: "two" },
           { kind: "typed", line: 3, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "three" },
         ],
-      },
-    );
+      })({ limit: "2" } as PromptsArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain("three");
@@ -297,15 +282,12 @@ describe("prompts", () => {
       online: true,
       status: "idle",
     } as any;
-    const result = await prompts(
-      { "filter-name": "DESIGN" } as PromptsArgs,
-      {
+    const result = await promptsCommand.create({
         readSessions: async () => [designSession, stockSession],
         readPrompts: async (s: any) => s.name === "use-design-05"
           ? [{ kind: "typed", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "design prompt" }]
           : [{ kind: "typed", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "stock prompt" }],
-      },
-    );
+      })({ "filter-name": "DESIGN" } as PromptsArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain("design prompt");
@@ -323,13 +305,10 @@ describe("prompts", () => {
       online: false,
       status: "offline",
     } as any;
-    const result = await prompts(
-      { search: "ancient wisdom" } as PromptsArgs,
-      {
+    const result = await promptsCommand.create({
         readSessions: async () => [offlineSession],
         readPrompts: async () => [{ kind: "typed", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "ancient wisdom here" }],
-      },
-    );
+      })({ search: "ancient wisdom" } as PromptsArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain("dead-session");
@@ -357,13 +336,10 @@ describe("prompts", () => {
       online: true,
       status: "idle",
     } as any;
-    const result = await prompts(
-      { search: "zzz-nope" } as PromptsArgs,
-      {
+    const result = await promptsCommand.create({
         readSessions: async () => [s1, s2],
         readPrompts: async () => [{ kind: "typed", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "nothing relevant" }],
-      },
-    );
+      })({ search: "zzz-nope" } as PromptsArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain('No prompts contain "zzz-nope"');
@@ -373,7 +349,7 @@ describe("prompts", () => {
   it("rejects a non-positive --limit value", () => {
     let err: any;
     try {
-      PromptsArgsSchema.parse({ limit: "0" });
+      promptsCommand.inputSchema.parse({ limit: "0" });
     } catch (e) {
       err = e;
     }
@@ -392,13 +368,10 @@ describe("prompts", () => {
       online: true,
       status: "idle",
     } as any;
-    const result = await prompts(
-      { search: "json" } as PromptsArgs,
-      {
+    const result = await promptsCommand.create({
         readSessions: async () => [session],
         readPrompts: async () => [{ kind: "typed", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "json prompt" }],
-      },
-    );
+      })({ search: "json" } as PromptsArgs);
 
     expect(result.success).toBe(true);
     expect(result.data?.length).toBe(1);
@@ -418,13 +391,10 @@ describe("prompts", () => {
       online: true,
       status: "idle",
     } as any;
-    const result = await prompts(
-      { search: "second line" } as PromptsArgs,
-      {
+    const result = await promptsCommand.create({
         readSessions: async () => [session],
         readPrompts: async () => [{ kind: "typed", line: 2, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "second line prompt" }],
-      },
-    );
+      })({ search: "second line" } as PromptsArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain("L2");
@@ -441,13 +411,10 @@ describe("prompts", () => {
       online: true,
       status: "idle",
     } as any;
-    const result = await prompts(
-      { show: "L3" } as PromptsArgs,
-      {
+    const result = await promptsCommand.create({
         readSessions: async () => [session],
         readPrompts: async () => [{ kind: "typed", line: 3, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "full prompt text here" }],
-      },
-    );
+      })({ show: "L3" } as PromptsArgs);
 
     expect(result.success).toBe(true);
     expect(result.result).toContain("full prompt text here");
@@ -464,13 +431,10 @@ describe("prompts", () => {
       online: true,
       status: "idle",
     } as any;
-    const result = await prompts(
-      { show: "L5" } as PromptsArgs,
-      {
+    const result = await promptsCommand.create({
         readSessions: async () => [session],
         readPrompts: async () => [{ kind: "typed", line: 5, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "referenced prompt" }],
-      },
-    );
+      })({ show: "L5" } as PromptsArgs);
 
     expect(result.success).toBe(true);
     expect(result.result).toContain("referenced prompt");
@@ -487,13 +451,10 @@ describe("prompts", () => {
       online: true,
       status: "idle",
     } as any;
-    const result = await prompts(
-      { show: "L99" } as PromptsArgs,
-      {
+    const result = await promptsCommand.create({
         readSessions: async () => [session],
         readPrompts: async () => [{ kind: "typed", line: 3, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "only prompt" }],
-      },
-    );
+      })({ show: "L99" } as PromptsArgs);
 
     expect(result.success).toBe(false);
     expect(result.message).toContain("No prompt at line 99");
@@ -502,7 +463,7 @@ describe("prompts", () => {
   it("rejects a non-numeric --show value", () => {
     let err: any;
     try {
-      PromptsArgsSchema.parse({ show: "abc" });
+      promptsCommand.inputSchema.parse({ show: "abc" });
     } catch (e) {
       err = e;
     }
@@ -533,15 +494,12 @@ describe("prompts — target", () => {
       online: true,
       status: "idle",
     } as any;
-    const result = await prompts(
-      { target: "use-design-da", search: "deploy" } as PromptsArgs,
-      {
+    const result = await promptsCommand.create({
         readSessions: async () => [designSession, stockSession],
         readPrompts: async (s: any) => s.name === "use-design-da"
           ? [{ kind: "typed", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "deploy the design" }]
           : [{ kind: "typed", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "deploy the stock" }],
-      },
-    );
+      })({ target: "use-design-da", search: "deploy" } as PromptsArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain("deploy the design");
@@ -560,13 +518,10 @@ describe("prompts — target", () => {
       online: true,
       status: "idle",
     } as any;
-    const result = await prompts(
-      { target: sessionId } as PromptsArgs,
-      {
+    const result = await promptsCommand.create({
         readSessions: async () => [session],
         readPrompts: async () => [{ kind: "typed", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "find me by id" }],
-      },
-    );
+      })({ target: sessionId } as PromptsArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain("find me by id");
@@ -583,16 +538,13 @@ describe("prompts — target", () => {
       online: true,
       status: "idle",
     } as any;
-    const result = await prompts(
-      { target: "use-design-da" } as PromptsArgs,
-      {
+    const result = await promptsCommand.create({
         readSessions: async () => [session],
         readPrompts: async () => [
           { kind: "typed", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "design only" },
           { kind: "typed", line: 2, timestamp: Date.parse("2026-10-26T10:00:01.000Z"), text: "second design prompt" },
         ],
-      },
-    );
+      })({ target: "use-design-da" } as PromptsArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain("design only");
@@ -610,13 +562,10 @@ describe("prompts — target", () => {
       online: true,
       status: "idle",
     } as any;
-    const result = await prompts(
-      { target: "use-design-da", search: "targeted" } as PromptsArgs,
-      {
+    const result = await promptsCommand.create({
         readSessions: async () => [session],
         readPrompts: async () => [{ kind: "typed", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "targeted search match" }],
-      },
-    );
+      })({ target: "use-design-da", search: "targeted" } as PromptsArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain("targeted search match");
@@ -633,13 +582,10 @@ describe("prompts — target", () => {
       online: true,
       status: "idle",
     } as any;
-    const result = await prompts(
-      { target: "nope", search: "deploy" } as PromptsArgs,
-      {
+    const result = await promptsCommand.create({
         readSessions: async () => [session],
         readPrompts: async () => [{ kind: "typed", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "alpha prompt" }],
-      },
-    );
+      })({ target: "nope", search: "deploy" } as PromptsArgs);
 
     expect(result.success).toBe(false);
     expect(result.message).toContain('No session matches "nope"');
@@ -667,13 +613,10 @@ describe("prompts — target", () => {
       online: true,
       status: "idle",
     } as any;
-    const result = await prompts(
-      { target: "use-design", search: "deploy" } as PromptsArgs,
-      {
+    const result = await promptsCommand.create({
         readSessions: async () => [s1, s2],
         readPrompts: async (s: any) => [{ kind: "typed", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: `${s.name} prompt` }],
-      },
-    );
+      })({ target: "use-design", search: "deploy" } as PromptsArgs);
 
     expect(result.success).toBe(false);
     expect(result.message).toContain("ambiguous");
@@ -692,13 +635,10 @@ describe("prompts — target", () => {
       online: true,
       status: "idle",
     } as any;
-    const result = await prompts(
-      { target: "use-design-da", search: "zzz-nope" } as PromptsArgs,
-      {
+    const result = await promptsCommand.create({
         readSessions: async () => [session],
         readPrompts: async () => [{ kind: "typed", line: 1, timestamp: Date.parse("2026-10-26T10:00:00.000Z"), text: "some other text" }],
-      },
-    );
+      })({ target: "use-design-da", search: "zzz-nope" } as PromptsArgs);
 
     expect(result.success).toBe(true);
     expect(result.message).toContain('No prompts contain "zzz-nope" in use-design-da.');

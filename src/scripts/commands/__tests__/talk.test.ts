@@ -1,14 +1,12 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { createConnection } from "node:net";
-import { talk, type TalkArgs, type TalkDeps } from "../../../lib/talk-command";
+import { talkCommand } from "../talk";
+import type { TalkArgs, TalkDeps } from "../talk";
 import { sendWithReply } from "../../../lib/reply-send";
 import { sessionLabel as label } from "../../../lib/sessions";
-import { preprocessTalkArgv } from "../../../lib/talk-argv";
-import { talkToAll } from "../../../lib/talk-to-all-command";
 
 const cleanups: (() => void)[] = [];
 let received = "";
@@ -144,7 +142,7 @@ function setup() {
     }
 
     // wait socket drain helper
-    const res = await talk(talkArgs, deps);
+    const res = await talkCommand.create(deps)(talkArgs);
     return { code: res.success ? 0 : 1, out: res.message, err: res.success ? "" : res.message, received: () => received };
   }
 
@@ -179,15 +177,6 @@ function lastContent(raw: string): string {
   } catch {
     return "";
   }
-}
-
-async function waitFor(predicate: () => boolean, timeoutMs = 1000) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (predicate()) return true;
-    
-  }
-  return predicate();
 }
 
 describe("talk", () => {
