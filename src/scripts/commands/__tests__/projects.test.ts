@@ -1,37 +1,80 @@
-import { afterEach, describe, expect, it } from "bun:test";
-import {
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-  utimesSync,
-  writeFileSync,
-} from "node:fs";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { bunMockModule } from "modality-bun-kit";
+import { mkdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { inspect } from "node:util";
 
-const CLI = join(import.meta.dir, "../../../runner/cli.ts");
+const home = join(tmpdir(), "use-code-cli-perf-commands");
+mkdirSync(home, { recursive: true });
 
-const cleanups: (() => void)[] = [];
+// Pin project/session discovery to temp HOME with scoped, restorable mocks.
+const actualOs = await import("node:os");
+const resetOs = await bunMockModule("node:os", () => ({ ...actualOs, homedir: () => home }), import.meta.dir);
 
-afterEach(() => {
-  while (cleanups.length > 0) cleanups.pop()?.();
+const freshSessions = await import("../../../lib/sessions.ts?perf-projects=1");
+const resetSessions = await bunMockModule("../../../lib/sessions", () => freshSessions, import.meta.dir);
+
+const realProjects = await import("../../../lib/projects.ts?perf-projects=1");
+const resetProjects = await bunMockModule("../../../lib/projects", () => ({ ...realProjects, readProjects: realProjects.readProjects }), import.meta.dir);
+
+const { createCliRunner } = await import("modality-cli-kit");
+const { cliConfig } = await import("../../../config/cliConfig");
+const { normalizeCliArgv } = await import("../../../lib/cli-argv");
+
+const runner = createCliRunner({ ...cliConfig });
+const stringify = (value: unknown): string => typeof value === "string" ? value : inspect(value);
+
+async function invoke(...args: string[]) {
+  const { argv, error } = await normalizeCliArgv(args);
+  if (error) return { code: 1, out: "", err: error };
+
+  const out: string[] = [];
+  const err: string[] = [];
+  const originalLog = console.log;
+  const originalError = console.error;
+  const originalExitCode = process.exitCode;
+  console.log = (...values: unknown[]) => { out.push(values.map(stringify).join(" ")); };
+  console.error = (...values: unknown[]) => { err.push(values.map(stringify).join(" ")); };
+
+  try {
+    const code = await runner.run(argv);
+    return { code, out: out.join("\n"), err: err.join("\n") };
+  } finally {
+    console.log = originalLog;
+    console.error = originalError;
+    process.exitCode = originalExitCode;
+  }
+}
+
+const originalHome = process.env.HOME;
+const originalCwd = process.cwd();
+
+beforeAll(() => {
+  process.env.HOME = home;
+  process.chdir(home);
 });
 
-/** A throwaway HOME holding a fake ~/.claude tree. */
+afterAll(() => {
+  process.chdir(originalCwd);
+  if (originalHome === undefined) delete process.env.HOME;
+  else process.env.HOME = originalHome;
+  rmSync(home, { recursive: true, force: true });
+  resetProjects();
+  resetSessions();
+  resetOs();
+});
+
 function setup() {
-  const home = mkdtempSync(join(tmpdir(), "use-code-cli-"));
   const sessionsDir = join(home, ".claude", "sessions");
   const projectsDir = join(home, ".claude", "projects");
+  rmSync(sessionsDir, { recursive: true, force: true });
+  rmSync(projectsDir, { recursive: true, force: true });
   mkdirSync(sessionsDir, { recursive: true });
   mkdirSync(projectsDir, { recursive: true });
 
-  const sleeps: Bun.Subprocess[] = [];
-  cleanups.push(() => {
-    for (const p of sleeps) p.kill();
-    rmSync(home, { recursive: true, force: true });
-  });
+  let seq = 0;
 
-  /** Write one project directory with a transcript per session id. */
   function addProject(cwd: string, sessionIds: string[], updatedAt = Date.now()) {
     const dir = cwd.replace(/[^a-zA-Z0-9]/g, "-");
     const path = join(projectsDir, dir);
@@ -44,15 +87,15 @@ function setup() {
     return { dir, path };
   }
 
-  /** Register a live session backed by a `sleep` so it counts as active. */
+  // A live record only needs a PID that is still alive; this process qualifies.
   function addSession(name: string, cwd: string) {
-    const proc = Bun.spawn(["sleep", "30"]);
-    sleeps.push(proc);
+    seq += 1;
+    const pid = process.pid;
     writeFileSync(
-      join(sessionsDir, `${proc.pid}.json`),
+      join(sessionsDir, `${pid}-${seq}.json`),
       JSON.stringify({
-        pid: proc.pid,
-        sessionId: `session-${proc.pid}`,
+        pid,
+        sessionId: `session-${pid}-${seq}`,
         name,
         cwd,
         status: "idle",
@@ -63,17 +106,7 @@ function setup() {
   }
 
   async function run(...args: string[]) {
-    const proc = Bun.spawn([process.execPath, CLI, ...args], {
-      env: { ...process.env, HOME: home },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const code = await proc.exited;
-    const [out, err] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    return { code, out, err };
+    return invoke(...args);
   }
 
   return { addProject, addSession, run };

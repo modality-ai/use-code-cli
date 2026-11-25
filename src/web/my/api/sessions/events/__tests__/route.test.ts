@@ -1,14 +1,17 @@
-import { describe, expect, it, mock } from "bun:test";
+import { afterAll, describe, expect, it } from "bun:test";
+import { bunMockModule } from "modality-bun-kit";
 
 const mockedSessions = [
   { name: "alpha", sessionId: "sid-1", hero: "JAMES", status: "busy", lastPrompt: "hello" },
 ];
 
-mock.module("../../../../../../lib/live", () => ({
+const resetLive = await bunMockModule("../../../../../../lib/live", () => ({
   fetchSessions: async () => mockedSessions,
-}));
+}), import.meta.dir);
 
 const { GET } = await import("../route");
+
+afterAll(() => resetLive());
 
 describe("sessions events route", () => {
   it("returns an SSE Response with SSE headers", async () => {

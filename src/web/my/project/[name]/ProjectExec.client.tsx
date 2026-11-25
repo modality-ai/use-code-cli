@@ -98,31 +98,64 @@ export default function ProjectExec({ name: initialName }: ProjectExecProps) {
 
   return (
     <div>
-      <div className="flex items-center gap-2 mb-md">
-        <a href="/my/projects" className="text-xs text-accent-collaboration hover:underline">← Back to projects</a>
-        <h1 className="text-2xl font-semibold font-display">Project: {name}</h1>
-        <a
-          href={`/my/project/${encodeURIComponent(name)}/config`}
-          title="Project config"
-          aria-label="Project config"
-          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-sm border border-transparent text-text-muted transition-colors duration-150 hover:border-border hover:bg-surface hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-paper"
+      <div className="mb-md grid grid-cols-[1fr_auto] items-center gap-x-2 gap-y-2 sm:flex sm:flex-wrap sm:gap-x-3">
+        <a href="/my/projects" className="order-1 shrink-0 whitespace-nowrap text-xs text-accent-collaboration hover:underline">← Back to projects</a>
+        <h1
+          className="order-3 col-span-2 min-w-0 truncate text-2xl font-semibold font-display sm:order-2 sm:col-span-1 sm:flex-1"
+          title={`Project: ${name}`}
         >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 24 24"
-            className="h-5 w-5 shrink-0"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={1.75}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-            focusable="false"
+          Project: {name}
+        </h1>
+        <div className="order-2 flex shrink-0 items-center gap-2 sm:order-3 sm:ml-auto">
+          <a
+            href={`/my/project/${encodeURIComponent(name)}/config`}
+            title="Project config"
+            aria-label="Project config"
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-sm border border-transparent text-text-muted transition-colors duration-150 hover:border-border hover:bg-surface hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-paper"
           >
-            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-            <circle cx="12" cy="12" r="3" />
-          </svg>
-        </a>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              className="h-5 w-5 shrink-0"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.75}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+          </a>
+          <a
+            href={`/my/schedule/add?project=${encodeURIComponent(name)}`}
+            title="Add schedule item"
+            aria-label="Add schedule item"
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-sm border border-transparent text-text-muted transition-colors duration-150 hover:border-border hover:bg-surface hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-paper"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              className="h-5 w-5 shrink-0"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.75}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path d="M21 13V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8" />
+              <path d="M16 2v4" />
+              <path d="M8 2v4" />
+              <path d="M3 10h18" />
+              <path d="M19 16v6" />
+              <path d="M16 19h6" />
+            </svg>
+          </a>
+        </div>
       </div>
       <div className="mb-sm">
         <input

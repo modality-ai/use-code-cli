@@ -1,34 +1,73 @@
-import { afterEach, describe, expect, it } from "bun:test";
-import {
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-  utimesSync,
-  writeFileSync,
-} from "node:fs";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { bunMockModule } from "modality-bun-kit";
+import { mkdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { inspect } from "node:util";
 
-const CLI = join(import.meta.dir, "../../../runner/cli.ts");
+const home = join(tmpdir(), "use-code-cli-perf-commands");
+mkdirSync(home, { recursive: true });
 
-const cleanups: (() => void)[] = [];
+const actualOs = await import("node:os");
+const resetOs = await bunMockModule("node:os", () => ({ ...actualOs, homedir: () => home }), import.meta.dir);
 
-afterEach(() => {
-  while (cleanups.length > 0) cleanups.pop()?.();
+const freshSessions = await import("../../../lib/sessions.ts?perf-project=1");
+const resetSessions = await bunMockModule("../../../lib/sessions", () => freshSessions, import.meta.dir);
+
+const realProjects = await import("../../../lib/projects.ts?perf-project=1");
+const resetProjects = await bunMockModule("../../../lib/projects", () => ({ ...realProjects, readProjects: realProjects.readProjects }), import.meta.dir);
+
+const { createCliRunner } = await import("modality-cli-kit");
+const { cliConfig } = await import("../../../config/cliConfig");
+const { normalizeCliArgv } = await import("../../../lib/cli-argv");
+
+const runner = createCliRunner({ ...cliConfig });
+const stringify = (value: unknown): string => typeof value === "string" ? value : inspect(value);
+
+async function invoke(...args: string[]) {
+  const { argv, error } = await normalizeCliArgv(args);
+  if (error) return { code: 1, out: "", err: error };
+
+  const out: string[] = [];
+  const err: string[] = [];
+  const originalLog = console.log;
+  const originalError = console.error;
+  const originalExitCode = process.exitCode;
+  console.log = (...values: unknown[]) => { out.push(values.map(stringify).join(" ")); };
+  console.error = (...values: unknown[]) => { err.push(values.map(stringify).join(" ")); };
+
+  try {
+    const code = await runner.run(argv);
+    return { code, out: out.join("\n"), err: err.join("\n") };
+  } finally {
+    console.log = originalLog;
+    console.error = originalError;
+    process.exitCode = originalExitCode;
+  }
+}
+
+const originalHome = process.env.HOME;
+const originalCwd = process.cwd();
+
+beforeAll(() => {
+  process.env.HOME = home;
+  process.chdir(home);
+});
+
+afterAll(() => {
+  process.chdir(originalCwd);
+  if (originalHome === undefined) delete process.env.HOME;
+  else process.env.HOME = originalHome;
+  rmSync(home, { recursive: true, force: true });
+  resetProjects();
+  resetSessions();
+  resetOs();
 });
 
 function setup() {
-  const home = mkdtempSync(join(tmpdir(), "use-code-cli-"));
-  const sessionsDir = join(home, ".claude", "sessions");
   const projectsDir = join(home, ".claude", "projects");
-  mkdirSync(sessionsDir, { recursive: true });
+  rmSync(projectsDir, { recursive: true, force: true });
   mkdirSync(projectsDir, { recursive: true });
-
-  const sleeps: Bun.Subprocess[] = [];
-  cleanups.push(() => {
-    for (const p of sleeps) p.kill();
-    rmSync(home, { recursive: true, force: true });
-  });
 
   function addProject(cwd: string, sessionIds: string[]) {
     const dir = cwd.replace(/[^a-zA-Z0-9]/g, "-");
@@ -43,17 +82,7 @@ function setup() {
   }
 
   async function run(...args: string[]) {
-    const proc = Bun.spawn([process.execPath, CLI, ...args], {
-      env: { ...process.env, HOME: home },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const code = await proc.exited;
-    const [out, err] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    return { code, out, err };
+    return invoke(...args);
   }
 
   return { home, projectsDir, addProject, run };

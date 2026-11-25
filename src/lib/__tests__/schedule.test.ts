@@ -1,13 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { cronMatchesDate, cronTime, cronWeekdays as cronDays } from "../cron";
-import {
-  buildSchedule,
-  dateKey,
-  fetchSchedule,
-  parseDateKey,
-  weekdayLong,
-  weekdayShort,
-} from "../schedule";
+import { buildSchedule, fetchSchedule } from "../schedule";
+import { dateKey, parseDateKey, weekdayLong, weekdayShort } from "../schedule-date";
 
 const now = new Date(2026, 10, 22, 12, 0);
 

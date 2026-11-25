@@ -1,15 +1,20 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { bunMockModule } from "modality-bun-kit";
+import { fileURLToPath } from "node:url";
 import { cleanup } from "@testing-library/react";
 import React from "react";
 import { render, act } from "reshow-unit";
-import PasskeyApp from "../PasskeyApp.client";
 
 // The login flow's WebAuthn step is browser-only; what changed here is the
 // redirect guard around it, so stub the authenticator interaction.
-mock.module("@simplewebauthn/browser", () => ({
+const resetWebauthn = await bunMockModule(fileURLToPath(import.meta.resolve("@simplewebauthn/browser")), () => ({
   startRegistration: async () => ({}),
   startAuthentication: async () => ({ response: "stub" }),
 }));
+
+afterAll(() => resetWebauthn());
+
+const { default: PasskeyApp } = await import("../PasskeyApp.client");
 
 // Observation harness for the 1.5s redirect timer: 1500ms callbacks are
 // swallowed (a fired redirect would navigate the test DOM) but still tracked,

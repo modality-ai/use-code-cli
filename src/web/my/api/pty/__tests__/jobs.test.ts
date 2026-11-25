@@ -1,5 +1,5 @@
-import { afterAll, describe, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -9,6 +9,7 @@ import {
   listJobs,
   liveJobCount,
   registerJob,
+  setPtyJobPersistenceEnabled,
   type PtyProc,
 } from "../../../../../lib/pty";
 
@@ -16,16 +17,35 @@ const testHome = mkdtempSync(join(tmpdir(), "pty-jobs-"));
 const originalHome = process.env.HOME;
 process.env.HOME = testHome;
 
+beforeAll(() => {
+  setPtyJobPersistenceEnabled(false);
+});
+
 afterAll(() => {
+  setPtyJobPersistenceEnabled(true);
   if (originalHome === undefined) delete process.env.HOME;
   else process.env.HOME = originalHome;
   rmSync(testHome, { recursive: true, force: true });
 });
 
+async function flush(): Promise<void> {
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  for (let i = 0; i < 100; i++) {
+    if (predicate()) return;
+    await flush();
+  }
+  throw new Error("condition was not met after flushing the event loop");
+}
+
 // Minimal PtyProc stand-in: only pid / exited / exitCode / terminal
 // are touched by the jobs registry and its callers.
 function mockProc(pid: number, opts: { exitCode?: number | null } = {}) {
-  let resolveExit: (code: number | null) => void = () => {};
+  let resolveExit!: (code: number | null) => void;
   const exited = new Promise<number | null>((resolve) => {
     resolveExit = resolve;
   });
@@ -72,22 +92,25 @@ describe("job eviction", () => {
     expect(getJob(jobId)).toBeDefined();
     resolveExit(0);
     await proc.exited;
-    await new Promise((r) => setTimeout(r, 0));
+    await flush();
     expect(getJob(jobId)).toBeUndefined();
   });
 
-  it("evicts exited jobs beyond the cap of 50 live entries", async () => {
+  it("evicts exited jobs beyond the live cap", async () => {
+    // MAX_LIVE_JOBS + margin covers the eviction path without 60 registrations.
     const exited: { jobId: string; proc: PtyProc; resolveExit: (c: number | null) => void }[] = [];
     let firstJobId = "";
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < MAX_LIVE_JOBS + 2; i++) {
       const m = mockProc(5000 + i);
       const jobId = await registerJob(m.proc);
       if (i === 0) firstJobId = jobId;
       exited.push({ jobId, proc: m.proc, resolveExit: m.resolveExit });
     }
-    // Nothing has exited yet: all 60 stay registered.
     expect(getJob(firstJobId)).toBeDefined();
-    for (const m of exited) m.resolveExit(0);
+    for (const m of exited) {
+      (m.proc as { exitCode: number | null }).exitCode = 0;
+      m.resolveExit(0);
+    }
     await Promise.all(exited.map((m) => m.proc.exited));
     const { proc: trigger } = mockProc(6000);
     await registerJob(trigger);
@@ -110,16 +133,20 @@ describe("exit persistence resilience", () => {
     const errors: unknown[] = [];
     const handler = (reason: unknown) => errors.push(reason);
     process.on("unhandledRejection", handler);
+    const jobsFile = join(testHome, ".use-code-cli", "pty-jobs.json");
+    setPtyJobPersistenceEnabled(true);
     try {
       const { proc, resolveExit } = mockProc(9001);
       await registerJob(proc);
       rmSync(testHome, { recursive: true, force: true });
       resolveExit(0);
       await proc.exited;
-      await new Promise((r) => setTimeout(r, 50));
+      await waitFor(() => existsSync(jobsFile));
+      await flush();
       expect(errors).toHaveLength(0);
     } finally {
       process.off("unhandledRejection", handler);
+      setPtyJobPersistenceEnabled(false);
       mkdirSync(testHome, { recursive: true });
     }
   });
@@ -136,7 +163,7 @@ describe("liveJobCount", () => {
     await registerJob(live2.proc);
     done.resolveExit(0);
     await done.proc.exited;
-    await new Promise((r) => setTimeout(r, 0));
+    await flush();
     expect(liveJobCount() - before).toBe(2);
   });
 

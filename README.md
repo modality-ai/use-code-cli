@@ -120,6 +120,24 @@ use-code-cli session <target>
 
 ---
 
+## `session-create`
+
+Create or reuse a Claude Code session for a project (idempotent).
+
+```
+use-code-cli session-create [project] --name <name> [--id <string>] [--timeout <ms>]
+```
+
+- `--name` is required.
+- `--id` is optional; when provided and a matching session exists it is reused.
+- When `--id` is supplied but no session has that id, an existing same-name session under a different id returns a 409 conflict instead of being reused.
+- `--timeout` defaults to 15000ms and controls spawn verification.
+- If a matching session already exists, returns `created:false` and reuses it.
+- Otherwise spawns `claude --bg --name <name> --session-id <id>` via the project-run detach path and verifies the session appears.
+- Uses the resolved project cwd/directory name for matching; offline sessions count as existing.
+
+---
+
 ## `sessions`
 
 List active (and offline) sessions.

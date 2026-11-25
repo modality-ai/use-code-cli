@@ -38,16 +38,22 @@ describe("withLock", () => {
   it("serializes concurrent access", async () => {
     const lock = tmpLock();
     const order: number[] = [];
+    let entered!: () => void;
+    const enteredPromise = new Promise<void>((resolve) => { entered = resolve; });
+
     const a = withLock(lock, async () => {
       order.push(1);
+      entered();
       await new Promise((r) => setTimeout(r, 50));
       order.push(2);
     });
+
+    // a holds the lock before b starts; otherwise b can win the atomic create.
+    await enteredPromise;
     const b = withLock(lock, async () => {
       order.push(3);
     });
     await Promise.all([a, b]);
-    // Either a fully runs then b, or b waits. Ensure 3 not before 2.
     expect(order.indexOf(3)).toBeGreaterThan(order.indexOf(2));
   });
 

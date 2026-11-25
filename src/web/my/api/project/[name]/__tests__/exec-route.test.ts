@@ -1,5 +1,5 @@
-import { describe, expect, it } from "bun:test";
-import { mock } from "bun:test";
+import { afterAll, describe, expect, it } from "bun:test";
+import { bunMockModule } from "modality-bun-kit";
 
 type ToolResult = {
   success?: boolean;
@@ -18,16 +18,18 @@ type ToolResult = {
 let mockResult: ToolResult = { success: true, message: "out\n[exit code: 0]\n", data: { cwd: "/tmp/proj", jobId: "job-1" } };
 const calls: Record<string, unknown>[] = [];
 
-mock.module("../../../../../../scripts/index", () => ({
+const resetScripts = await bunMockModule("../../../../../../scripts/index", () => ({
   aiTool: {
     execute: async (props: Record<string, unknown>) => {
       calls.push(props);
       return mockResult;
     },
   },
-}));
+}), import.meta.dir);
 
 const { POST } = await import("../exec/route");
+
+afterAll(() => resetScripts());
 
 function request(body: unknown): Request {
   return new Request("http://localhost/my/api/project/proj/exec", {

@@ -16,6 +16,7 @@ import { promptsCommand } from "./commands/prompts";
 import { ptyInputCommand } from "./commands/pty-input";
 import { pushWebCommand } from "./commands/push-web";
 import { schedulerCommand } from "./commands/scheduler";
+import { sessionCreateCommand } from "./commands/session-create";
 import { sessionCommand } from "./commands/session";
 import { sessionsCommand } from "./commands/sessions";
 import { startCommand } from "./commands/start";
@@ -24,4 +25,4 @@ import { talkPermitCommand } from "./commands/talk-permit";
 import { talkToAllCommand } from "./commands/talk-to-all";
 import { talkCommand } from "./commands/talk";
 
-export const commands: CLICommand[] = [compactCommand, logCommand, memoryCommand, monitorsCommand, projectDeleteCommand, projectPsCommand, projectRunStreamCommand, projectRunCommand, projectCommand, projectsCommand, promptsCommand, ptyInputCommand, pushWebCommand, schedulerCommand, sessionCommand, sessionsCommand, startCommand, talkHeroCommand, talkPermitCommand, talkToAllCommand, talkCommand];
+export const commands: CLICommand[] = [compactCommand, logCommand, memoryCommand, monitorsCommand, projectDeleteCommand, projectPsCommand, projectRunStreamCommand, projectRunCommand, projectCommand, projectsCommand, promptsCommand, ptyInputCommand, pushWebCommand, schedulerCommand, sessionCreateCommand, sessionCommand, sessionsCommand, startCommand, talkHeroCommand, talkPermitCommand, talkToAllCommand, talkCommand];

@@ -1,8 +1,7 @@
 import { createCliRunner } from "modality-cli-kit";
 import { aiTool } from "../scripts";
 import { cliConfig } from "../config/cliConfig";
-import { preprocessTalkArgv } from "./talk-argv";
-import { preprocessProjectRunArgv } from "./project-run-argv";
+import { normalizeCliArgv } from "./cli-argv";
 
 /**
  * The use-code-cli CLI. All the generic machinery (help, alias resolution, arg
@@ -22,21 +21,10 @@ export const cli = createCliRunner({ ...cliConfig, aiTool });
  * `project-run` supports a `--` separator the same way.
  */
 export async function runCli(argv: string[] = process.argv.slice(2)): Promise<number> {
-  let normalized = argv;
-  // The kit dispatches on the first argv token only, so the two-word
-  // "project run" invocation is rewritten to the "project-run" command.
-  if (normalized[0] === "project" && normalized[1] === "run") {
-    normalized = ["project-run", ...normalized.slice(2)];
-  }
-  if (normalized[0] === "project" && normalized[1] === "ps") {
-    normalized = ["project-ps", ...normalized.slice(2)];
-  }
-  normalized = preprocessProjectRunArgv(normalized).argv;
-  const { argv: normalized2, error } = await preprocessTalkArgv(normalized);
+  const { argv: normalized, error } = await normalizeCliArgv(argv);
   if (error) {
     console.error(error);
     return 1;
   }
-  normalized = normalized2;
   return cli.run(normalized);
 }

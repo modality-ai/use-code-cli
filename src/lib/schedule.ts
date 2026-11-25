@@ -1,5 +1,6 @@
 import { aiTool } from "../scripts/index";
 import { cronMatchesDate, cronTime, cronWeekdays as cronDays } from "./cron";
+import { dateKey, parseDateKey, weekdayLong, weekdayShort } from "./schedule-date";
 
 export type ScheduleKind = "routine" | "once";
 
@@ -47,9 +48,6 @@ interface SessionSchedule {
   monitors: unknown[];
 }
 
-const DAY_SHORT = ["S", "M", "T", "W", "T", "F", "S"] as const;
-const DAY_LONG = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
-
 const asRecord = (value: unknown): Record<string, unknown> | undefined =>
   value && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
 
@@ -69,24 +67,6 @@ function pad(value: number): string {
 
 function formatTime(date: Date): string {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-export function dateKey(date: Date): string {
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-}
-
-export function parseDateKey(value: string): Date {
-  const [year, month, day] = value.split("-").map(Number);
-  if (!year || !month || !day) return new Date();
-  return new Date(year, month - 1, day, 12);
-}
-
-export function weekdayLong(index: number): string {
-  return DAY_LONG[index] ?? "Today";
-}
-
-export function weekdayShort(index: number): string {
-  return DAY_SHORT[index] ?? "";
 }
 
 function cadenceFor(days: number[], recurring: boolean): string {

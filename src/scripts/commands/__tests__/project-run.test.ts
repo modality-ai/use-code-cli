@@ -1,192 +1,180 @@
-import { afterEach, describe, expect, it } from "bun:test";
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  utimesSync,
-  writeFileSync,
-} from "node:fs";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { bunMockModule } from "modality-bun-kit";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { PtyProc } from "../../../lib/pty";
+import { setPtyJobPersistenceEnabled } from "../../../lib/pty";
+import { ProjectRunArgsSchema, type ProjectRunArgs } from "../../../lib/project-run";
+import { projectRunCommand } from "../project-run";
 
-const CLI = join(import.meta.dir, "../../../runner/cli.ts");
+const sharedHome = mkdtempSync(join(tmpdir(), "use-code-cli-inproc-"));
 
-const cleanups: (() => void)[] = [];
+const actualPty = await import("../../../lib/pty");
+const actualProjects = await import("../../../lib/projects");
 
-afterEach(() => {
-  while (cleanups.length > 0) cleanups.pop()?.();
-});
+let fakePid = 100000;
 
-function setup() {
-  const home = mkdtempSync(join(tmpdir(), "use-code-cli-"));
-  const sessionsDir = join(home, ".claude", "sessions");
-  const projectsDir = join(home, ".claude", "projects");
-  mkdirSync(sessionsDir, { recursive: true });
-  mkdirSync(projectsDir, { recursive: true });
-
-  cleanups.push(() => {
-    rmSync(home, { recursive: true, force: true });
-  });
-
-  function addProject(cwd: string, sessionIds: string[]) {
-    const dir = cwd.replace(/[^a-zA-Z0-9]/g, "-");
-    const path = join(projectsDir, dir);
-    mkdirSync(path, { recursive: true });
-    for (const id of sessionIds) {
-      const file = join(path, `${id}.jsonl`);
-      writeFileSync(file, JSON.stringify({ cwd, type: "summary" }) + "\n");
-      utimesSync(file, Date.now() / 1000, Date.now() / 1000);
-    }
-    return { dir, path };
-  }
-
-  async function run(...args: string[]) {
-    const proc = Bun.spawn([process.execPath, CLI, ...args], {
-      env: { ...process.env, HOME: home },
-      stdout: "pipe",
-      stderr: "pipe",
-      cwd: home,
-    });
-    const code = await proc.exited;
-    const [out, err] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    return { code, out, err };
-  }
-
-  return { home, projectsDir, addProject, run };
+function fakeSpawnPty(command: string, cwd: string, onData?: (data: Uint8Array) => void): PtyProc {
+  const exitCode = command.includes("false") ? 1 : 0;
+  let text = "";
+  if (command.includes("pwd")) text = cwd;
+  else if (command.includes("echo")) text = command.slice(command.indexOf("echo") + 4).trim();
+  else if (command.includes("ls")) text = "file";
+  if (text) queueMicrotask(() => onData?.(new TextEncoder().encode(`${text}\n`)));
+  return {
+    pid: ++fakePid,
+    exited: Promise.resolve(exitCode),
+    exitCode,
+    terminal: { write: (data: string) => data, close: () => {} },
+  } as unknown as PtyProc;
 }
 
-describe("project run", () => {
-  it("runs a command in the current cwd via nested syntax", async () => {
-    const h = setup();
-    const res = await h.run("project", "run", "pwd");
-    expect(res.code).toBe(0);
-    expect(res.out + res.err).toContain(h.home);
-  });
+const resetPty = await bunMockModule("../../../lib/pty", () => ({
+  ...actualPty,
+  spawnPty: fakeSpawnPty,
+}), import.meta.dir);
 
-  it("preserves project command behavior", async () => {
-    const h = setup();
-    h.addProject("/w/proj", ["a"]);
-    const res = await h.run("project", "/w/proj");
-    expect(res.code).toBe(0);
-    expect(res.out).toContain("/w/proj");
-  });
+// Keep discovery empty so tests never scan the developer's real projects dir.
+const resetProjects = await bunMockModule("../../../lib/projects", () => ({
+  ...actualProjects,
+  readProjects: async () => [],
+}), import.meta.dir);
 
-  it("supports -- separator and multi-arg flags", async () => {
+beforeAll(() => {
+  setPtyJobPersistenceEnabled(false);
+});
+
+afterAll(() => {
+  setPtyJobPersistenceEnabled(true);
+  rmSync(sharedHome, { recursive: true, force: true });
+  resetProjects();
+  resetPty();
+});
+
+function args(input: Partial<ProjectRunArgs>): ProjectRunArgs {
+  return ProjectRunArgsSchema.parse(input);
+}
+
+function setup() {
+  const home = join(sharedHome, "case");
+  mkdirSync(home, { recursive: true });
+
+  async function run(input: Partial<ProjectRunArgs>) {
+    return projectRunCommand.execute(args(input));
+  }
+
+  return { home, run };
+}
+
+async function readUntil(logPath: string, token: string): Promise<string> {
+  let content = "";
+  for (let i = 0; i < 40; i++) {
+    try { content = readFileSync(logPath, "utf8"); } catch {}
+    if (content.includes(token)) break;
+    if (i < 39) await Bun.sleep(5);
+  }
+  return content;
+}
+
+describe("project run (in-process command)", () => {
+  it("runs a command in the provided project with multiple words", async () => {
     const h = setup();
     const dir = join(h.home, "workdir");
     mkdirSync(dir);
-    const res = await h.run("project", "run", "--project", dir, "--", "echo", "hello", "world");
-    expect(res.code).toBe(0);
-    expect(res.out).toContain("hello world");
+    const res = await h.run({ project: dir, cmd: "echo hello world" });
+    expect(res.success).toBe(true);
+    expect(res.message).toContain("hello world");
   });
 
-  it("supports --- separator", async () => {
+  it("accepts a trailing command with flags", async () => {
     const h = setup();
-    const res = await h.run("project", "run", "---", "ls");
-    expect(res.code).toBe(0);
+    const res = await h.run({ cmd: "ls -la" });
+    expect(res.success).toBe(true);
   });
 
-  it("supports --- separator with child flags", async () => {
-    const h = setup();
-    const res = await h.run("project", "run", "---", "ls", "-la");
-    expect(res.code).toBe(0);
-  });
-
-  it("supports explicit target positional", async () => {
+  it("supports an explicit target positional", async () => {
     const h = setup();
     const dir = join(h.home, "workdir2");
     mkdirSync(dir);
-    const res = await h.run("project", "run", dir, "--", "echo", "ok");
-    expect(res.code).toBe(0);
-    expect(res.out).toContain("ok");
+    const res = await h.run({ target: dir, cmd: "echo ok" });
+    expect(res.success).toBe(true);
+    expect(res.message).toContain("ok");
+  });
+
+  it("keeps flags after the command as child arguments", async () => {
+    const h = setup();
+    const res = await h.run({ cmd: "echo --detach" });
+    expect(res.success).toBe(true);
+    expect(res.message).toContain("--detach");
   });
 
   it("errors on missing command", async () => {
     const h = setup();
-    const res = await h.run("project", "run");
-    expect(res.code).toBe(1);
-    expect(res.err + res.out).toContain("Command required");
+    const res = await h.run({});
+    expect(res.success).toBe(false);
+    expect(res.message).toContain("Command required");
   });
 
   it("propagates exit code", async () => {
     const h = setup();
-    const res = await h.run("project", "run", "--", "false");
-    expect(res.code).toBe(1);
-    expect(res.out + res.err).toContain("exit code: 1");
+    const res = await h.run({ cmd: "false" });
+    expect(res.success).toBe(false);
+    expect(res.message).toContain("exit code: 1");
   });
 
   it("reports missing project", async () => {
     const h = setup();
-    const res = await h.run("project", "run", "--project", "/no/such/dir", "--", "echo", "hi");
-    expect(res.code).toBe(1);
-    expect(res.err + res.out).toContain("No project matches");
+    const res = await h.run({ project: "/no/such/dir", cmd: "echo hi" });
+    expect(res.success).toBe(false);
+    expect(res.message).toContain("No project matches");
   });
 
   it("detaches and returns job metadata", async () => {
     const h = setup();
-    const res = await h.run("project", "run", "--detach", "--", "echo", "hello-detach");
-    expect(res.code).toBe(0);
-    expect(res.out).toContain("Started in background");
-    expect(res.out).toContain("PID:");
-    expect(res.out).toContain("Log:");
-    expect(res.out).toContain("jobId:");
+    const res = await h.run({ detach: true, cmd: "echo hello-detach" });
+    expect(res.success).toBe(true);
+    expect(res.message).toContain("Started in background");
+    expect(res.message).toContain("PID:");
+    expect(res.message).toContain("Log:");
+    expect(res.message).toContain("jobId:");
   });
 
-  it("detaches with --json exposes cwd/jobId/pid/log/background", async () => {
+  it("detached result exposes cwd/jobId/pid/log/background", async () => {
     const h = setup();
-    const res = await h.run("project", "run", "--detach", "--json", "--", "echo", "json-detach");
-    expect(res.code).toBe(0);
-    const parsed = JSON.parse(res.out);
-    expect(parsed.success).toBe(true);
-    expect(parsed.background).toBe(true);
-    expect(parsed.data.background).toBe(true);
-    expect(parsed.data.cwd).toBeTruthy();
-    expect(parsed.data.jobId).toBeTruthy();
-    expect(typeof parsed.data.pid).toBe("number");
-    expect(parsed.data.log).toBeTruthy();
-    let content = "";
-    for (let i = 0; i < 50; i++) {
-      try { content = readFileSync(parsed.data.log, "utf8"); } catch {}
-      if (content.includes("json-detach")) break;
-      await Bun.sleep(50);
-    }
+    const res = await h.run({ detach: true, cmd: "echo json-detach" });
+    expect(res.success).toBe(true);
+    const data = res.data as Record<string, unknown>;
+    expect(data.background).toBe(true);
+    expect(data.cwd).toBeTruthy();
+    expect(data.jobId).toBeTruthy();
+    expect(typeof data.pid).toBe("number");
+    expect(data.log).toBeTruthy();
+    const content = await readUntil(data.log as string, "json-detach");
     expect(content).toContain("json-detach");
   });
 
-  it("foreground --json exposes jobId", async () => {
+  it("foreground result exposes jobId and exit code", async () => {
     const h = setup();
-    const res = await h.run("project", "run", "--json", "--", "echo", "fg-jobid");
-    expect(res.code).toBe(0);
-    const parsed = JSON.parse(res.out);
-    expect(parsed.success).toBe(true);
-    expect(parsed.data.jobId).toBeTruthy();
-    expect(parsed.data.exitCode).toBe(0);
+    const res = await h.run({ cmd: "echo fg-jobid" });
+    expect(res.success).toBe(true);
+    const data = res.data as Record<string, unknown>;
+    expect(data.jobId).toBeTruthy();
+    expect(data.exitCode).toBe(0);
   });
 
   it("detach returns immediately for long command", async () => {
     const h = setup();
     const start = Date.now();
-    const res = await h.run("project", "run", "--detach", "--", "sleep", "2");
-    const elapsed = Date.now() - start;
-    expect(res.code).toBe(0);
-    expect(elapsed).toBeLessThan(2000);
+    const res = await h.run({ detach: true, cmd: "sleep 2" });
+    expect(res.success).toBe(true);
+    expect(Date.now() - start).toBeLessThan(2000);
   });
 
-  it("detaches with --- separator", async () => {
+  it("detaches with a command that starts with a flag-like token", async () => {
     const h = setup();
-    const res = await h.run("project", "run", "--detach", "---", "echo", "detach-sep");
-    expect(res.code).toBe(0);
-    expect(res.out).toContain("Started in background");
-  });
-
-  it("keeps --detach after separator as child arg", async () => {
-    const h = setup();
-    const res = await h.run("project", "run", "---", "echo", "--detach");
-    expect(res.code).toBe(0);
-    expect(res.out).toContain("--detach");
+    const res = await h.run({ detach: true, cmd: "echo detach-sep" });
+    expect(res.success).toBe(true);
+    expect(res.message).toContain("Started in background");
   });
 });

@@ -1,46 +1,25 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { cronSummary, cronTime, cronWeekdays, isCronValid, nextCronRuns, normalizeCron, splitCron, timeCron } from "../../../lib/cron";
-
-type ScheduleKind = "routine" | "once";
-type CreateKind = "once" | "routine";
-
-interface ScheduleItem {
-  id: string;
-  sessionId: string;
-  sessionName: string;
-  title: string;
-  time: string;
-  kind: ScheduleKind;
-  cadence: string;
-  days: number[];
-  completed: false;
-  href: string;
-  ends?: string;
-  endsOn?: string;
-  cron?: string;
-}
-
-interface ScheduleRoutine {
-  id: string;
-  sessionId: string;
-  title: string;
-  time: string;
-  cadence: string;
-  days: number[];
-  href: string;
-  ends?: string;
-  endsOn?: string;
-  cron?: string;
-}
-
-interface ScheduleData {
-  date: string;
-  countToday: number;
-  items: ScheduleItem[];
-  routines: ScheduleRoutine[];
-}
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  DAY_LETTERS,
+  headerDate,
+  longDate,
+  parseDate,
+  shortDate,
+  todayKey,
+  weekOf,
+  WEEKDAYS,
+} from "../../../lib/schedule-date";
+import {
+  applyLocalAdds,
+  eyebrow,
+  emptySchedule,
+  readLocalAdds,
+  takeScheduleNotice,
+  type ScheduleData,
+  type ScheduleItem,
+} from "./schedule-model";
 
 type Tab = "all" | "once" | "routines";
 
@@ -49,70 +28,6 @@ const TABS: Array<{ id: Tab; label: string }> = [
   { id: "once", label: "Once" },
   { id: "routines", label: "Routines" },
 ];
-
-const DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
-const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const MONTHS_LONG = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
-
-const eyebrow = "text-[10px] font-medium uppercase leading-[14px] tracking-[0.16em] text-text-muted";
-
-function parseDate(dateKey: string): Date {
-  const [year, month, day] = dateKey.split("-").map(Number);
-  return year && month && day ? new Date(year, month - 1, day, 12) : new Date();
-}
-
-function headerDate(dateKey: string): string {
-  const date = parseDate(dateKey);
-  return `${WEEKDAYS[date.getDay()] ?? "Today"}, ${date.getDate()} ${MONTHS[date.getMonth()] ?? ""}`.trim();
-}
-
-function longDate(dateKey: string): string {
-  const date = parseDate(dateKey);
-  return `${WEEKDAYS[date.getDay()] ?? "Today"}, ${date.getDate()} ${MONTHS_LONG[date.getMonth()] ?? ""}`;
-}
-
-function shortDate(dateKey: string): string {
-  const date = parseDate(dateKey);
-  return `${MONTHS[date.getMonth()] ?? ""} ${date.getDate()}`.trim();
-}
-
-function addDays(dateKey: string, count: number): string {
-  const date = parseDate(dateKey);
-  date.setDate(date.getDate() + count);
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${date.getFullYear()}-${month}-${day}`;
-}
-
-function weekOf(dateKey: string): Date[] {
-  const date = parseDate(dateKey);
-  const start = new Date(date);
-  start.setDate(date.getDate() - date.getDay());
-  return Array.from({ length: 7 }, (_, index) => {
-    const day = new Date(start);
-    day.setDate(start.getDate() + index);
-    return day;
-  });
-}
-
-function emptySchedule(dateKey: string): ScheduleData {
-  return { date: dateKey, countToday: 0, items: [], routines: [] };
-}
-
-function todayKey(): string {
-  const now = new Date();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${now.getFullYear()}-${month}-${day}`;
-}
-
-function sortItems(items: ScheduleItem[]): ScheduleItem[] {
-  return [...items].sort((a, b) => a.time.localeCompare(b.time));
-}
 
 function CheckCircle({ checked, onClick, title }: { checked: boolean; onClick: () => void; title: string }) {
   return (
@@ -148,14 +63,13 @@ function ScheduleCard({
   onToggle: (id: string) => void;
 }) {
   const isRoutine = item.kind === "routine";
-  const isLocal = item.sessionId === "local";
   const titleClass = `truncate text-[15px] font-semibold leading-5 ${checked ? "line-through decoration-border" : ""}`;
-  const title = isLocal ? (
-    <span className={titleClass}>{item.title}</span>
-  ) : (
+  const title = item.href ? (
     <a href={item.href} className={`${titleClass} hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus`}>
       {item.title}
     </a>
+  ) : (
+    <span className={titleClass}>{item.title}</span>
   );
   const detail = item.cadence;
 
@@ -212,198 +126,20 @@ function DayPill({ label, active, today }: { label: string; active: boolean; tod
   );
 }
 
-function ChoiceGroup<T extends string>({
-  legend,
-  value,
-  options,
-  onChange,
-}: {
-  legend: string;
-  value: T;
-  options: Array<{ value: T; label: React.ReactNode }>;
-  onChange: (value: T) => void;
-}) {
-  return (
-    <fieldset className="mt-5">
-      <legend className={eyebrow}>{legend}</legend>
-      <div className="mt-2 grid grid-cols-3 gap-2">
-        {options.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            aria-pressed={value === option.value}
-            onClick={() => onChange(option.value)}
-            className={`h-11 rounded-[14px] border text-sm font-medium cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
-              value === option.value
-                ? "border-teal-line bg-teal-soft text-accent-collaboration"
-                : "border-border bg-surface text-text-muted"
-            }`}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
-    </fieldset>
-  );
-}
-
-function FieldRow({
-  label,
-  htmlFor,
-  children,
-}: {
-  label: React.ReactNode;
-  htmlFor: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="mt-5 flex items-center justify-between gap-4">
-      <label htmlFor={htmlFor} className="text-sm font-medium text-text-primary">{label}</label>
-      {children}
-    </div>
-  );
-}
-
-function FieldCard({ label, htmlFor, children, testId }: { label: string; htmlFor: string; children: React.ReactNode; testId?: string }) {
-  return (
-    <div data-testid={testId} className="rounded-[16px] bg-shell p-1.5 ring-1 ring-black/5">
-      <div className="rounded-[12px] bg-surface px-3 py-2">
-        <label htmlFor={htmlFor} className={eyebrow}>{label}</label>
-        <div className="mt-1">{children}</div>
-      </div>
-    </div>
-  );
-}
-
-function EndsControl({
-  ends,
-  endDate,
-  onEndsChange,
-  onEndDateChange,
-  minDate,
-}: {
-  ends: string;
-  endDate: string;
-  onEndsChange: (value: string) => void;
-  onEndDateChange: (value: string) => void;
-  minDate: string;
-}) {
-  const invalidDate = !endDate || endDate < minDate;
-  return (
-    <FieldCard label="Ends" htmlFor="schedule-ends" testId="ends-control">
-      <select
-        id="schedule-ends"
-        value={ends}
-        onChange={(event) => onEndsChange(event.target.value)}
-        className="w-full cursor-pointer appearance-none border-0 bg-transparent p-0 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-      >
-        <option value="Never">Never</option>
-        <option value="On a date">On a date</option>
-      </select>
-      {ends === "On a date" && (
-        <div className="mt-2 border-t border-border/70 pt-2">
-          <label htmlFor="schedule-end-date" className="text-[10px] font-medium uppercase leading-[14px] tracking-[0.12em] text-text-muted">Ends on date</label>
-          <input
-            id="schedule-end-date"
-            type="date"
-            value={endDate}
-            min={minDate}
-            aria-invalid={invalidDate}
-            aria-describedby={invalidDate ? "schedule-end-date-error" : undefined}
-            onInput={(event) => onEndDateChange(event.currentTarget.value)}
-            onChange={(event) => onEndDateChange(event.target.value)}
-            className="mt-1 h-9 w-full cursor-pointer rounded-[10px] border border-border bg-surface px-2 text-xs tabular-nums text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-          />
-          {invalidDate && (
-            <p id="schedule-end-date-error" className="mt-1 text-[11px] text-orange" role="alert">Choose today or a later date.</p>
-          )}
-        </div>
-      )}
-    </FieldCard>
-  );
-}
-
-function formatRun(date: Date): string {
-  const weekday = WEEKDAYS[date.getDay()]?.slice(0, 3) ?? "";
-  const month = MONTHS[date.getMonth()] ?? "";
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  return `${weekday} ${date.getDate()} ${month} • ${hours}:${minutes}`;
-}
-
-function SchedulePreview({
-  summary,
-  runs,
-  expression,
-  showExpression = true,
-  emptyLabel,
-}: {
-  summary: string;
-  runs: Date[];
-  expression: string;
-  showExpression?: boolean;
-  emptyLabel?: string;
-}) {
-  return (
-    <section className="mt-5 rounded-[16px] bg-shell p-1.5 ring-1 ring-black/5" aria-label="Schedule preview">
-      <div className="rounded-[12px] bg-surface p-4">
-        <p className="flex items-start gap-2 text-sm font-medium text-text-primary">
-          <svg viewBox="0 0 16 16" className="mt-0.5 h-4 w-4 shrink-0 text-accent-collaboration" aria-hidden="true">
-            <path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <span aria-live="polite">{summary}</span>
-        </p>
-        <h3 className={`${eyebrow} mt-4`}>Next runs</h3>
-        <ul className="mt-2 space-y-1 text-xs tabular-nums text-text-muted">
-          {runs.length === 0 ? (
-            <li>{emptyLabel ?? "No upcoming runs in the next 2 years"}</li>
-          ) : runs.map((run) => (
-            <li key={run.toISOString()}>{formatRun(run)}</li>
-          ))}
-        </ul>
-        {showExpression && (
-          <div className="mt-4 flex items-center justify-between gap-3 border-t border-border pt-3 text-xs">
-            <span className="text-text-muted">Cron equivalent</span>
-            <code className="font-code tabular-nums text-text-primary">{expression}</code>
-          </div>
-        )}
-      </div>
-    </section>
-  );
-}
-
-const inputClass =
-  "h-11 rounded-[12px] border border-border bg-surface px-3 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus";
-
 export default function ScheduleApp({ initial }: { initial?: ScheduleData }) {
   const [schedule, setSchedule] = useState<ScheduleData>(() => {
-    const dehydrated = typeof window !== "undefined" ? (window as any).__REACT_DATA__?.schedule : undefined;
-    if (dehydrated && typeof dehydrated === "object") return dehydrated as ScheduleData;
-    return initial ?? emptySchedule(todayKey());
+    const dehydrated = typeof window !== "undefined" ? window.__REACT_DATA__?.schedule : undefined;
+    const base = dehydrated && typeof dehydrated === "object"
+      ? dehydrated as ScheduleData
+      : initial ?? emptySchedule(todayKey());
+    return applyLocalAdds(base, readLocalAdds(base.date));
   });
   const [tab, setTab] = useState<Tab>("all");
   const [completed, setCompleted] = useState<Set<string>>(() => new Set());
   const [loading, setLoading] = useState(!initial);
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
-  const [createOpen, setCreateOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-
-  const [createKind, setCreateKind] = useState<CreateKind>("once");
-  const [what, setWhat] = useState("");
-  const [when, setWhen] = useState<"today" | "tomorrow" | "pick">("today");
-  const [pickDate, setPickDate] = useState(schedule.date);
-  const [time, setTime] = useState("09:00");
-  const [repeats, setRepeats] = useState<"daily" | "weekly" | "cron">("daily");
-  const [weekDays, setWeekDays] = useState<number[]>([1, 3, 5]);
-  const [cronRule, setCronRule] = useState("30 7 * * 1-5");
-  const [ends, setEnds] = useState("Never");
-  const [endDate, setEndDate] = useState(schedule.date);
-
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const addButtonRef = useRef<HTMLButtonElement>(null);
-  const whatRef = useRef<HTMLInputElement>(null);
-  const localSeq = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -415,7 +151,8 @@ export default function ScheduleApp({ initial }: { initial?: ScheduleData }) {
           throw new Error(payload?.error || `Request failed with ${response.status}`);
         }
         if (!cancelled) {
-          setSchedule(payload.data as ScheduleData);
+          const loaded = payload.data as ScheduleData;
+          setSchedule(applyLocalAdds(loaded, readLocalAdds(loaded.date)));
           setError(null);
         }
       } catch (cause) {
@@ -429,6 +166,11 @@ export default function ScheduleApp({ initial }: { initial?: ScheduleData }) {
   }, [reload]);
 
   useEffect(() => {
+    const message = takeScheduleNotice();
+    if (message) setNotice(message);
+  }, []);
+
+  useEffect(() => {
     try {
       const raw = typeof localStorage !== "undefined" ? localStorage.getItem(`schedule:completed:${schedule.date}`) : null;
       const ids = raw ? JSON.parse(raw) : [];
@@ -437,45 +179,6 @@ export default function ScheduleApp({ initial }: { initial?: ScheduleData }) {
       setCompleted(new Set());
     }
   }, [schedule.date]);
-
-  useEffect(() => {
-    if (!createOpen) return;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    const focusTimer = setTimeout(() => whatRef.current?.focus(), 0);
-    return () => {
-      clearTimeout(focusTimer);
-      document.body.style.overflow = previousOverflow;
-    };
-  }, [createOpen]);
-
-  useEffect(() => {
-    if (!createOpen) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closeCreate();
-        return;
-      }
-      if (event.key !== "Tab" || !dialogRef.current) return;
-      const focusable = [...dialogRef.current.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), input:not([disabled]), select:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
-      )];
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (!first || !last) return;
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [createOpen]);
 
   const toggleComplete = (id: string) => {
     const next = new Set(completed);
@@ -487,147 +190,6 @@ export default function ScheduleApp({ initial }: { initial?: ScheduleData }) {
     } catch {
       // completion stays local to this view when storage is unavailable
     }
-  };
-
-  const openCreate = () => {
-    setCreateKind("once");
-    setWhat("");
-    setWhen("today");
-    setPickDate(schedule.date);
-    setTime("09:00");
-    setRepeats("daily");
-    setWeekDays([1, 3, 5]);
-    setCronRule("30 7 * * 1-5");
-    setEnds("Never");
-    setEndDate(schedule.date);
-    setNotice(null);
-    setCreateOpen(true);
-  };
-
-  const closeCreate = () => {
-    setCreateOpen(false);
-    setTimeout(() => addButtonRef.current?.focus(), 0);
-  };
-
-  const selectCreateKind = (kind: CreateKind) => {
-    setCreateKind(kind);
-  };
-
-  const endInvalid = createKind === "routine" && ends === "On a date" && (!endDate || endDate < schedule.date);
-
-  const canSave = what.trim().length > 0 && !(
-    createKind === "routine" && (
-      (repeats === "weekly" && weekDays.length === 0) ||
-      (repeats === "cron" && !isCronValid(cronRule)) ||
-      endInvalid
-    )
-  );
-
-  const routineExpression = useMemo(() => {
-    if (repeats === "cron") return normalizeCron(cronRule);
-    return timeCron(time, repeats === "weekly" ? weekDays : undefined);
-  }, [repeats, cronRule, time, weekDays]);
-
-  const routineRuns = useMemo(() => {
-    if (!isCronValid(routineExpression)) return [];
-    let until: Date | undefined;
-    if (ends === "On a date" && endDate) {
-      const parsed = parseDate(endDate);
-      if (!Number.isNaN(parsed.getTime())) {
-        parsed.setHours(23, 59, 59, 999);
-        until = parsed;
-      }
-    }
-    return nextCronRuns(routineExpression, new Date(), 3, until);
-  }, [routineExpression, ends, endDate]);
-
-  const routineSummary = repeats === "daily"
-    ? `Every day at ${time}`
-    : repeats === "weekly"
-      ? `Every ${[...weekDays].sort((a, b) => a - b).map((day) => WEEKDAYS[day]?.slice(0, 3)).join(", ") || "selected days"} at ${time}`
-      : cronSummary(routineExpression);
-
-  const cronChips = splitCron(cronRule);
-
-  const saveCreate = () => {
-    const title = what.trim();
-    if (!title || !canSave) return;
-    localSeq.current += 1;
-    const id = `local-${Date.now()}-${localSeq.current}`;
-
-    if (createKind === "once") {
-      const targetDate = when === "today" ? schedule.date : when === "tomorrow" ? addDays(schedule.date, 1) : pickDate || schedule.date;
-      const cadence = when === "today" ? "Today only" : when === "tomorrow" ? "Tomorrow" : shortDate(targetDate);
-      const item: ScheduleItem = {
-        id,
-        sessionId: "local",
-        sessionName: "You",
-        title,
-        time,
-        kind: "once",
-        cadence,
-        days: [parseDate(targetDate).getDay()],
-        completed: false,
-        href: "/my/sessions",
-      };
-      setSchedule((previous) => ({
-        ...previous,
-        countToday: previous.countToday + (targetDate === previous.date ? 1 : 0),
-        items: sortItems([...previous.items, item]),
-      }));
-      setNotice(`Added "${title}" locally.`);
-    } else {
-      const allDays = [0, 1, 2, 3, 4, 5, 6];
-      const days = repeats === "daily"
-        ? allDays
-        : repeats === "weekly"
-          ? [...weekDays].sort((a, b) => a - b)
-          : cronWeekdays(cronRule);
-      const expression = repeats === "cron" ? normalizeCron(cronRule) : timeCron(time, repeats === "weekly" ? days : undefined);
-      const cadence = repeats === "daily"
-        ? "Daily"
-        : repeats === "weekly"
-          ? days.map((day) => WEEKDAYS[day]?.slice(0, 3)).join(", ")
-          : cronSummary(expression);
-      const effectiveTime = repeats === "cron" ? cronTime(expression) : time;
-      const endsOn = ends === "On a date" ? endDate : undefined;
-      const routine: ScheduleRoutine = {
-        id,
-        sessionId: "local",
-        title,
-        time: effectiveTime,
-        cadence,
-        days,
-        href: "/my/sessions",
-        ends,
-        endsOn,
-        cron: expression,
-      };
-      const routineItem: ScheduleItem = {
-        id,
-        sessionId: "local",
-        sessionName: "You",
-        title,
-        time: effectiveTime,
-        kind: "routine",
-        cadence,
-        days,
-        completed: false,
-        href: "/my/sessions",
-        ends,
-        endsOn,
-        cron: expression,
-      };
-      const isToday = days.includes(parseDate(schedule.date).getDay());
-      setSchedule((previous) => ({
-        ...previous,
-        countToday: previous.countToday + (isToday ? 1 : 0),
-        items: isToday ? sortItems([...previous.items, routineItem]) : previous.items,
-        routines: [...previous.routines, routine],
-      }));
-      setNotice(`Added "${title}" locally.`);
-    }
-    closeCreate();
   };
 
   const visibleItems = useMemo(() => {
@@ -660,19 +222,17 @@ export default function ScheduleApp({ initial }: { initial?: ScheduleData }) {
               </span>
             </div>
           </div>
-          <button
-            ref={addButtonRef}
-            type="button"
-            onClick={openCreate}
-            aria-haspopup="dialog"
-            aria-controls="schedule-create"
-            className="schedule-add fixed bottom-[calc(20px+env(safe-area-inset-bottom))] right-[calc(20px+env(safe-area-inset-right))] z-20 flex h-14 w-14 items-center justify-center rounded-[20px] bg-accent-collaboration text-white shadow-[0_12px_28px_-10px_rgba(11,101,96,.45)] transition-transform duration-150 hover:-translate-y-0.5 active:scale-95 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus md:static md:ml-auto md:translate-y-0"
+          <a
+            href="/my/projects?from=schedule-add"
+            aria-label="Add schedule item — choose a project"
+            title="Add schedule item — choose a project"
+            data-testid="schedule-add"
+            className="schedule-add fixed bottom-[calc(20px+env(safe-area-inset-bottom))] right-[calc(20px+env(safe-area-inset-right))] z-20 flex h-14 w-14 items-center justify-center rounded-[20px] bg-accent-collaboration text-white shadow-[0_12px_28px_-10px_rgba(11,101,96,.45)] transition-transform duration-150 hover:-translate-y-0.5 active:scale-95 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus md:static md:ml-auto md:h-11 md:w-11 md:rounded-[14px] md:bg-transparent md:text-text-muted md:shadow-none md:ring-1 md:ring-border md:translate-y-0 md:hover:translate-y-0 md:hover:bg-surface md:hover:text-text-primary"
           >
-            <svg viewBox="0 0 24 24" className="h-6 w-6" aria-hidden="true">
+            <svg viewBox="0 0 24 24" className="h-6 w-6 md:h-5 md:w-5" aria-hidden="true">
               <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" />
             </svg>
-            <span className="sr-only">Add schedule item</span>
-          </button>
+          </a>
         </header>
 
         {notice && (
@@ -763,7 +323,7 @@ export default function ScheduleApp({ initial }: { initial?: ScheduleData }) {
                 </div>
               )}
 
-              {!error && visibleItems.length > 0 && (
+              {visibleItems.length > 0 && (
                 <div className="space-y-3">
                   {visibleItems.map((item, index) => (
                     <div key={item.id} className="schedule-reveal" style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}>
@@ -787,19 +347,18 @@ export default function ScheduleApp({ initial }: { initial?: ScheduleData }) {
               ) : (
                 <div className="space-y-3">
                   {schedule.routines.map((routine) => {
-                    const isLocal = routine.sessionId === "local";
                     const titleClass = "text-[15px] font-semibold leading-5";
                     const detail = routine.endsOn ? `${routine.cadence} · Ends ${shortDate(routine.endsOn)}` : routine.cadence;
                     return (
                       <article key={routine.id} className="schedule-card">
                         <div className="flex items-start justify-between gap-4">
                           <div className="min-w-0">
-                            {isLocal ? (
-                              <span className={titleClass}>{routine.title}</span>
-                            ) : (
+                            {routine.href ? (
                               <a href={routine.href} className={`${titleClass} hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus`}>
                                 {routine.title}
                               </a>
+                            ) : (
+                              <span className={titleClass}>{routine.title}</span>
                             )}
                             <p className="mt-2 text-xs leading-4 text-text-muted">
                               <span className="font-code tabular-nums">{routine.time}</span> • {detail}
@@ -820,229 +379,6 @@ export default function ScheduleApp({ initial }: { initial?: ScheduleData }) {
           </div>
         </div>
       </main>
-
-      {createOpen && (
-        <div
-          id="schedule-create"
-          ref={dialogRef}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="schedule-create-title"
-          data-testid="schedule-create"
-          className="fixed inset-0 z-40 overflow-y-auto bg-paper"
-        >
-          <form
-            onSubmit={(event) => { event.preventDefault(); saveCreate(); }}
-            className="mx-auto flex min-h-dvh w-full max-w-[440px] flex-col px-5 pb-[calc(20px+env(safe-area-inset-bottom))] pt-5"
-          >
-            <header className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
-              <button
-                type="button"
-                onClick={closeCreate}
-                className="justify-self-start rounded-sm text-sm text-text-primary cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-              >
-                Cancel
-              </button>
-              <h2 id="schedule-create-title" className="text-[15px] font-semibold leading-5 text-text-primary">New item</h2>
-              <span aria-hidden="true" />
-            </header>
-
-            <div className="relative mt-5 grid h-11 grid-cols-2 rounded-[14px] bg-shell p-1" role="tablist" aria-label="Item type">
-              <span
-                aria-hidden="true"
-                className={`absolute inset-y-1 left-1 w-[calc((100%-8px)/2)] rounded-[10px] bg-surface ring-1 ring-black/5 shadow-[0_6px_14px_-8px_rgba(29,29,27,.3)] transition-transform duration-[220ms] ease-[cubic-bezier(.16,1,.3,1)] motion-reduce:transition-none`}
-                style={{ transform: `translateX(${createKind === "once" ? 0 : 100}%)` }}
-              />
-              {(["once", "routine"] as const).map((kind) => (
-                <button
-                  key={kind}
-                  type="button"
-                  role="tab"
-                  aria-selected={createKind === kind}
-                  aria-pressed={createKind === kind}
-                  onClick={() => selectCreateKind(kind)}
-                  className={`relative z-10 cursor-pointer appearance-none rounded-[10px] border-0 bg-transparent text-sm transition-[color,background-color,transform,box-shadow] duration-[220ms] ease-[cubic-bezier(.16,1,.3,1)] hover:text-text-primary active:scale-[.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus motion-reduce:transition-none motion-reduce:transform-none ${
-                    createKind === kind ? "font-semibold text-text-primary" : "font-medium text-text-muted hover:bg-surface/60"
-                  }`}
-                >
-                  {kind === "once" ? "Once" : "Routine"}
-                </button>
-              ))}
-            </div>
-
-            <fieldset className="mt-6">
-              <legend className={eyebrow}>What</legend>
-              <input
-                ref={whatRef}
-                id="schedule-what"
-                type="text"
-                value={what}
-                onInput={(event) => setWhat(event.currentTarget.value)}
-                placeholder="What needs doing?"
-                className={`${inputClass} mt-2 w-full`}
-              />
-            </fieldset>
-
-            {createKind === "once" ? (
-              <>
-                <ChoiceGroup
-                  legend="When"
-                  value={when}
-                  options={[
-                    { value: "today", label: "Today" },
-                    { value: "tomorrow", label: "Tomorrow" },
-                    { value: "pick", label: <><span className="cursor-pointer" aria-hidden="true">📅</span> Pick date</> },
-                  ]}
-                  onChange={setWhen}
-                />
-                {when === "pick" && (
-                  <FieldRow label="Date" htmlFor="schedule-pick-date">
-                    <input
-                      id="schedule-pick-date"
-                      type="date"
-                      value={pickDate}
-                      onChange={(event) => setPickDate(event.target.value)}
-                      className={inputClass}
-                    />
-                  </FieldRow>
-                )}
-                <FieldRow label={<><span className="cursor-pointer" aria-hidden="true">⏱️</span> Time</>} htmlFor="schedule-time">
-                  <input id="schedule-time" type="time" value={time} onChange={(event) => setTime(event.target.value)} className={inputClass} />
-                </FieldRow>
-              </>
-            ) : (
-              <>
-                <ChoiceGroup
-                  legend="Repeats"
-                  value={repeats}
-                  options={[
-                    { value: "daily", label: "Daily" },
-                    { value: "weekly", label: "Weekly" },
-                    { value: "cron", label: "Cron" },
-                  ]}
-                  onChange={setRepeats}
-                />
-
-                {repeats === "weekly" && (
-                  <fieldset className="mt-5">
-                    <legend className={eyebrow}>On</legend>
-                    <div className="mt-2 grid grid-cols-7 gap-1.5">
-                      {DAY_LETTERS.map((letter, index) => {
-                        const active = weekDays.includes(index);
-                        return (
-                          <button
-                            key={index}
-                            type="button"
-                            aria-pressed={active}
-                            aria-label={WEEKDAYS[index]}
-                            onClick={() => setWeekDays((current) => active ? current.filter((value) => value !== index) : [...current, index])}
-                            className={`flex h-11 items-center justify-center rounded-[14px] border text-xs font-medium cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
-                              active ? "border-teal-line bg-teal-soft text-accent-collaboration" : "border-border bg-surface text-text-muted"
-                            }`}
-                          >
-                            {letter}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </fieldset>
-                )}
-
-                {repeats === "cron" && (
-                  <fieldset className="mt-5">
-                    <legend className={eyebrow}>Cron rule</legend>
-                    <p id="schedule-cron-hint" className="mt-1 text-xs text-text-muted">* any • */5 step • 1-5 range • 1,3 list</p>
-                    <input
-                      id="schedule-cron"
-                      type="text"
-                      value={cronRule}
-                      onInput={(event) => setCronRule(event.currentTarget.value)}
-                      aria-describedby="schedule-cron-hint"
-                      aria-invalid={!isCronValid(cronRule)}
-                      className={`${inputClass} mt-2 w-full font-code tabular-nums`}
-                    />
-                    {!isCronValid(cronRule) && (
-                      <p className="mt-1 text-xs text-orange" role="alert">Enter a valid 5-field cron rule</p>
-                    )}
-                    <div className="mt-3 grid grid-cols-5 gap-2">
-                      {([
-                        ["min", cronChips.minute],
-                        ["hour", cronChips.hour],
-                        ["day", cronChips.day],
-                        ["month", cronChips.month],
-                        ["weekday", cronChips.weekday],
-                      ] as const).map(([label, value]) => (
-                        <div key={label} className="rounded-[12px] bg-shell p-1 ring-1 ring-black/5">
-                          <div className="rounded-[8px] bg-surface px-1 py-2 text-center">
-                            <span className="block truncate font-code text-xs tabular-nums text-text-primary">{value}</span>
-                            <span className={`${eyebrow} mt-1 block`}>{label}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </fieldset>
-                )}
-
-                {repeats !== "cron" && (
-                  <div className="mt-5 grid grid-cols-2 gap-3">
-                    <FieldCard label="Time" htmlFor="schedule-time">
-                      <input
-                        id="schedule-time"
-                        type="time"
-                        value={time}
-                        onChange={(event) => setTime(event.target.value)}
-                        className="w-full cursor-pointer border-0 bg-transparent p-0 font-code text-base tabular-nums text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-                      />
-                    </FieldCard>
-                    <EndsControl
-                      ends={ends}
-                      endDate={endDate}
-                      onEndsChange={setEnds}
-                      onEndDateChange={setEndDate}
-                      minDate={schedule.date}
-                    />
-                  </div>
-                )}
-
-                <SchedulePreview
-                  summary={routineSummary}
-                  runs={routineRuns}
-                  expression={routineExpression}
-                  showExpression={repeats !== "cron"}
-                  emptyLabel={ends === "On a date" ? "No upcoming runs before this end date" : "No upcoming runs in the next 2 years"}
-                />
-
-                {repeats === "cron" && (
-                  <div className="mt-4">
-                    <EndsControl
-                      ends={ends}
-                      endDate={endDate}
-                      onEndsChange={setEnds}
-                      onEndDateChange={setEndDate}
-                      minDate={schedule.date}
-                    />
-                  </div>
-                )}
-
-              </>
-            )}
-
-            <div className="mt-auto pt-8">
-              <button
-                type="submit"
-                disabled={!canSave}
-                className={`h-12 w-full rounded-[16px] text-sm font-semibold text-white cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
-                  createKind === "once"
-                    ? "bg-orange shadow-[0_12px_28px_-10px_rgba(168,65,12,.45)]"
-                    : "bg-accent-collaboration shadow-[0_12px_28px_-10px_rgba(11,101,96,.45)]"
-                }`}
-              >
-                Save
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
     </>
   );
 }

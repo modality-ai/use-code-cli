@@ -1,4 +1,5 @@
-import { describe, expect, it, mock, spyOn, beforeEach, afterEach } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { bunMockModule } from "modality-bun-kit";
 import * as scripts from "../../../../../scripts/index";
 import { writeFileSync, unlinkSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
@@ -10,11 +11,13 @@ const mockedSessions = [
   { name: "alpha", sessionId: "sid-1", online: true, status: "waiting", waitingFor: "permission prompt", stopped: true, updatedAt: 1 },
 ];
 
-mock.module("../../../../../lib/sessions", () => ({
+const resetSessions = await bunMockModule("../../../../../lib/sessions", () => ({
   ...actual,
   readSessions: async () => mockedSessions,
   findSessionsFuzzy: () => mockedSessions,
-}));
+}), import.meta.dir);
+
+afterAll(() => resetSessions());
 
 const { fetchSessionData, fetchThinking, fetchToolResult } = await import("../session-data");
 

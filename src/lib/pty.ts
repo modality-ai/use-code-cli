@@ -29,6 +29,19 @@ interface PtyJobRecord {
 const jobs = new Map<string, PtyJob>();
 let jobSeq = 0;
 
+// Test-only bypass for unit tests that exercise the in-memory registry.
+// Production keeps filesystem persistence enabled; callers that disable it
+// must restore the previous value when the test finishes.
+let persistJobs = true;
+let memoryRecords: PtyJobRecord[] = [];
+
+export function setPtyJobPersistenceEnabled(enabled: boolean): boolean {
+  const previous = persistJobs;
+  persistJobs = enabled;
+  if (enabled) memoryRecords = [];
+  return previous;
+}
+
 function stateDir(): string {
   return join(process.env.HOME || homedir(), ".use-code-cli");
 }
@@ -58,6 +71,12 @@ function readPersistedJobsSync(): PtyJobRecord[] {
 // One lock covers the whole read-modify-write; separate locks would let
 // concurrent registrations and exits overwrite each other's records.
 async function updatePersistedJobs(update: (records: PtyJobRecord[]) => void): Promise<PtyJobRecord[]> {
+  if (!persistJobs) {
+    const records = [...memoryRecords];
+    update(records);
+    memoryRecords = records;
+    return records;
+  }
   let updated: PtyJobRecord[] | undefined;
   try {
     return await withLock(jobsLock(), () => {

@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterAll, beforeEach, describe, expect, it } from "bun:test";
+import { bunMockModule } from "modality-bun-kit";
 
 const fixtureSessions = [
   { pid: 30078, sessionId: "ed6a79a1-0f7c-4de5-b455-ca19d4243eda", name: "alpha", online: true, cwd: "/tmp/a", status: "idle", updatedAt: 10 },
@@ -18,7 +19,7 @@ function resetAiTool() {
 }
 resetAiTool();
 
-mock.module("../../../../../../lib/sessions", () => ({
+const resetSessions = await bunMockModule("../../../../../../lib/sessions", () => ({
   readSessions: (includeOffline?: boolean) => readSessionsImpl(includeOffline),
   findOfflineTranscriptPath: async () => null,
   findSessionsFuzzy: (sessions: any[], target: string) => {
@@ -26,15 +27,20 @@ mock.module("../../../../../../lib/sessions", () => ({
     if (exact.length > 0) return exact;
     return sessions.filter((s) => (s.name ?? "").startsWith(target));
   },
-}));
+}), import.meta.dir);
 
-mock.module("../../../../../../scripts/index", () => ({
+const resetScripts = await bunMockModule("../../../../../../scripts/index", () => ({
   aiTool: {
     execute: async (props: any) => aiToolImpl(props),
   },
-}));
+}), import.meta.dir);
 
 const { POST } = await import("../route");
+
+afterAll(() => {
+  resetScripts();
+  resetSessions();
+});
 
 describe("POST /my/api/session/stop", () => {
   beforeEach(() => {

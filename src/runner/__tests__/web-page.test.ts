@@ -50,6 +50,13 @@ describe("web page SSR + client bundle injection", () => {
     expect(html).toContain("<script>window.__REACT_DATA__ = { schedule:");
   });
 
+  it("renders the standalone schedule add page with its own client bundle", async () => {
+    const html = await getHtml("/my/schedule/add?project=foo");
+    expect(html).toContain('<script type="module" src="/dist/my/schedule/add/ScheduleAddPage.client.js">');
+    expect(html).toContain("Add schedule item");
+    expect(html).toMatch(/Project: (?:<!-- -->)?foo/);
+  });
+
   it("server-renders initial client component markup + hydration payload for sessions", async () => {
     const html = await getHtml("/my/sessions");
     expect(html).toContain("<script>window.__REACT_DATA__ = { sessions:");
@@ -76,6 +83,13 @@ describe("web page SSR + client bundle injection", () => {
     const html = await getHtml("/my/projects");
     expect(html).toContain("<script>window.__REACT_DATA__ = { projects:");
     expect(html).toMatch(/\/my\/project\//);
+  });
+
+  it("renders the project picker when arriving from the schedule FAB", async () => {
+    const html = await getHtml("/my/projects?from=schedule-add");
+    expect(html).toContain("Choose a project for a new schedule item");
+    expect(html).toContain('href="/my/schedule"');
+    expect(html).toContain('id="project-filter"');
   });
 
   it("renders the project config page shell", async () => {
