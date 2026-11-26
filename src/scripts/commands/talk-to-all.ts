@@ -101,6 +101,7 @@ async function talkToAll(args: TalkToAllArgs, deps?: TalkToAllDeps) {
 
 export const talkToAllCommand: CLICommand<TalkToAllDeps, TalkToAllArgs, any> = {
   name: "talk-to-all",
+  positionalKeys: ["message"],
   description: "Talk to all active Claude Code sessions",
   inputSchema: TalkToAllArgsSchema,
   execute: (args) => talkToAll(args as TalkToAllArgs),

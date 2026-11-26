@@ -47,6 +47,64 @@ describe("session-status run", () => {
     expect(delivered).toHaveLength(0);
   });
 
+  it("reports idle agents to sender and PO with identity, output, and actionable prompts", async () => {
+    const delivered: { sessionId: string; message: string }[] = [];
+    const sessions = (status: string) => [
+      { sessionId: "s1", status, name: "agent-one", cwd: "/x/proj-one" },
+      { sessionId: "s2", status, name: "agent-two", cwd: "/x/proj-two" },
+    ];
+    let baseline = true;
+    const deps = {
+      aiTool: {
+        execute: async (args: { command: string; target?: string }) => {
+          if (args.command === "sessions") return { data: sessions(baseline ? "busy" : "idle") };
+          if (args.command === "session")
+            return { message: args.target === "s1" ? "Work finished." : "" };
+          if (args.command === "project") return { data: { po: "po-session" } };
+          return {};
+        },
+      },
+      liveSessions: async (): Promise<LiveSession[]> => [
+        { pid: 1, sessionId: "sender1", name: "sender", cwd: "/x/proj-one" },
+        { pid: 2, sessionId: "po-session", name: "po", cwd: "/x/proj-two" },
+      ],
+      deliver: async (s: LiveSession, m: string) => {
+        delivered.push({ sessionId: s.sessionId, message: m });
+        return "ok";
+      },
+      findRepliesForTarget: async (target: string) =>
+        target === "s1"
+          ? [{ inReplyTo: "m1", targetSessionId: "s1", senderSessionId: "sender1", msgId: "a", at: 1 }]
+          : [],
+      removeReply: async () => 1,
+    } as SessionStatusDeps;
+
+    await run(deps);
+    baseline = false;
+    await run(deps);
+
+    expect(
+      delivered.map(({ sessionId, message }) => ({
+        sessionId,
+        name: message.includes(`Agent "${sessionId === "sender1" ? "agent-one" : "agent-two"}"`),
+        project: message.includes(sessionId === "sender1" ? "proj-one" : "proj-two"),
+        output: message.includes(
+          sessionId === "sender1"
+            ? "Work finished."
+            : "agent-two is idle now (no captured output)."
+        ),
+        actionable: message.includes(
+          sessionId === "sender1"
+            ? "decide whether follow-up is needed"
+            : "Summarize what the agent accomplished"
+        ),
+      }))
+    ).toEqual([
+      { sessionId: "sender1", name: true, project: true, output: true, actionable: true },
+      { sessionId: "po-session", name: true, project: true, output: true, actionable: true },
+    ]);
+  });
+
   it("delivers to sender on busy->idle when reply exists", async () => {
     const delivered: string[] = [];
     const sessions1 = [{ sessionId: "s1", status: "busy", name: "agent", cwd: "/x/proj" }];

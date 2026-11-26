@@ -58,6 +58,20 @@ describe("preprocessTalkArgv", () => {
     expect(argv).toEqual(["talk", "james", "--message=line one --- more"]);
   });
 
+  it("preprocesses talk-to-all messages after --- like talk", async () => {
+    const { argv, error } = await preprocessTalkArgv([
+      "talk-to-all",
+      MESSAGE_SEPARATOR,
+      "ship",
+      MESSAGE_SEPARATOR,
+      "it",
+    ]);
+    expect({ argv, error }).toEqual({
+      argv: ["talk-to-all", "--message=ship --- it"],
+      error: undefined,
+    });
+  });
+
   it("reports a held-open stdin as a clear error instead of hanging", async () => {
     const neverEnding = new Readable({ read() {} });
     neverEnding.push("x");

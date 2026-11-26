@@ -1,8 +1,13 @@
 import type { Readable } from "node:stream";
 
-/** The command this preprocessor applies to. */
-export const TALK_COMMAND_NAME = "talk";
-export const TALK_HERO_COMMAND_NAME = "talk-hero";
+const TALK_COMMAND_NAME = "talk";
+const TALK_HERO_COMMAND_NAME = "talk-hero";
+const TALK_TO_ALL_COMMAND_NAME = "talk-to-all";
+const TALK_PREPROCESSED_COMMANDS = new Set([
+  TALK_COMMAND_NAME,
+  TALK_HERO_COMMAND_NAME,
+  TALK_TO_ALL_COMMAND_NAME,
+]);
 
 /** The token that ends the CLI arguments and starts the literal message. */
 export const MESSAGE_SEPARATOR = "---";
@@ -79,7 +84,8 @@ export async function preprocessTalkArgv(
   argv: string[],
   stdinTimeoutMs: number = STDIN_READ_TIMEOUT_MS,
 ): Promise<PreprocessedArgv> {
-  if (argv[0] !== TALK_COMMAND_NAME && argv[0] !== TALK_HERO_COMMAND_NAME) return { argv };
+  const command = argv[0];
+  if (!command || !TALK_PREPROCESSED_COMMANDS.has(command)) return { argv };
 
   const at = argv.indexOf(MESSAGE_SEPARATOR, 1);
   if (at === -1) return { argv };

@@ -3,7 +3,7 @@
 
 import { aiTool } from "../../scripts/index";
 import { homedir } from "os";
-import { join } from "path";
+import { basename, join } from "path";
 import {
   existsSync,
   mkdirSync,
@@ -83,8 +83,7 @@ export function resetSessionStatusState(): void {
 
 function basenameOf(cwd: string | undefined): string {
   if (!cwd) return "";
-  const parts = String(cwd).split("/").filter(Boolean);
-  return parts.length ? parts[parts.length - 1]! : "";
+  return basename(cwd);
 }
 
 /** Detect session status changes by comparing the current snapshot to the previous one. */
@@ -135,37 +134,49 @@ export async function run(deps?: SessionStatusDeps): Promise<void> {
             if (prev === "busy" && status === "idle") {
               try {
                 const session = rowById.get(id)!;
-                const name = id;
+                const agentName = session.name || id;
+                const projectName = basenameOf(session.cwd);
                 // Fetch the session's whole content via aiTool execute and dispatch that.
-                let message = `${name} is idle now`;
+                let agentOutput = "";
                 try {
                   const r: any = await aiToolFn.execute({
                     command: "session",
-                    target: name,
+                    target: id,
                   });
                   if (r && typeof r.message === "string" && r.message.trim())
-                    message = r.message;
+                    agentOutput = r.message;
                   else if (
                     r?.data &&
                     typeof r.data.message === "string" &&
                     r.data.message.trim()
                   )
-                    message = r.data.message;
-                } catch {
-                  // fall back to the hint message
-                }
+                    agentOutput = r.data.message;
+                } catch {}
+                const report =
+                  agentOutput.trim() ||
+                  `${agentName} is idle now (no captured output).`;
+
                 const replies = await findRepliesFn(id);
                 const live = await liveSessionsFn();
 
-                if (Array.isArray(replies) && replies.length > 0) {
-                  let fallThrough = false;
+                const senderMessage = [
+                  `[Status update] Agent "${agentName}" (project ${projectName || "unknown"}) just became idle after working on your request.`,
+                  "",
+                  "Latest output:",
+                  report,
+                  "",
+                  "Please review the result above, decide whether follow-up is needed, and continue/finish the task. Reply with your assessment and next step rather than just acknowledging.",
+                ].join("\n");
+
+                let fallThrough = !Array.isArray(replies) || replies.length === 0;
+                if (Array.isArray(replies)) {
                   for (const rec of replies) {
                     const sender = rec?.senderSessionId
                       ? live.find((s) => s.sessionId === rec.senderSessionId)
                       : undefined;
                     if (sender) {
                       try {
-                        await deliverFn(sender, message);
+                        await deliverFn(sender, senderMessage);
                       } catch {
                         // best-effort
                       }
@@ -178,11 +189,17 @@ export async function run(deps?: SessionStatusDeps): Promise<void> {
                       fallThrough = true;
                     }
                   }
-                  if (fallThrough) {
-                    await alertPo(session, live, deliverFn, aiToolFn, message);
-                  }
-                } else {
-                  await alertPo(session, live, deliverFn, aiToolFn, message);
+                }
+                if (fallThrough) {
+                  await alertPo(
+                    session,
+                    live,
+                    deliverFn,
+                    aiToolFn,
+                    agentName,
+                    projectName,
+                    report
+                  );
                 }
               } catch {
                 // never throw
@@ -215,22 +232,39 @@ async function alertPo(
     msgId?: string
   ) => Promise<string>,
   aiToolFn: { execute: (args: unknown) => Promise<unknown> },
-  message: string
+  agentName: string,
+  projectName: string,
+  report: string
 ): Promise<void> {
   try {
     const res: any = await aiToolFn.execute({
       command: "project",
       target: session.cwd,
     } as any);
-    const po = res?.data?.po ?? `po-${basenameOf(session.cwd)}`;
+    const po =
+      res?.data?.po ?? (session.cwd ? `po-${basename(session.cwd)}` : "po");
     const poSession = live.find(
       (s) =>
         (s.name === po || s.sessionId === po) &&
         s.sessionId !== session.sessionId
     );
     if (poSession) {
+      const poMessage = [
+        `[Automated status report] Agent "${agentName}" (session id: ${session.sessionId}) in project "${projectName || "unknown"}" (cwd: ${session.cwd || "unknown"}) transitioned busy -> idle.`,
+        "",
+        "Latest captured output:",
+        report,
+        "",
+        "If you lack context to act on this report, proactively read the agent's full session transcript before deciding — run `use-code-cli session ${session.sessionId}` (or the session tool with that target) and review its recent prompts/output. Do not guess from the snippet above alone.",
+        "",
+        "As the project PO, please:",
+        "1. Summarize what the agent accomplished (3-5 bullets).",
+        "2. Decide whether any follow-up is required (verify results, notify the user, assign a next step).",
+        "3. If follow-up is needed, take the action (e.g. talk to the agent or another session) or report your decision.",
+        "Do not just reply \"received\" — provide the summary and your decision.",
+      ].join("\n");
       try {
-        await deliverFn(poSession, message);
+        await deliverFn(poSession, poMessage);
       } catch {
         // best-effort
       }
