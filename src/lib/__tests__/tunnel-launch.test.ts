@@ -2,7 +2,17 @@ import { describe, expect, it, beforeAll, afterAll } from "bun:test";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startTunnel, getTunnelStatus, readPersistedState, stopTunnel, registerLocalServer } from "../tunnel";
+import {
+  startTunnel,
+  getTunnelStatus,
+  readPersistedState,
+  writePersistedState,
+  recoverPersistedUrl,
+  killStaleCloudflared,
+  probeLiveTunnelUrl,
+  stopTunnel,
+  registerLocalServer,
+} from "../tunnel";
 
 const LOCAL_HOST = "127.0.0.1";
 const LOCAL_PORT = 59998;
@@ -34,8 +44,12 @@ function makeFakeProc() {
   return { proc, killCalls };
 }
 
-function makeDeps(writeFn?: (fd: any, args: string[]) => void) {
+function makeDeps(
+  writeFn?: (fd: any, args: string[]) => void,
+  fetchImpl: () => Promise<any> = async () => ({ ok: false, status: 530 }),
+) {
   const spawnCalls: any[] = [];
+  const signalCalls: any[] = [];
   const { proc, killCalls } = makeFakeProc();
   const fakeSpawn = (args: any[], opts: any) => {
     spawnCalls.push({ args, opts });
@@ -55,10 +69,14 @@ function makeDeps(writeFn?: (fd: any, args: string[]) => void) {
   const deps: any = {
     spawn: fakeSpawn,
     which: () => "/fake/cloudflared",
-    fetch: async () => ({ ok: false, status: 530 }), tailIntervalMs: 1, setInterval: (fn: any) => { fn(); return 0; }, execFileSync: () => "cloudflared", kill: () => true,
+    fetch: fetchImpl,
+    probeDelayMs: 0,
+    tailIntervalMs: 1,
     setInterval: (fn: any) => { fn(); return 0; },
+    execFileSync: () => "cloudflared",
+    kill: (pid: number, sig?: any) => { signalCalls.push({ pid, sig }); return true; },
   };
-  return { deps, spawnCalls, proc, killCalls };
+  return { deps, spawnCalls, proc, killCalls, signalCalls };
 }
 
 describe("launchTunnel (detached)", () => {
@@ -207,6 +225,159 @@ describe("launchTunnel (detached)", () => {
     let log = "";
     log = res!.session.output.join("");
     expect(log).toContain(`tunnel --url http://${LOCAL_HOST}:${LOCAL_PORT}`);
+    await stopTunnel(deps);
+  }, 10000);
+
+  it("reuses an alive tunnel on a second start without spawning again", async () => {
+    const { deps, spawnCalls } = makeDeps(undefined, async () => ({ status: 200 }));
+    const first = await startTunnel(deps);
+    expect(first?.reused).toBe(false);
+    await new Promise((r) => setTimeout(r, 5));
+    const url = getTunnelStatus().tunnelUrl;
+    expect(url).toMatch(/trycloudflare\.com$/);
+
+    const second = await startTunnel(deps);
+    expect(second?.reused).toBe(true);
+    expect(second?.url).toBe(url);
+    expect(second?.session.done).toBe(true);
+    expect(spawnCalls).toHaveLength(1);
+    await stopTunnel(deps);
+  }, 10000);
+
+  it("does not kill an adopted tunnel on a later POST", async () => {
+    const { deps, spawnCalls, signalCalls } = makeDeps(undefined, async () => ({ status: 200 }));
+    await startTunnel(deps);
+    await new Promise((r) => setTimeout(r, 5));
+    expect(await recoverPersistedUrl(deps)).toBe(getTunnelStatus().tunnelUrl);
+
+    const second = await startTunnel(deps);
+    expect(second?.reused).toBe(true);
+    expect(signalCalls).toHaveLength(0);
+    expect(spawnCalls).toHaveLength(1);
+    await stopTunnel(deps);
+  }, 10000);
+
+  it("forceNew skips adoption and spawns a fresh tunnel", async () => {
+    const base = makeDeps(undefined, async () => ({ status: 200 }));
+    await startTunnel(base.deps);
+    await new Promise((r) => setTimeout(r, 5));
+    const originalUrl = getTunnelStatus().tunnelUrl;
+
+    // A live pid-file URL that the sweep would otherwise adopt.
+    const forceDeps = {
+      ...base.deps,
+      execFileSync: (cmd: string) => {
+        if (cmd === "pgrep") return "4242\n";
+        if (cmd === "ps") return "1 cloudflared tunnel --url http://127.0.0.1:59998\n";
+        return "";
+      },
+      readFileSync: (p: any) => String(p).endsWith("cloudflared.pid") ? "4242" : readFileSync(p, "utf8"),
+    };
+    const fresh = await startTunnel(forceDeps, { forceNew: true });
+    expect(fresh?.reused).toBe(false);
+    expect(base.spawnCalls).toHaveLength(2);
+    await new Promise((r) => setTimeout(r, 5));
+    expect(getTunnelStatus().tunnelUrl).not.toBe(originalUrl);
+    await stopTunnel(base.deps);
+  }, 10000);
+
+  it("probes and adopts a pid-file URL before sweeping stale processes", async () => {
+    writePersistedState({
+      url: "https://adopted.trycloudflare.com",
+      active: true,
+      lastAliveAt: "2026-01-01T00:00:00.000Z",
+    });
+    writeFileSync(join(tmpHome, ".use-code-cli", "cloudflared.pid"), "4242");
+    const signalCalls: any[] = [];
+    const res = await killStaleCloudflared([], {
+      execFileSync: (cmd: string) => {
+        if (cmd === "pgrep") return "4242\n";
+        if (cmd === "ps") return "1 cloudflared tunnel --url http://127.0.0.1:59998\n";
+        return "";
+      },
+      readFileSync: (p: any) => String(p).endsWith("cloudflared.pid") ? "4242" : readFileSync(p, "utf8"),
+      fetch: async () => ({ status: 200 }),
+      probeDelayMs: 0,
+      kill: (pid: number, sig?: any) => { signalCalls.push({ pid, sig }); return true; },
+    });
+    expect(res).toEqual({ killed: 0, adoptedUrl: "https://adopted.trycloudflare.com" });
+    expect(signalCalls).toHaveLength(0);
+    expect(getTunnelStatus().tunnelUrl).toBe("https://adopted.trycloudflare.com");
+    await stopTunnel();
+  }, 10000);
+
+  it("marks state stale when a periodic probe fails while the child is alive", async () => {
+    const { deps } = makeDeps(undefined, async () => ({ status: 200 }));
+    await startTunnel(deps);
+    await new Promise((r) => setTimeout(r, 5));
+    expect(readPersistedState()?.stale).toBe(false);
+
+    const originalFetch = globalThis.fetch;
+    const originalDelay = process.env.TUNNEL_PROBE_DELAY_MS;
+    process.env.TUNNEL_PROBE_DELAY_MS = "0";
+    globalThis.fetch = (async () => new Response(null, { status: 530 })) as any;
+    try {
+      await probeLiveTunnelUrl();
+      expect(readPersistedState()?.stale).toBe(true);
+      expect(readPersistedState()?.active).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalDelay === undefined) delete process.env.TUNNEL_PROBE_DELAY_MS;
+      else process.env.TUNNEL_PROBE_DELAY_MS = originalDelay;
+    }
+    await stopTunnel(deps);
+  }, 10000);
+
+  it("never probes a non-tunnel persisted URL during the launch sweep", async () => {
+    writePersistedState({
+      url: "http://127.0.0.1:9999/admin",
+      active: true,
+      lastAliveAt: new Date().toISOString(),
+    });
+    writeFileSync(join(tmpHome, ".use-code-cli", "cloudflared.pid"), "4242");
+    let fetches = 0;
+    const signals: any[] = [];
+    const res = await killStaleCloudflared([], {
+      execFileSync: (cmd: string) => {
+        if (cmd === "pgrep") return "4242\n";
+        if (cmd === "ps") return "1 cloudflared tunnel --url http://127.0.0.1:59998\n";
+        return "";
+      },
+      readFileSync: (p: any) => String(p).endsWith("cloudflared.pid") ? "4242" : readFileSync(p, "utf8"),
+      fetch: async () => { fetches += 1; return { status: 200 }; },
+      probeDelayMs: 0,
+      kill: (pid: number, sig?: any) => { signals.push({ pid, sig }); return true; },
+    });
+    expect(fetches).toBe(0);
+    expect(res.adoptedUrl).toBeNull();
+    expect(signals).toHaveLength(1);
+  }, 10000);
+
+  it("does not reuse or report a stale URL on a later start", async () => {
+    const { deps, spawnCalls } = makeDeps(undefined, async () => ({ status: 200 }));
+    const first = await startTunnel(deps);
+    expect(first?.reused).toBe(false);
+    await new Promise((r) => setTimeout(r, 5));
+    expect(getTunnelStatus().tunnelUrl).toMatch(/trycloudflare\.com$/);
+
+    writePersistedState({ ...readPersistedState()!, stale: true });
+    expect(getTunnelStatus().tunnelUrl).toBeNull();
+
+    const second = await startTunnel(deps);
+    expect(second?.reused).toBe(false);
+    expect(spawnCalls).toHaveLength(2);
+    await stopTunnel(deps);
+  }, 10000);
+
+  it("honors forceNew supplied through deps", async () => {
+    const { deps, spawnCalls } = makeDeps(undefined, async () => ({ status: 200 }));
+    await startTunnel(deps);
+    await new Promise((r) => setTimeout(r, 5));
+    expect(getTunnelStatus().tunnelUrl).toMatch(/trycloudflare\.com$/);
+
+    const fresh = await startTunnel({ ...deps, forceNew: true });
+    expect(fresh?.reused).toBe(false);
+    expect(spawnCalls).toHaveLength(2);
     await stopTunnel(deps);
   }, 10000);
 });

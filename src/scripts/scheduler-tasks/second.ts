@@ -7,7 +7,8 @@
 // 6-field `schedule` exported by a scanned module is parsed/collected here
 // (via parseSchedule) but never handed to Bun.cron.
 
-import { readdirSync, openSync, closeSync, statSync, writeFileSync, mkdirSync, unlinkSync, readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { readdirSync, openSync, closeSync, writeFileSync, mkdirSync, unlinkSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { schedulerScriptsDir } from "../../runner/scheduler";
@@ -114,6 +115,88 @@ const inFlight = new Set<SecondModule>();
 const __g2 = globalThis as { __secondIntervals?: ReturnType<typeof setInterval>[] };
 __g2.__secondIntervals = intervals;
 
+interface LeaderLock {
+  token: string;
+  pid: number;
+  instanceId: string;
+  heartbeatAt: number;
+}
+
+// The uuid makes the token unique per module instance, so a recycled pid or
+// a hot-reload survivor cannot be mistaken for the current leader.
+const instanceId = randomUUID();
+let ownerToken: string | null = null;
+
+function readLeaderLock(): LeaderLock | null {
+  try {
+    const v = JSON.parse(readFileSync(lockPath(), "utf8"));
+    if (!v || typeof v !== "object") return null;
+    if (
+      typeof v.token !== "string" || !Number.isInteger(v.pid) ||
+      typeof v.instanceId !== "string" || typeof v.heartbeatAt !== "number"
+    ) return null;
+    return { token: v.token, pid: v.pid, instanceId: v.instanceId, heartbeatAt: v.heartbeatAt };
+  } catch {
+    return null;
+  }
+}
+
+function isHolderAlive(lock: LeaderLock): boolean {
+  if (lock.pid <= 0) return false;
+  // Same pid + different token is a stale instance inside this process (or a
+  // reused pid): still alive, so it must never be stolen.
+  if (lock.pid === process.pid) return true;
+  try {
+    process.kill(lock.pid, 0);
+    return true;
+  } catch (err) {
+    // EPERM proves the process exists but signals are forbidden.
+    return (err as { code?: string })?.code === "EPERM";
+  }
+}
+
+function writeLeaderLock(): boolean {
+  if (!ownerToken) return false;
+  const lock = lockPath();
+  const tmp = `${lock}.${instanceId}.tmp`;
+  try {
+    writeFileSync(tmp, JSON.stringify({
+      token: ownerToken,
+      pid: process.pid,
+      instanceId,
+      heartbeatAt: Date.now(),
+    }));
+    // Publish in one rename so a concurrent reader never sees a partial record.
+    renameSync(tmp, lock);
+    return true;
+  } catch {
+    try { unlinkSync(tmp); } catch {}
+    return false;
+  }
+}
+
+function ownsLock(): boolean {
+  if (!leader || !ownerToken) return false;
+  const current = readLeaderLock();
+  return current?.token === ownerToken &&
+    current.pid === process.pid &&
+    current.instanceId === instanceId;
+}
+
+/** Called at the top of every module tick. Loss of ownership is fatal for
+ * this instance: no further tick may run and all timers are cleared at once. */
+function verifyLeadership(): boolean {
+  if (!ownsLock()) {
+    stopSecondScheduler();
+    return false;
+  }
+  if (!writeLeaderLock()) {
+    stopSecondScheduler();
+    return false;
+  }
+  return true;
+}
+
 function intervalMsFor(m: SecondModule): number {
   if (typeof m.intervalMs === "number" && m.intervalMs > 0) return m.intervalMs;
   const sched = m.schedule;
@@ -142,11 +225,13 @@ export function stopSecondScheduler(): void {
   intervals.length = 0;
   inFlight.clear();
   armed = false;
-  // Release the leader lock we own so a subsequent run() can re-acquire it.
-  if (leader) {
+  // Never delete a lock another instance now owns: only an exact token match
+  // proves this instance still holds it.
+  if (ownsLock()) {
     try { unlinkSync(lockPath()); } catch {}
   }
   leader = false;
+  ownerToken = null;
 }
 
 function unregisterExitHandlers(): void {
@@ -163,60 +248,49 @@ function unregisterExitHandlers(): void {
 // Keep globalThis in sync for hot-reload cleanup.
 (globalThis as { __secondStop?: () => void }).__secondStop = stopSecondScheduler;
 
-/** Attempt to acquire the single-owner leader lock. Returns true if this process is leader. */
+/** Attempt to acquire the single-owner leader lock. Returns true if this instance is leader. */
 async function tryAcquireLeader(): Promise<boolean> {
   leader = false;
+  ownerToken = null;
   try {
     mkdirSync(stateDir(), { recursive: true });
   } catch {}
   const lp = lockPath();
-  let acquired = false;
-  try {
-    const fd = openSync(lp, "wx");
+  const token = `${process.pid}:${instanceId}`;
+  // Two attempts: one atomic create, or one reclaim of a malformed/dead lock
+  // followed by an atomic create. A live holder always wins and is never stolen.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    let fd: number;
     try {
-      writeFileSync(lp, String(process.pid));
-      acquired = true;
-    } finally {
-      closeSync(fd);
+      fd = openSync(lp, "wx");
+    } catch (err) {
+      if ((err as { code?: string })?.code !== "EEXIST") return false;
+      const existing = readLeaderLock();
+      if (existing && isHolderAlive(existing)) return false;
+      try { unlinkSync(lp); } catch {}
+      continue;
     }
-  } catch {
     try {
-      const st = statSync(lp);
-      const age = Date.now() - st.mtimeMs;
-      let holderAlive = false;
-      try {
-        const holderPid = parseInt(readFileSync(lp, "utf8").trim(), 10);
-        if (!isNaN(holderPid) && holderPid > 0 && holderPid !== process.pid) {
-          try {
-            process.kill(holderPid, 0);
-            holderAlive = true;
-          } catch (err) {
-            // EPERM means the process exists but we lack permission to signal it —
-            // treat as alive so we never steal a live holder's lock. ESRCH (no
-            // such process) means it's dead.
-            const code = (err as { code?: string })?.code;
-            holderAlive = code === "EPERM";
-          }
-        }
-      } catch {}
-      const fresh = age >= 0 && age < 120_000;
-      if (fresh && holderAlive) {
-        return false;
-      }
-      try { writeFileSync(lp, String(process.pid)); } catch {}
-      acquired = true;
+      ownerToken = token;
+      if (!writeLeaderLock()) throw new Error("leader heartbeat write failed");
+      leader = true;
+      return true;
     } catch {
-      acquired = false;
+      ownerToken = null;
+      try { unlinkSync(lp); } catch {}
+      return false;
+    } finally {
+      try { closeSync(fd); } catch {}
     }
   }
-  if (!acquired) return false;
-  leader = true;
-  return true;
+  return false;
 }
 
 export async function run(dir?: string): Promise<{ armed: boolean; moduleCount: number; leader: boolean }> {
   if (armed) stopSecondScheduler(); // restartable: never accumulate timers
   if (!(await tryAcquireLeader())) {
+    // No leader means no timers, even if a previous attempt left any behind.
+    stopSecondScheduler();
     return { armed: false, moduleCount: 0, leader: false };
   }
   lastRunDir = dir;
@@ -247,10 +321,8 @@ export async function run(dir?: string): Promise<{ armed: boolean; moduleCount: 
   for (const m of mods) {
     const ms = intervalMsFor(m);
     const tick = async () => {
-      // Leader heartbeat: refresh lock mtime so stale detection works.
-      if (leader) {
-        try { writeFileSync(lockPath(), String(process.pid)); } catch {}
-      }
+      // Heartbeat + ownership check happen before every module tick.
+      if (!verifyLeadership()) return;
       if (inFlight.has(m)) return;
       inFlight.add(m);
       try { await m.run(); } catch (err) { console.error(`[second] module ${m.name} tick failed:`, err); } finally { inFlight.delete(m); }

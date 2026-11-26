@@ -165,7 +165,7 @@ export async function run(deps?: SessionStatusDeps): Promise<void> {
                   "Latest output:",
                   report,
                   "",
-                  "Please review the result above, decide whether follow-up is needed, and continue/finish the task. Reply with your assessment and next step rather than just acknowledging.",
+                  "If follow-up is needed, take it now via `use-code-cli talk` or another appropriate tool, then report the concrete action taken and its result. If no follow-up is needed, explicitly state why after reviewing the output. Do not just acknowledge or describe intent.",
                 ].join("\n");
 
                 let fallThrough = !Array.isArray(replies) || replies.length === 0;
@@ -260,8 +260,9 @@ async function alertPo(
         "As the project PO, please:",
         "1. Summarize what the agent accomplished (3-5 bullets).",
         "2. Decide whether any follow-up is required (verify results, notify the user, assign a next step).",
-        "3. If follow-up is needed, take the action (e.g. talk to the agent or another session) or report your decision.",
-        "Do not just reply \"received\" — provide the summary and your decision.",
+        "3. If follow-up is needed, perform it now with `use-code-cli talk`, `use-code-cli session`, or another appropriate tool, then report the exact action taken and its result.",
+        "4. Only say \"no follow-up\" after verification, with a concrete reason.",
+        "Do not merely describe intent, say \"will dispatch\", or reply \"received\" — take the action or give a verified no-follow-up reason.",
       ].join("\n");
       try {
         await deliverFn(poSession, poMessage);

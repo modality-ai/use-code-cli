@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { TUNNEL_BTN, TUNNEL_OUTPUT, TUNNEL_STATUS, TUNNEL_URL, UNLINK_BTN, COPY_BTN } from "./dom-ids";
+import { TUNNEL_BTN, TUNNEL_OUTPUT, TUNNEL_STATUS, TUNNEL_URL, TUNNEL_WARNING, UNLINK_BTN, COPY_BTN } from "./dom-ids";
 
 export interface TunnelPageProps {
   url?: string | null;
@@ -14,8 +14,10 @@ export default function TunnelApp({ url, pollMs = 2000 }: TunnelPageProps = {}) 
   const redirectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   function updateActionButtons(u: boolean) {
     setHasUrl(u);
+    const createBtn = document.getElementById(TUNNEL_BTN) as HTMLButtonElement | null;
     const copyBtn = document.getElementById(COPY_BTN) as HTMLButtonElement | null;
     const unlinkBtn = document.getElementById(UNLINK_BTN) as HTMLButtonElement | null;
+    if (createBtn) createBtn.disabled = u;
     if (copyBtn) copyBtn.disabled = !u;
     if (unlinkBtn) unlinkBtn.disabled = !u;
   }
@@ -60,7 +62,8 @@ export default function TunnelApp({ url, pollMs = 2000 }: TunnelPageProps = {}) 
       appendOutput("\nError: " + String(e) + "\n");
     } finally {
       const b = document.getElementById(TUNNEL_BTN) as HTMLButtonElement | null;
-      if (b) b.disabled = false;
+      const currentUrl = document.getElementById(TUNNEL_URL)?.textContent?.trim();
+      if (b) b.disabled = !!currentUrl && currentUrl !== "—";
     }
   }
   async function unlink() {
@@ -159,7 +162,8 @@ export default function TunnelApp({ url, pollMs = 2000 }: TunnelPageProps = {}) 
       <p>Status: <span id={TUNNEL_STATUS}>checking…</span></p>
       <h2>2. Create tunnel &amp; link to this project web url</h2>
       <p>One click creates the tunnel and links it to this project web url.</p>
-      <button id={TUNNEL_BTN} onClick={createAndLink} className="px-3 py-2 rounded-sm bg-accent-collaboration text-white font-semibold cursor-pointer">Create &amp; Link tunnel</button>
+      {!hasUrl && <p id={TUNNEL_WARNING} className="text-xs text-text-muted mb-1">Creating a new tunnel changes the URL — Quick Tunnel cannot keep the current hostname.</p>}
+      <button id={TUNNEL_BTN} onClick={createAndLink} disabled={hasUrl} className="px-3 py-2 rounded-sm bg-accent-collaboration text-white font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Create &amp; Link tunnel</button>
       <h2>Tunnel URL</h2>
       <p className="text-xs text-text-muted mb-1">Last alive: <span id="tunnel-last-alive">{lastAliveAt || "—"}</span></p>
       <div className="flex items-center gap-2">

@@ -1,5 +1,4 @@
 import {
-  launchTunnel,
   getSession,
   clearStaleTunnelUrl,
   getTunnelStatus,
@@ -61,13 +60,30 @@ export async function GET(request: Request): Promise<Response> {
 
 export async function POST(request: Request): Promise<Response> {
   try {
-    const res = await startTunnel();
+    // Reuse is the default. Explicit forceNew is available via query or JSON,
+    // so existing no-body clients keep working unchanged.
+    const params = new URL(request.url).searchParams;
+    let forceNew = ["true", "1"].includes((params.get("forceNew") ?? "").toLowerCase());
+    try {
+      const text = await request.text();
+      if (text) {
+        const body = JSON.parse(text);
+        if (body?.forceNew === true) forceNew = true;
+      }
+    } catch {}
+    const res = await startTunnel(undefined, { forceNew });
     if (!res) {
       return Response.json({ success: false, error: "failed to spawn cloudflared" }, { status: 500 });
     }
     const { id } = res;
     const status = getTunnelStatus();
-    return Response.json({ success: true, sessionId: id, projectUrl: getLocalProjectUrl(), url: status.tunnelUrl });
+    return Response.json({
+      success: true,
+      sessionId: id,
+      projectUrl: getLocalProjectUrl(),
+      url: res.url ?? status.tunnelUrl,
+      reused: res.reused,
+    });
   } catch (err) {
     // A mis-wired registration (getLocalProjectUrl throws) or a spawn failure
     // surfaces as a structured error, not an unhandled 500.

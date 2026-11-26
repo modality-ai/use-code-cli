@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +16,14 @@ import {
   recoverPersistedUrl,
   stopTunnel,
 } from "../tunnel";
+
+// The production retry gap is 5s; tests inject zero so probe-retry cases stay fast.
+const ORIGINAL_PROBE_DELAY = process.env.TUNNEL_PROBE_DELAY_MS;
+process.env.TUNNEL_PROBE_DELAY_MS = "0";
+afterAll(() => {
+  if (ORIGINAL_PROBE_DELAY === undefined) delete process.env.TUNNEL_PROBE_DELAY_MS;
+  else process.env.TUNNEL_PROBE_DELAY_MS = ORIGINAL_PROBE_DELAY;
+});
 
 describe("extractTunnelUrl", () => {
   it("returns null when no url present", () => {
@@ -116,7 +124,7 @@ describe("shouldReplacePersistedUrl", () => {
   });
 
   it("replaces a different url once its marker times out", () => {
-    expect(shouldReplacePersistedUrl(state(OLD, new Date(Date.now() - 120_000).toISOString()), NEW)).toBe(true);
+    expect(shouldReplacePersistedUrl(state(OLD, new Date(Date.now() - 200_000).toISOString()), NEW)).toBe(true);
   });
 
   it("replaces a different url with no liveness marker", () => {
@@ -129,8 +137,12 @@ describe("isRecentlyAlive", () => {
     expect(isRecentlyAlive(new Date(Date.now() - 10_000).toISOString())).toBe(true);
   });
 
+  it("treats a 120s-old marker as alive inside the 180s grace window", () => {
+    expect(isRecentlyAlive(new Date(Date.now() - 120_000).toISOString())).toBe(true);
+  });
+
   it("is false for a timestamp older than the grace window", () => {
-    expect(isRecentlyAlive(new Date(Date.now() - 120_000).toISOString())).toBe(false);
+    expect(isRecentlyAlive(new Date(Date.now() - 200_000).toISOString())).toBe(false);
   });
 
   it("is false for undefined or invalid timestamps", () => {
@@ -190,6 +202,8 @@ describe("readPersistedState / writePersistedState", () => {
       active: undefined,
       port: undefined,
       lastAliveAt: undefined,
+      owner: undefined,
+      stale: undefined,
     });
   });
 
@@ -206,7 +220,7 @@ describe("readPersistedState / writePersistedState", () => {
   });
 
   it("removes state when the liveness marker is stale", async () => {
-    writePersistedState({ url: "https://x.trycloudflare.com", active: true, lastAliveAt: new Date(Date.now() - 120_000).toISOString() });
+    writePersistedState({ url: "https://x.trycloudflare.com", active: true, lastAliveAt: new Date(Date.now() - 200_000).toISOString() });
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async () => { throw new Error("down"); }) as any;
     try {
@@ -218,7 +232,7 @@ describe("readPersistedState / writePersistedState", () => {
   });
 
   it("keeps state when the endpoint answers with an origin error behind a live tunnel (502)", async () => {
-    writePersistedState({ url: "https://x.trycloudflare.com", active: true, lastAliveAt: new Date(Date.now() - 120_000).toISOString() });
+    writePersistedState({ url: "https://x.trycloudflare.com", active: true, lastAliveAt: new Date(Date.now() - 200_000).toISOString() });
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async () => ({ ok: false, status: 502 })) as any;
     try {
@@ -229,8 +243,26 @@ describe("readPersistedState / writePersistedState", () => {
     }
   });
 
+  it("retries a failed probe and treats a non-530 response as alive", async () => {
+    writePersistedState({ url: "https://x.trycloudflare.com", active: true, lastAliveAt: new Date(Date.now() - 200_000).toISOString() });
+    const originalFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      return calls === 1 ? new Response(null, { status: 530 }) : new Response(null, { status: 502 });
+    }) as any;
+    try {
+      expect(await prunePersistedUrl()).toBe(false);
+      expect(calls).toBe(2);
+      expect(readPersistedState()?.url).toBe("https://x.trycloudflare.com");
+      expect(readPersistedState()?.stale).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("removes state when Cloudflare edge reports the tunnel is unreachable (530)", async () => {
-    writePersistedState({ url: "https://x.trycloudflare.com", active: true, lastAliveAt: new Date(Date.now() - 120_000).toISOString() });
+    writePersistedState({ url: "https://x.trycloudflare.com", active: true, lastAliveAt: new Date(Date.now() - 200_000).toISOString() });
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async () => ({ ok: false, status: 530 })) as any;
     try {
@@ -256,7 +288,7 @@ describe("readPersistedState / writePersistedState", () => {
   });
 
   it("serializes concurrent prunes without deadlock", async () => {
-    writePersistedState({ url: "https://x.trycloudflare.com", active: true, lastAliveAt: new Date(Date.now() - 120_000).toISOString() });
+    writePersistedState({ url: "https://x.trycloudflare.com", active: true, lastAliveAt: new Date(Date.now() - 200_000).toISOString() });
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async () => { throw new Error("down"); }) as any;
     try {
@@ -309,7 +341,7 @@ describe("recoverPersistedUrl", () => {
       expect(await recoverPersistedUrl()).toBeNull();
       expect(readPersistedState()?.url).toBe(TUNNEL_URL);
 
-      writePersistedState({ url: TUNNEL_URL, active: true, lastAliveAt: new Date(Date.now() - 120_000).toISOString() });
+      writePersistedState({ url: TUNNEL_URL, active: true, lastAliveAt: new Date(Date.now() - 200_000).toISOString() });
       expect(await recoverPersistedUrl()).toBeNull();
       expect(readPersistedState()).toBeNull();
     });
@@ -338,5 +370,81 @@ describe("recoverPersistedUrl", () => {
       expect(readPersistedState()?.url).toBe(TUNNEL_URL);
       expect(readPersistedState()?.lastAliveAt).not.toBe("2026-01-01T00:00:00.000Z");
     });
+  });
+});
+
+describe("owner attribution", () => {
+  let originalHome: string | undefined;
+  let tmpHome: string;
+  const TUNNEL_URL = "https://owned.trycloudflare.com";
+
+  beforeEach(async () => {
+    originalHome = process.env.HOME;
+    tmpHome = mkdtempSync(join(tmpdir(), "use-code-cli-owner-"));
+    process.env.HOME = tmpHome;
+    await stopTunnel();
+  });
+
+  afterEach(async () => {
+    await stopTunnel();
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("does not adopt a still-running foreign instance's URL", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => ({ status: 200 })) as any;
+    try {
+      writePersistedState({
+        url: TUNNEL_URL,
+        active: true,
+        autoReconnect: true,
+        lastAliveAt: "2026-01-01T00:00:00.000Z",
+        owner: { pid: process.pid, instanceId: "other-instance", port: "9999" },
+      });
+      expect(await recoverPersistedUrl({ instanceId: "this-instance" })).toBeNull();
+      expect(readPersistedState()?.url).toBe(TUNNEL_URL);
+      expect(getTunnelStatus().tunnelUrl).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("reclaims an orphan whose owner process is gone and stamps this instance", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => ({ status: 200 })) as any;
+    try {
+      writePersistedState({
+        url: TUNNEL_URL,
+        active: true,
+        lastAliveAt: "2026-01-01T00:00:00.000Z",
+        owner: { pid: 999_999, instanceId: "other-instance", port: "9999" },
+      });
+      expect(await recoverPersistedUrl({ instanceId: "this-instance" })).toBe(TUNNEL_URL);
+      expect(readPersistedState()?.owner?.instanceId).toBe("this-instance");
+      expect(readPersistedState()?.stale).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("does not adopt a stale persisted URL even when it still answers", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => ({ status: 200 })) as any;
+    try {
+      writePersistedState({
+        url: TUNNEL_URL,
+        active: false,
+        stale: true,
+        lastAliveAt: new Date().toISOString(),
+        owner: { pid: 999_999, instanceId: "dead-owner", port: "9999" },
+      });
+      expect(await recoverPersistedUrl({ instanceId: "this-instance" })).toBeNull();
+      expect(getTunnelStatus().tunnelUrl).toBeNull();
+      expect(readPersistedState()?.stale).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });

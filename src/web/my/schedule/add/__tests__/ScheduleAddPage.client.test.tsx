@@ -113,6 +113,12 @@ describe("schedule add page", () => {
     expect(text).toContain("0 9 * * 1,3,5");
     expect((query(container, 'button[aria-label="Monday"]') as HTMLButtonElement).getAttribute("aria-pressed")).toBe("true");
     expect((query(container, 'button[aria-label="Sunday"]') as HTMLButtonElement).getAttribute("aria-pressed")).toBe("false");
+
+    for (const weekday of ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]) {
+      const button = query(container, `button[aria-label="${weekday}"]`) as HTMLButtonElement;
+      expect(button).not.toBeNull();
+      expect(button.getAttribute("title")).toBe(weekday);
+    }
   });
 
   it("renders cron chips, live summary, and validation", async () => {

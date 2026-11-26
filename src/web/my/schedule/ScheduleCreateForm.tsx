@@ -401,6 +401,7 @@ export default function ScheduleCreateForm({ date, project, onSave }: ScheduleCr
                       type="button"
                       aria-pressed={active}
                       aria-label={WEEKDAYS[index]}
+                      title={WEEKDAYS[index]}
                       onClick={() => setWeekDays((current) => active ? current.filter((value) => value !== index) : [...current, index])}
                       className={`flex h-11 items-center justify-center rounded-[14px] border text-xs font-medium cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
                         active ? "border-teal-line bg-teal-soft text-accent-collaboration" : "border-border bg-surface text-text-muted"

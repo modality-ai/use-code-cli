@@ -95,14 +95,39 @@ describe("session-status run", () => {
         ),
         actionable: message.includes(
           sessionId === "sender1"
-            ? "decide whether follow-up is needed"
-            : "Summarize what the agent accomplished"
+            ? "take it now via `use-code-cli talk`"
+            : "perform it now with `use-code-cli talk`"
         ),
+        hasNewlines: message.includes("\n"),
+        noEscapeHatch: !message.includes("or report your decision"),
       }))
     ).toEqual([
-      { sessionId: "sender1", name: true, project: true, output: true, actionable: true },
-      { sessionId: "po-session", name: true, project: true, output: true, actionable: true },
+      {
+        sessionId: "sender1",
+        name: true,
+        project: true,
+        output: true,
+        actionable: true,
+        hasNewlines: true,
+        noEscapeHatch: true,
+      },
+      {
+        sessionId: "po-session",
+        name: true,
+        project: true,
+        output: true,
+        actionable: true,
+        hasNewlines: true,
+        noEscapeHatch: true,
+      },
     ]);
+    const poMsg = delivered.find((d) => d.sessionId === "po-session")?.message ?? "";
+    expect(poMsg).toContain('Only say "no follow-up" after verification, with a concrete reason.');
+    expect(poMsg).toContain('Do not merely describe intent, say "will dispatch", or reply "received"');
+    expect(poMsg).not.toContain("or report your decision");
+    const senderMsg = delivered.find((d) => d.sessionId === "sender1")?.message ?? "";
+    expect(senderMsg).toContain("report the concrete action taken and its result");
+    expect(senderMsg).toContain("Do not just acknowledge or describe intent.");
   });
 
   it("delivers to sender on busy->idle when reply exists", async () => {

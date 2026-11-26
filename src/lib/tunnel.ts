@@ -53,6 +53,47 @@ function tunnelEvent(message: string, logFile: string = tunnelLogFile()): void {
   } catch {}
 }
 
+const PROBE_TIMEOUT_MS = 3_000;
+const PROBE_RETRY_DELAY_MS = 5_000;
+const fallbackInstanceId = randomUUID();
+
+/** Deterministic test seam; production defaults to probes 5s apart. */
+function probeDelayMs(deps?: TunnelDeps): number {
+  if (typeof deps?.probeDelayMs === "number" && deps.probeDelayMs >= 0) return deps.probeDelayMs;
+  const fromEnv = Number(process.env.TUNNEL_PROBE_DELAY_MS);
+  if (Number.isFinite(fromEnv) && fromEnv >= 0) return fromEnv;
+  return PROBE_RETRY_DELAY_MS;
+}
+
+function currentInstanceId(deps?: TunnelDeps): string {
+  return deps?.instanceId ?? process.env.USE_CODE_CLI_INSTANCE_ID ?? fallbackInstanceId;
+}
+
+function currentOwner(deps?: TunnelDeps): TunnelOwner {
+  return {
+    pid: process.pid,
+    instanceId: currentInstanceId(deps),
+    port: typeof localServer?.port === "number" ? String(localServer.port) : undefined,
+  };
+}
+
+function isPidAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 1) return false;
+  if (pid === process.pid) return true;
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+/** A state written by a different, still-running instance is not ours to adopt.
+ * A dead owner's state is an orphan and may be reclaimed; legacy files with no
+ * owner predate attribution and stay adoptable. */
+function hasForeignOwner(state: PersistedTunnelState | null, deps?: TunnelDeps): boolean {
+  const owner = state?.owner;
+  if (!owner) return false;
+  if (owner.instanceId === currentInstanceId(deps)) return false;
+  if (owner.port && typeof localServer?.port === "number" && owner.port !== String(localServer.port)) return true;
+  return isPidAlive(owner.pid);
+}
+
 // The log is append-only across launches (see launchTunnel), so it needs a
 // cap: a new launch over a log larger than this starts fresh instead of
 // growing without bound.
@@ -63,21 +104,38 @@ function cloudflaredPidFile(): string {
   return join(tunnelStateDir(), "cloudflared.pid");
 }
 
+interface TunnelOwner {
+  pid: number;
+  instanceId: string;
+  port?: string;
+}
+
 export interface PersistedTunnelState {
   url: string | null;
   autoReconnect?: boolean;
   active?: boolean;
   port?: string;
   lastAliveAt?: string; // ISO timestamp of the last time the tunnel was confirmed alive
+  /** Which process/instance last wrote this state. Legacy files without an owner stay adoptable. */
+  owner?: TunnelOwner;
+  /** Set by the periodic probe when the URL stopped answering; never reused blindly. */
+  stale?: boolean;
 }
 
 interface TunnelSession {
   id: string;
-  proc: Bun.Subprocess<"ignore", number, number>;
+  proc: Pick<Bun.Subprocess<"ignore", number, number>, "pid" | "exitCode" | "kill">;
   output: string[];
   done: boolean;
   exitCode: number | null;
   listeners: Set<(chunk: string) => void>;
+}
+
+interface TunnelStartResult {
+  id: string;
+  session: TunnelSession;
+  reused: boolean;
+  url: string | null;
 }
 
 // Shared trycloudflare quick-tunnel URL pattern (unanchored, case-insensitive).
@@ -137,13 +195,30 @@ const LAUNCH_URL_TIMEOUT_MS = scheduler.LAUNCH_URL_TIMEOUT_MS;
 let lastLaunchAt = 0;
 
 /** The canonical persisted state for a tunnel this instance runs or adopts. */
-function writeCurrentState(url: string) {
+function writeCurrentState(url: string, deps?: TunnelDeps) {
   tunnelEvent(`persisting tunnel.json (url ${url}, port ${localServer?.port ?? "unknown"}, autoReconnect ${autoReconnectEnabled})`);
   writePersistedState({
     url,
     autoReconnect: autoReconnectEnabled,
     active: true,
+    stale: false,
     port: typeof localServer?.port === "number" ? String(localServer.port) : undefined,
+    owner: currentOwner(deps),
+    lastAliveAt: new Date().toISOString(),
+  });
+}
+
+/** Claim a probed-alive persisted URL for this instance. Used by both GET
+ * adoption and the launch sweep so the two paths stamp ownership identically. */
+function adoptPersistedState(state: PersistedTunnelState, deps?: TunnelDeps) {
+  if (!state.url) return;
+  tunnelUrl = state.url;
+  if (typeof state.autoReconnect === "boolean") autoReconnectEnabled = state.autoReconnect;
+  writePersistedState({
+    ...state,
+    active: true,
+    stale: false,
+    owner: currentOwner(deps),
     lastAliveAt: new Date().toISOString(),
   });
 }
@@ -152,20 +227,58 @@ function writeCurrentState(url: string) {
  * describes an older tunnel kept through its liveness grace — replace it with
  * the tunnel actually running once the old marker times out. No-op without a
  * persisted URL. */
-function touchLastAlive() {
+function touchLastAlive(deps?: TunnelDeps) {
   return withStateLock(() => {
     const state = readPersistedState();
     if (!state?.url || !tunnelUrl) return;
     if (state.url === tunnelUrl) {
-      writePersistedState({ ...state, lastAliveAt: new Date().toISOString() });
+      writePersistedState({
+        ...state,
+        active: true,
+        stale: false,
+        lastAliveAt: new Date().toISOString(),
+      });
       return;
     }
     // Leave the older URL alone while its marker is fresh — so it never gets
     // refreshed by a different running tunnel — and replace it once the
     // marker times out.
     if (!shouldReplacePersistedUrl(state, tunnelUrl)) return;
-    writeCurrentState(tunnelUrl);
+    writeCurrentState(tunnelUrl, deps);
   });
+}
+
+let periodicProbeRunning = false;
+
+/** While a child is alive, actually probe its URL each watchdog tick. A dead
+ * endpoint is recorded as stale instead of refreshing lastAliveAt and hiding
+ * the failure behind an alive process. */
+export async function probeLiveTunnelUrl(): Promise<void> {
+  if (periodicProbeRunning || !tunnelUrl || !isTunnelAlive()) return;
+  periodicProbeRunning = true;
+  try {
+    const url = tunnelUrl;
+    const probe = await isUrlAlive(url);
+    await withStateLock(() => {
+      const state = readPersistedState();
+      if (!state || state.url !== url) return;
+      if (probe.ok) {
+        tunnelEvent(`periodic probe OK (${probe.detail}) — keeping tunnel.json alive`);
+        writePersistedState({
+          ...state,
+          active: true,
+          stale: false,
+          owner: state.owner ?? currentOwner(),
+          lastAliveAt: new Date().toISOString(),
+        });
+        return;
+      }
+      tunnelEvent(`periodic probe failed (${probe.detail}) — marking tunnel.json stale`);
+      writePersistedState({ ...state, active: false, stale: true });
+    });
+  } finally {
+    periodicProbeRunning = false;
+  }
 }
 
 let watchdogDisabled = false;
@@ -197,7 +310,7 @@ function runWatchdogTick() {
       attempts: reconnectAttempts,
       maxAttempts: MAX_RECONNECT_ATTEMPTS,
     });
-    if (action === "touch") touchLastAlive();
+    if (action === "touch") void probeLiveTunnelUrl().catch(() => {});
     else if (action === "relaunch") {
       if (launchTimedOut) {
         tunnelEvent(
@@ -248,11 +361,19 @@ export function readPersistedState(): PersistedTunnelState | null {
       active: typeof v.active === "boolean" ? v.active : undefined,
       port: typeof v.port === "string" ? v.port : undefined,
       lastAliveAt: typeof v.lastAliveAt === "string" ? v.lastAliveAt : undefined,
+      owner: v.owner && typeof v.owner === "object" && Number.isInteger(v.owner.pid) && typeof v.owner.instanceId === "string"
+        ? {
+          pid: v.owner.pid,
+          instanceId: v.owner.instanceId,
+          port: typeof v.owner.port === "string" ? v.owner.port : undefined,
+        }
+        : undefined,
+      stale: typeof v.stale === "boolean" ? v.stale : undefined,
     };
   } catch { return null; }
 }
 
-function writePersistedUrl(url: string) {
+function writePersistedUrl(url: string, deps?: TunnelDeps) {
   // Serialize with the other persisted-state writers (touch/reconcile) so a
   // write for a newer URL can't be clobbered by an in-flight reconcile of an
   // older one.
@@ -267,7 +388,7 @@ function writePersistedUrl(url: string) {
       );
       return;
     }
-    writeCurrentState(url);
+    writeCurrentState(url, deps);
   });
 }
 export function writePersistedState(state: PersistedTunnelState) {
@@ -305,8 +426,8 @@ function withStateLock<T>(fn: () => T | Promise<T>): Promise<T> {
 
 // A failed liveness probe is not proof the tunnel is gone: a transient network
 // error or a slow cloudflared start can look dead. Keep the persisted state if
-// it was confirmed alive within this grace window.
-const ALIVE_GRACE_MS = 60_000;
+// it was confirmed alive within this 180s grace window.
+const ALIVE_GRACE_MS = 180_000;
 
 /** True when `lastAliveAt` falls inside the liveness grace window. */
 export function isRecentlyAlive(lastAliveAt: string | undefined, graceMs: number = ALIVE_GRACE_MS): boolean {
@@ -347,13 +468,14 @@ function isPersistableTunnelUrl(url: string): boolean {
 async function reconcilePersistedUrl(
   url: string,
   state: PersistedTunnelState | null,
+  deps?: TunnelDeps,
 ): Promise<{ alive: boolean; removed: boolean }> {
   if (!isPersistableTunnelUrl(url)) {
     await withStateLock(() =>
       removePersistedFile(`persisted URL failed validation — not a trycloudflare quick-tunnel URL (${url})`));
     return { alive: false, removed: true };
   }
-  const probe = await isUrlAlive(url);
+  const probe = await isUrlAlive(url, deps);
   if (probe.ok) {
     tunnelEvent(`liveness probe OK (${probe.detail}) — tunnel.json kept, lastAliveAt refreshed`);
     await withStateLock(() => {
@@ -367,8 +489,10 @@ async function reconcilePersistedUrl(
       writePersistedState({
         url,
         autoReconnect: base?.autoReconnect,
-        active: base?.active ?? true,
+        active: true,
+        stale: false,
         port: base?.port,
+        owner: currentOwner(deps),
         lastAliveAt: new Date().toISOString(),
       });
     });
@@ -393,28 +517,44 @@ async function reconcilePersistedUrl(
 // Prune the persisted state: keep it while the tunnel URL still answers, and
 // for a short grace window after the last confirmed-alive marker. Only delete
 // once the URL is unresponsive and that marker has gone stale.
-export async function prunePersistedUrl(): Promise<boolean> {
+export async function prunePersistedUrl(deps?: TunnelDeps): Promise<boolean> {
   const state = readPersistedState();
   const url = state?.url ?? null;
   if (!url) {
     await withStateLock(() => removePersistedFile("no persisted URL to keep"));
     return true;
   }
-  return (await reconcilePersistedUrl(url, state)).removed;
+  return (await reconcilePersistedUrl(url, state, deps)).removed;
 }
 // A tunnel URL is alive when its cloudflared endpoint answers at all: a 5xx
 // from the origin behind a live tunnel (502 Bad Gateway while the local
 // server is still binding its port after a restart) still proves the tunnel
 // serves — it heals once the origin is up. Only a dead tunnel counts as
 // gone: connection failure, or Cloudflare edge's 530 (tunnel unreachable).
-async function isUrlAlive(url: string): Promise<{ ok: boolean; detail: string }> {
+// A first failure is retried once ~5s later so a slow start or a transient
+// edge error cannot make us kill a live tunnel.
+type ProbeResponse = { status: number };
+
+async function probeUrlOnce(url: string, deps?: TunnelDeps): Promise<{ ok: boolean; detail: string }> {
   try {
-    const r = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(3000) });
+    const r: ProbeResponse = await (deps?.fetch ?? globalThis.fetch)(url, {
+      method: "HEAD",
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    });
     if (r.status !== 530) return { ok: true, detail: `HTTP ${r.status}` };
     return { ok: false, detail: "HTTP 530 (tunnel unreachable at the Cloudflare edge)" };
   } catch (e) {
     return { ok: false, detail: `no response (${String(e)})` };
   }
+}
+
+async function isUrlAlive(url: string, deps?: TunnelDeps): Promise<{ ok: boolean; detail: string }> {
+  const first = await probeUrlOnce(url, deps);
+  if (first.ok) return first;
+  await new Promise<void>((resolve) => (deps?.setTimeout ?? setTimeout)(resolve, probeDelayMs(deps)));
+  const second = await probeUrlOnce(url, deps);
+  if (second.ok) return second;
+  return { ok: false, detail: `${first.detail}; retry: ${second.detail}` };
 }
 
 function isTunnelAlive(): boolean {
@@ -463,6 +603,24 @@ function pruneSessions() {
   }
 }
 
+/** A reused tunnel has no child process to stream. Give the API a finished
+ * session so `?stream=<id>` answers once with a short message instead of
+ * hanging forever waiting for an exit event that will never happen. */
+function makeAdoptedSession(url: string): TunnelSession {
+  const id = randomUUID();
+  const s: TunnelSession = {
+    id,
+    proc: { pid: 0, exitCode: 0, kill: () => {} },
+    output: [`Adopted existing tunnel (no new process started): ${url}\n`],
+    done: true,
+    exitCode: 0,
+    listeners: new Set(),
+  };
+  sessions.set(id, s);
+  pruneSessions();
+  return s;
+}
+
 function clearReconnectTimer() {
   reconnectPending = false;
 }
@@ -482,15 +640,45 @@ function clearReconnectTimer() {
 // a mutual-kill loop: each launch kills the other's tunnel, whose watchdog
 // relaunches and kills back (observed live: the dev server's sweep SIGTERMed
 // test fakes ~1s after launch, before their delayed URL lines were written).
-function killStaleCloudflared(keepPids: Iterable<number>, deps?: TunnelDeps): number {
+export async function killStaleCloudflared(
+  keepPids: Iterable<number>,
+  deps?: TunnelDeps,
+): Promise<{ killed: number; adoptedUrl: string | null }> {
   let killed = 0;
   try {
     const keep = new Set(keepPids);
     keep.add(process.pid);
     const out = (deps?.execFileSync ?? execFileSync)("pgrep", ["-f", "cloudflared.*tunnel --url"], { encoding: "utf8" });
-    for (const line of out.split("\n")) {
-      const pid = Number.parseInt(line.trim(), 10);
-      if (!Number.isInteger(pid) || pid <= 1 || keep.has(pid)) continue;
+    const candidates = out.split("\n")
+      .map((line: string) => Number.parseInt(line.trim(), 10))
+      .filter((pid: number) => Number.isInteger(pid) && pid > 1 && !keep.has(pid));
+
+    // Before any SIGTERM, probe the URL the pid file owns. An answer proves
+    // this is a live adopted tunnel, not an orphan to sweep; claiming it also
+    // stops the mutual-kill loop between coexisting dev/test instances.
+    if (!deps?.forceNew && candidates.length > 0) {
+      const state = readPersistedState();
+      let recordedPid: number | null = null;
+      try {
+        recordedPid = Number.parseInt(
+          (deps?.readFileSync ?? readFileSync)(cloudflaredPidFile(), "utf8").trim(), 10,
+        );
+      } catch {}
+      if (
+        state?.url && !state.stale && isPersistableTunnelUrl(state.url) &&
+        recordedPid !== null && candidates.includes(recordedPid) &&
+        !hasForeignOwner(state, deps)
+      ) {
+        const probe = await isUrlAlive(state.url, deps);
+        if (probe.ok) {
+          tunnelEvent(`launchTunnel: pid-file URL still answers (${probe.detail}) — adopting pid ${recordedPid} and skipping the stale sweep`);
+          adoptPersistedState(state, deps);
+          return { killed: 0, adoptedUrl: state.url };
+        }
+      }
+    }
+
+    for (const pid of candidates) {
       try {
         // One ps call carries both filters: ppid (orphan check) and command
         // (spawn signature). A parse failure reads as "no orphan evidence" —
@@ -507,7 +695,7 @@ function killStaleCloudflared(keepPids: Iterable<number>, deps?: TunnelDeps): nu
       } catch {}
     }
   } catch {}
-  return killed;
+  return { killed, adoptedUrl: null };
 }
 
 // Shared by the exit handler and the watchdog so both reconnect paths follow
@@ -544,9 +732,15 @@ export interface TunnelDeps {
   setInterval?: (...args: any[]) => any;
   tailIntervalMs?: number;
   execFileSync?: (...args: any[]) => any;
+  /** Test seam for the retry gap; production keeps PROBE_RETRY_DELAY_MS. */
+  probeDelayMs?: number;
+  /** Explicit owner for tests/workers; production uses process env or a per-process uuid. */
+  instanceId?: string;
+  /** Skip adoption so an explicit "new tunnel" request really spawns. */
+  forceNew?: boolean;
 }
 
-export async function launchTunnel(deps?: TunnelDeps): Promise<{ id: string; session: TunnelSession } | null> {
+export async function launchTunnel(deps?: TunnelDeps): Promise<TunnelStartResult | null> {
   // An explicit stop can race the watchdog's hung-launch relaunch: spawning
   // after the stop would leave an unadopted orphan cloudflared nobody stops.
   if (manualStop) return null;
@@ -563,7 +757,11 @@ export async function launchTunnel(deps?: TunnelDeps): Promise<{ id: string; ses
   for (const s of sessions.values()) {
     if (s.proc.exitCode === null) keepPids.add(s.proc.pid);
   }
-  killStaleCloudflared(keepPids, deps);
+  const sweep = await killStaleCloudflared(keepPids, deps);
+  if (sweep.adoptedUrl) {
+    const session = makeAdoptedSession(sweep.adoptedUrl);
+    return { id: session.id, session, reused: true, url: sweep.adoptedUrl };
+  }
 
   if (activeProc && activeProc.exitCode === null) {
     try { activeProc.kill(); } catch {}
@@ -664,7 +862,7 @@ export async function launchTunnel(deps?: TunnelDeps): Promise<{ id: string; ses
             tunnelUrl = m;
             autoReconnectEnabled = true;
             reconnectAttempts = 0;
-            writePersistedUrl(m);
+            writePersistedUrl(m, deps);
           }
         } finally {
           await fh.close();
@@ -723,7 +921,7 @@ export async function launchTunnel(deps?: TunnelDeps): Promise<{ id: string; ses
     if (activeProc === proc) activeProc = null;
   });
 
-  return { id, session: s };
+  return { id, session: s, reused: false, url: tunnelUrl };
 }
 
 export function getSession(id: string): TunnelSession | undefined {
@@ -739,16 +937,18 @@ export function clearStaleTunnelUrl() {
   }
 }
 
-// lastAliveAt lives in the persisted state and is refreshed by the watchdog's
-// touch; expose it only for the URL this instance currently runs — an older
-// tunnel's marker kept through the grace window must not read as the current
-// tunnel's liveness (same guard as touchLastAlive).
+// lastAliveAt lives in the persisted state and is refreshed only after a
+// successful periodic probe; expose it only for the URL this instance runs —
+// an older tunnel's marker kept through the grace window must not read as the
+// current tunnel's liveness (same guard as touchLastAlive).
 export function getTunnelStatus() {
   const persisted = readPersistedState();
+  // A stale URL stays in memory for the watchdog but is not current liveness.
+  const currentUrl = persisted?.stale === true && persisted.url === tunnelUrl ? null : tunnelUrl;
   // tunnelUrl must be non-null too: a normalized state file with url null
   // would otherwise satisfy both-null equality and read as current liveness.
-  const lastAliveAt = tunnelUrl && persisted?.url === tunnelUrl ? persisted?.lastAliveAt ?? null : null;
-  return { tunnelUrl, autoReconnectEnabled, isTunnelAlive: isTunnelAlive(), lastAliveAt };
+  const lastAliveAt = currentUrl && persisted?.url === currentUrl ? persisted?.lastAliveAt ?? null : null;
+  return { tunnelUrl: currentUrl, autoReconnectEnabled, isTunnelAlive: isTunnelAlive(), lastAliveAt };
 }
 
 /**
@@ -756,33 +956,43 @@ export function getTunnelStatus() {
  * answers, keep one that only recently went quiet, clear one that is gone.
  * Returns the persisted state that drove the decision.
  */
-async function restoreTunnel(): Promise<PersistedTunnelState | null> {
+async function restoreTunnel(deps?: TunnelDeps): Promise<PersistedTunnelState | null> {
   const state = readPersistedState();
   if (tunnelUrl) return state;
   const persisted = state?.url ?? null;
-  if (!persisted) return state;
-  const { alive } = await reconcilePersistedUrl(persisted, state);
+  if (!state || !persisted || state.stale || hasForeignOwner(state, deps)) return state;
+  const { alive } = await reconcilePersistedUrl(persisted, state, deps);
   if (alive) {
     tunnelEvent("recovered persisted tunnel URL from tunnel.json — adopting the still-running tunnel");
-    tunnelUrl = persisted;
-    if (typeof state?.autoReconnect === "boolean") autoReconnectEnabled = state.autoReconnect;
+    adoptPersistedState(state, deps);
   }
   return state;
 }
 
-export async function recoverPersistedUrl() {
-  await restoreTunnel();
+export async function recoverPersistedUrl(deps?: TunnelDeps) {
+  await restoreTunnel(deps);
   return tunnelUrl;
 }
 
-export async function startTunnel(deps?: TunnelDeps) {
-  tunnelEvent("startTunnel: manual start requested");
+export async function startTunnel(deps?: TunnelDeps, options: { forceNew?: boolean } = {}): Promise<TunnelStartResult | null> {
+  tunnelEvent(`startTunnel: manual start requested (forceNew ${options.forceNew === true})`);
+  const launchDeps: TunnelDeps = { ...deps, forceNew: options.forceNew === true || deps?.forceNew === true };
   manualStop = false;
   autoReconnectEnabled = false;
   watchdogDisabled = false;
   clearReconnectTimer();
   reconnectAttempts = 0;
-  return launchTunnel(deps);
+  // Adoption runs before launch so a second POST never spawns a second URL.
+  if (!launchDeps.forceNew) {
+    const state = readPersistedState();
+    if (state?.stale && state.url === tunnelUrl) tunnelUrl = null;
+    const url = await recoverPersistedUrl(launchDeps);
+    if (url) {
+      const session = makeAdoptedSession(url);
+      return { id: session.id, session, reused: true, url };
+    }
+  }
+  return launchTunnel(launchDeps);
 }
 
 export async function stopTunnel(deps?: TunnelDeps) {

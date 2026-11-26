@@ -210,4 +210,35 @@ describe("TunnelPage", () => {
     expect(btn).toBeTruthy();
     expect(btn?.className).toContain("cursor-pointer");
   });
+
+  it("disables Create & Link and hides the creation warning when a URL is present", async () => {
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = (async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ success: true, url: "https://existing.trycloudflare.com" }),
+    })) as any;
+    try {
+      let container: any;
+      await act(() => {
+        const r = render(TunnelPage({ url: "https://existing.trycloudflare.com" } as any));
+        container = r.container;
+      });
+      expect(container.querySelector("#tunnel-btn")?.disabled).toBe(true);
+      expect(container.querySelector("#tunnel-warning")).toBeNull();
+    } finally {
+      globalThis.fetch = origFetch;
+      await act(async () => { cleanup(); });
+    }
+  });
+
+  it("shows the URL-change warning while Create & Link is available", async () => {
+    let container: any;
+    await act(() => {
+      const r = render(TunnelPage());
+      container = r.container;
+    });
+    expect(container.querySelector("#tunnel-btn")?.disabled).toBe(false);
+    expect(container.textContent).toMatch(/Creating a new tunnel changes the URL/i);
+  });
 });
