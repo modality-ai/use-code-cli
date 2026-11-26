@@ -12,6 +12,7 @@ export interface ScheduleItem extends BaseScheduleItem {
   endsOn?: string;
   cron?: string;
   project?: string;
+  enabled?: boolean;
 }
 
 export interface ScheduleRoutine extends BaseScheduleRoutine {
@@ -19,6 +20,7 @@ export interface ScheduleRoutine extends BaseScheduleRoutine {
   endsOn?: string;
   cron?: string;
   project?: string;
+  enabled?: boolean;
 }
 
 export interface ScheduleData extends BaseScheduleData {
@@ -34,6 +36,7 @@ export type ScheduleSaved =
       project: string;
       item: ScheduleItem;
       targetDate: string;
+      enabled?: boolean;
     }
   | {
       id: string;
@@ -43,6 +46,7 @@ export type ScheduleSaved =
       item: ScheduleItem;
       routine: ScheduleRoutine;
       targetDate: string;
+      enabled?: boolean;
     };
 
 export const eyebrow = "text-[10px] font-medium uppercase leading-[14px] tracking-[0.16em] text-text-muted";
@@ -60,6 +64,20 @@ const NOTICE_KEY = "schedule:notice";
 
 function isWeekdayList(value: unknown): value is number[] {
   return Array.isArray(value) && value.every((day) => Number.isInteger(day) && day >= 0 && day <= 6);
+}
+
+function normalizeEnabled(entry: ScheduleSaved): ScheduleSaved {
+  const enabled = entry.enabled !== false;
+  const item = { ...entry.item, enabled };
+  if (entry.kind === "routine") {
+    return { ...entry, enabled, item, routine: { ...entry.routine, enabled } };
+  }
+  return { ...entry, enabled, item };
+}
+
+function isEntryEnabled(entry: ScheduleSaved): boolean {
+  return entry.enabled !== false && entry.item.enabled !== false &&
+    (entry.kind !== "routine" || entry.routine.enabled !== false);
 }
 
 export function readLocalAdds(dateKey: string = todayKey()): ScheduleSaved[] {
@@ -87,7 +105,7 @@ export function readLocalAdds(dateKey: string = todayKey()): ScheduleSaved[] {
         isWeekdayList(routine.days),
       );
       return valid && !(typeof routine?.endsOn === "string" && routine.endsOn < dateKey);
-    });
+    }).map(normalizeEnabled);
   } catch {
     return [];
   }
@@ -143,11 +161,11 @@ export function applyLocalAdds(schedule: ScheduleData, adds: ScheduleSaved[]): S
       const activeDay = add.item.days.includes(todayWeekday);
       const started = add.targetDate <= schedule.date;
       const notEnded = !add.routine.endsOn || schedule.date <= add.routine.endsOn;
-      if (!activeDay || !started || !notEnded) continue;
+      if (!isEntryEnabled(add) || !activeDay || !started || !notEnded) continue;
       addedToday = true;
     } else {
       if (itemIds.has(add.id)) continue;
-      if (add.targetDate === schedule.date) addedToday = true;
+      if (isEntryEnabled(add) && add.targetDate === schedule.date) addedToday = true;
     }
     itemIds.add(add.id);
     items = sortItems([...items, add.item]);

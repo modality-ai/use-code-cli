@@ -29,7 +29,27 @@ const TABS: Array<{ id: Tab; label: string }> = [
   { id: "routines", label: "Routines" },
 ];
 
-function CheckCircle({ checked, onClick, title }: { checked: boolean; onClick: () => void; title: string }) {
+function CheckCircle({ checked, onClick, title, disabled = false }: { checked: boolean; onClick: () => void; title: string; disabled?: boolean }) {
+  const circle = (
+    <span
+      className={`flex h-[22px] w-[22px] items-center justify-center rounded-full border-2 transition-colors duration-150 group-active:scale-95 ${
+        checked ? "border-accent-collaboration bg-accent-collaboration" : "border-border bg-transparent"
+      }`}
+    >
+      {checked && (
+        <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" aria-hidden="true">
+          <path d="M3.5 8.5l3 3 6-6.5" fill="none" stroke="white" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
+    </span>
+  );
+  if (disabled) {
+    return (
+      <span className="group flex h-11 w-11 shrink-0 items-center justify-center rounded-full" role="img" aria-label="Completion unavailable: disabled item">
+        {circle}
+      </span>
+    );
+  }
   return (
     <button
       type="button"
@@ -38,17 +58,7 @@ function CheckCircle({ checked, onClick, title }: { checked: boolean; onClick: (
       aria-label={`${checked ? "Mark incomplete" : "Mark complete"}: ${title}`}
       className="group flex h-11 w-11 shrink-0 items-center justify-center rounded-full cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
     >
-      <span
-        className={`flex h-[22px] w-[22px] items-center justify-center rounded-full border-2 transition-colors duration-150 group-active:scale-95 ${
-          checked ? "border-accent-collaboration bg-accent-collaboration" : "border-border bg-transparent"
-        }`}
-      >
-        {checked && (
-          <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" aria-hidden="true">
-            <path d="M3.5 8.5l3 3 6-6.5" fill="none" stroke="white" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        )}
-      </span>
+      {circle}
     </button>
   );
 }
@@ -63,6 +73,7 @@ function ScheduleCard({
   onToggle: (id: string) => void;
 }) {
   const isRoutine = item.kind === "routine";
+  const disabled = item.enabled === false;
   const titleClass = `truncate text-[15px] font-semibold leading-5 ${checked ? "line-through decoration-border" : ""}`;
   const title = item.href ? (
     <a href={item.href} className={`${titleClass} hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus`}>
@@ -74,7 +85,7 @@ function ScheduleCard({
   const detail = item.cadence;
 
   return (
-    <article className={`schedule-card ${checked ? "opacity-70" : ""}`}>
+    <article className={`schedule-card ${checked ? "opacity-70" : ""} ${disabled ? "opacity-50" : ""}`}>
       <div className="flex items-start gap-1.5">
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-3">
@@ -86,10 +97,11 @@ function ScheduleCard({
             <span className={isRoutine ? "text-accent-collaboration" : "text-orange"}>
               {isRoutine ? "Routine" : "Once"}
             </span>
+            {disabled && <span className="text-text-muted">• Disabled</span>}
             <span className="text-text-muted">• {detail}</span>
           </p>
         </div>
-        <CheckCircle checked={checked} onClick={() => onToggle(item.id)} title={item.title} />
+        <CheckCircle checked={checked} onClick={() => onToggle(item.id)} title={item.title} disabled={disabled} />
       </div>
     </article>
   );
@@ -212,16 +224,16 @@ export default function ScheduleApp({ initial }: { initial?: ScheduleData }) {
   return (
     <>
       <main className="schedule-page mx-auto w-full max-w-[440px] px-5 pb-28 pt-5 md:max-w-[880px] md:pb-8 xl:max-w-[1120px]">
-        <header className="flex flex-wrap items-start gap-3">
-          <div className="min-w-0 flex-1">
-            <p className={eyebrow}>{headerDate(schedule.date)}</p>
-            <div className="mt-1 flex items-baseline gap-3">
-              <h1 className="text-[28px] font-semibold leading-8 tracking-[-0.02em] font-display text-balance">Schedule</h1>
-              <span className="text-xs font-medium tabular-nums text-text-muted" aria-live="polite">
-                {schedule.countToday} today
-              </span>
-            </div>
-          </div>
+        <nav aria-label="Breadcrumb" className="mb-md flex flex-wrap items-center gap-2">
+          <a href="/" className="text-xs text-accent-collaboration hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">Home</a>
+          <span className="text-text-muted" aria-hidden="true">/</span>
+          <h1 className="text-[28px] font-semibold leading-8 tracking-[-0.02em] font-display text-balance text-text-primary">Schedule</h1>
+          <span className="ml-auto text-xs font-medium tabular-nums text-text-muted" aria-live="polite">
+            {schedule.countToday} today
+          </span>
+        </nav>
+        <div className="mt-1 flex items-center justify-between gap-3">
+          <p className={eyebrow}>{headerDate(schedule.date)}</p>
           <a
             href="/my/projects?from=schedule-add"
             aria-label="Add schedule item — choose a project"
@@ -233,7 +245,7 @@ export default function ScheduleApp({ initial }: { initial?: ScheduleData }) {
               <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" />
             </svg>
           </a>
-        </header>
+        </div>
 
         {notice && (
           <p className="mt-4 rounded-[12px] border border-teal-line bg-teal-soft p-3 text-sm text-accent-collaboration" role="status">
@@ -278,7 +290,7 @@ export default function ScheduleApp({ initial }: { initial?: ScheduleData }) {
                 <div className="mt-3 space-y-1">
                   {days.map((day) => {
                     const index = day.getDay();
-                    const active = schedule.routines.some((routine) => routine.days.includes(index));
+                    const active = schedule.routines.some((routine) => routine.enabled !== false && routine.days.includes(index));
                     return (
                       <div
                         key={day.toISOString()}
@@ -347,10 +359,11 @@ export default function ScheduleApp({ initial }: { initial?: ScheduleData }) {
               ) : (
                 <div className="space-y-3">
                   {schedule.routines.map((routine) => {
-                    const titleClass = "text-[15px] font-semibold leading-5";
+                    const disabled = routine.enabled === false;
+                    const titleClass = `text-[15px] font-semibold leading-5${disabled ? " text-text-muted" : ""}`;
                     const detail = routine.endsOn ? `${routine.cadence} · Ends ${shortDate(routine.endsOn)}` : routine.cadence;
                     return (
-                      <article key={routine.id} className="schedule-card">
+                      <article key={routine.id} className={`schedule-card ${disabled ? "opacity-50" : ""}`}>
                         <div className="flex items-start justify-between gap-4">
                           <div className="min-w-0">
                             {routine.href ? (
@@ -362,11 +375,12 @@ export default function ScheduleApp({ initial }: { initial?: ScheduleData }) {
                             )}
                             <p className="mt-2 text-xs leading-4 text-text-muted">
                               <span className="font-code tabular-nums">{routine.time}</span> • {detail}
+                              {disabled && <span> • Disabled</span>}
                             </p>
                           </div>
                           <div className="flex shrink-0 gap-1.5" aria-label={`Runs on ${routine.days.map((day) => WEEKDAYS[day]).join(", ")}`}>
                             {DAY_LETTERS.map((letter, index) => (
-                              <DayPill key={`${routine.id}-${index}`} label={letter ?? ""} active={routine.days.includes(index)} today={index === todayIndex} />
+                              <DayPill key={`${routine.id}-${index}`} label={letter ?? ""} active={!disabled && routine.days.includes(index)} today={index === todayIndex} />
                             ))}
                           </div>
                         </div>

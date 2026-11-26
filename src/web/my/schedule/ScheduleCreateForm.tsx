@@ -174,6 +174,7 @@ const inputClass =
 export default function ScheduleCreateForm({ date, project, onSave }: ScheduleCreateFormProps) {
   const [createKind, setCreateKind] = useState<CreateKind>("once");
   const [what, setWhat] = useState("");
+  const [session, setSession] = useState("");
   const [when, setWhen] = useState<"today" | "tomorrow" | "pick">("today");
   const [pickDate, setPickDate] = useState(date);
   const [time, setTime] = useState("09:00");
@@ -182,6 +183,7 @@ export default function ScheduleCreateForm({ date, project, onSave }: ScheduleCr
   const [cronRule, setCronRule] = useState("30 7 * * 1-5");
   const [ends, setEnds] = useState("Never");
   const [endDate, setEndDate] = useState(date);
+  const [enabled, setEnabled] = useState(true);
 
   const whatRef = useRef<HTMLInputElement>(null);
   const localSeq = useRef(0);
@@ -240,10 +242,11 @@ export default function ScheduleCreateForm({ date, project, onSave }: ScheduleCr
     if (createKind === "once") {
       const targetDate = when === "today" ? date : when === "tomorrow" ? addDays(date, 1) : pickDate || date;
       const cadence = when === "today" ? "Today only" : when === "tomorrow" ? "Tomorrow" : shortDate(targetDate);
+      const sessionValue = session.trim();
       const item: ScheduleItem = {
         id,
-        sessionId: project,
-        sessionName: project,
+        sessionId: sessionValue || project,
+        sessionName: sessionValue || project,
         title: itemTitle,
         time,
         kind: "once",
@@ -252,11 +255,13 @@ export default function ScheduleCreateForm({ date, project, onSave }: ScheduleCr
         completed: false,
         href: projectHref,
         project,
+        enabled,
       };
-      onSave({ id, title: itemTitle, kind: "once", project, item, targetDate });
+      onSave({ id, title: itemTitle, kind: "once", project, item, targetDate, enabled });
       return;
     }
 
+    const sessionValue = session.trim();
     const allDays = [0, 1, 2, 3, 4, 5, 6];
     const days = repeats === "daily"
       ? allDays
@@ -273,7 +278,7 @@ export default function ScheduleCreateForm({ date, project, onSave }: ScheduleCr
     const endsOn = ends === "On a date" ? endDate : undefined;
     const routine: ScheduleRoutine = {
       id,
-      sessionId: project,
+      sessionId: sessionValue || project,
       title: itemTitle,
       time: effectiveTime,
       cadence,
@@ -283,11 +288,12 @@ export default function ScheduleCreateForm({ date, project, onSave }: ScheduleCr
       endsOn,
       cron: expression,
       project,
+      enabled,
     };
     const item: ScheduleItem = {
       id,
-      sessionId: project,
-      sessionName: project,
+      sessionId: sessionValue || project,
+      sessionName: sessionValue || project,
       title: itemTitle,
       time: effectiveTime,
       kind: "routine",
@@ -299,8 +305,9 @@ export default function ScheduleCreateForm({ date, project, onSave }: ScheduleCr
       endsOn,
       cron: expression,
       project,
+      enabled,
     };
-    onSave({ id, title: itemTitle, kind: "routine", project, item, routine, targetDate: date });
+    onSave({ id, title: itemTitle, kind: "routine", project, item, routine, targetDate: date, enabled });
   };
 
   return (
@@ -331,6 +338,18 @@ export default function ScheduleCreateForm({ date, project, onSave }: ScheduleCr
       </div>
 
       <div className="mt-4">
+        <label htmlFor="schedule-session" className={eyebrow}>Session ID / Name</label>
+        <input
+          id="schedule-session"
+          type="text"
+          value={session}
+          onInput={(event) => setSession(event.currentTarget.value)}
+          placeholder="Session id or name"
+          className={`${inputClass} mt-2 w-full`}
+        />
+      </div>
+
+      <div className="mt-4">
         <label htmlFor="schedule-what" className={eyebrow}>What</label>
         <input
           ref={whatRef}
@@ -341,6 +360,28 @@ export default function ScheduleCreateForm({ date, project, onSave }: ScheduleCr
           placeholder="What needs doing?"
           className={`${inputClass} mt-2 w-full`}
         />
+      </div>
+
+      <div className="mt-4 flex items-center justify-between rounded-[12px] border border-border bg-surface px-3 py-2">
+        <span id="schedule-enabled-label" className="text-sm font-medium text-text-primary">Enabled</span>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={enabled}
+          aria-labelledby="schedule-enabled-label"
+          data-testid="schedule-enabled-switch"
+          onClick={() => setEnabled((value) => !value)}
+          className={`relative h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
+            enabled ? "bg-accent-collaboration" : "bg-border"
+          }`}
+        >
+          <span
+            aria-hidden="true"
+            className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
+              enabled ? "left-0.5" : "left-[22px]"
+            }`}
+          />
+        </button>
       </div>
 
       {createKind === "once" ? (

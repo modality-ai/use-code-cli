@@ -3,6 +3,7 @@ import { cleanup } from "@testing-library/react";
 import React from "react";
 import { act, render } from "reshow-unit";
 import ScheduleApp from "../ScheduleApp.client";
+import type { ScheduleData } from "../schedule-model";
 import { clearScheduleStorage, query } from "./helpers";
 
 const schedule = {
@@ -65,9 +66,9 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-const mount = async () => {
+const mount = async (initial: ScheduleData = schedule) => {
   let result: ReturnType<typeof render>;
-  await act(() => { result = render(<ScheduleApp initial={schedule} />); });
+  await act(() => { result = render(<ScheduleApp initial={initial} />); });
   return result!;
 };
 
@@ -104,6 +105,30 @@ describe("ScheduleApp", () => {
     expect(text).toContain("Your routines");
     expect(text).toContain("Manage");
     expect(container.querySelector('[role="tablist"]')).not.toBeNull();
+  });
+
+  it("renders a keyboard-accessible Home breadcrumb with the Schedule heading", async () => {
+    const { container } = await mount();
+    const nav = container.querySelector('nav[aria-label="Breadcrumb"]') as HTMLElement;
+    expect(nav).not.toBeNull();
+    const home = [...nav.querySelectorAll('a[href="/"]')].find(
+      (node) => node.textContent === "Home",
+    ) as HTMLAnchorElement;
+    expect(home).not.toBeNull();
+    expect(home.tagName).toBe("A");
+    expect(home.getAttribute("href")).toBe("/");
+    expect(home.textContent).toBe("Home");
+    expect(home.className).toContain("text-xs text-accent-collaboration hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus");
+    const separator = [...nav.querySelectorAll('span[aria-hidden="true"]')].find(
+      (node) => node.textContent === "/",
+    ) as HTMLElement;
+    expect(separator).not.toBeNull();
+    const h1 = nav.querySelector("h1") as HTMLElement;
+    expect(h1).not.toBeNull();
+    expect(h1.textContent).toBe("Schedule");
+    expect(h1.className).toContain("text-[28px] font-semibold leading-8 tracking-[-0.02em] font-display text-balance text-text-primary");
+    expect(nav.querySelectorAll('span[aria-hidden="true"]').length).toBe(1);
+    expect(nav.lastElementChild?.getAttribute("aria-live")).toBe("polite");
   });
 
   it("toggles a completion circle locally", async () => {
@@ -184,6 +209,61 @@ describe("ScheduleApp", () => {
     expect(text).toContain("Could not load the schedule");
     expect(text).toContain("Offline item");
     expect(text).toContain("3 today");
+  });
+
+  it("marks disabled entries as muted and Disabled, excludes them from today count and dots, and blocks completion", async () => {
+    window.localStorage.setItem("schedule:local-adds", JSON.stringify([
+      {
+        id: "disabled-once", title: "Disabled once", kind: "once", project: "alpha",
+        targetDate: schedule.date,
+        item: {
+          id: "disabled-once", sessionId: "alpha", sessionName: "alpha", title: "Disabled once",
+          time: "09:30", kind: "once", cadence: "Today only", days: [0], completed: false,
+          href: "/my/project/alpha", enabled: false,
+        },
+        enabled: false,
+      },
+      {
+        id: "disabled-routine", title: "Disabled routine", kind: "routine", project: "alpha",
+        targetDate: schedule.date,
+        item: {
+          id: "disabled-routine", sessionId: "alpha", sessionName: "alpha", title: "Disabled routine",
+          time: "08:30", kind: "routine", cadence: "Daily", days: [0], completed: false,
+          href: "/my/project/alpha", enabled: false,
+        },
+        routine: {
+          id: "disabled-routine", sessionId: "alpha", title: "Disabled routine",
+          time: "08:30", cadence: "Daily", days: [0], href: "/my/project/alpha", enabled: false,
+        },
+        enabled: false,
+      },
+    ]));
+    const empty: ScheduleData = { date: schedule.date, countToday: 0, items: [], routines: [] };
+    globalThis.fetch = (async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ success: true, data: empty }),
+    })) as typeof fetch;
+    const reactData = window as unknown as { __REACT_DATA__?: Record<string, unknown> };
+    const previousReactData = reactData.__REACT_DATA__;
+    reactData.__REACT_DATA__ = { schedule: empty };
+    const { container } = await mount(empty);
+    expect(container.textContent).toContain("0 today");
+    expect(container.textContent).toContain("Disabled once");
+    expect(container.textContent).toContain("Disabled routine");
+    const articles = [...container.querySelectorAll("article")];
+    expect(articles).toHaveLength(2);
+    for (const article of articles) {
+      expect(article.textContent).toContain("Disabled");
+      expect(article.className).toContain("opacity-50");
+    }
+    const completionButtons = [
+      ...container.querySelectorAll('button[aria-label^="Mark complete"], button[aria-label^="Mark incomplete"]'),
+    ];
+    expect(completionButtons).toHaveLength(0);
+    const activeDots = [...container.querySelectorAll('[aria-label*="active routine day"]')];
+    expect(activeDots).toHaveLength(0);
+    reactData.__REACT_DATA__ = previousReactData;
   });
 });
 

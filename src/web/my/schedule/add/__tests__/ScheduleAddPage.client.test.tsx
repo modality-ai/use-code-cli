@@ -80,7 +80,53 @@ describe("schedule add page", () => {
     expect(adds[0]?.item.sessionId).toBe("foo");
     expect(adds[0]?.item.sessionName).toBe("foo");
     expect(adds[0]?.item.href).toBe("/my/project/foo");
+    expect(adds[0]?.enabled).toBe(true);
+    expect(adds[0]?.item.enabled).toBe(true);
     expect(takeScheduleNotice()).toContain("for foo");
+  });
+
+  it("renders a default-on Enabled switch in both Once and Routine modes", async () => {
+    const { container } = await mount();
+    const getSwitch = () => query(container, '[role="switch"]') as HTMLButtonElement;
+    expect(getSwitch()).not.toBeNull();
+    expect(getSwitch().tagName).toBe("BUTTON");
+    expect(getSwitch().getAttribute("aria-checked")).toBe("true");
+    const labelId = getSwitch().getAttribute("aria-labelledby");
+    expect(labelId).not.toBeNull();
+    expect(query(container, `#${labelId}`)?.textContent).toBe("Enabled");
+    await clickButton(container, "Routine");
+    expect(getSwitch().getAttribute("aria-checked")).toBe("true");
+    await clickButton(container, "Once");
+    expect(getSwitch().getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("persists enabled=false when the switch is turned off for a Once item", async () => {
+    const { container } = await mount();
+    await act(() => { (query(container, '[role="switch"]') as HTMLButtonElement).click(); });
+    expect((query(container, '[role="switch"]') as HTMLButtonElement).getAttribute("aria-checked")).toBe("false");
+    await act(() => { typeInto(query(container, "#schedule-what") as HTMLInputElement, "Disabled bill"); });
+    await act(() => { submitButton(container).click(); });
+    const adds = readLocalAdds(date);
+    expect(adds.length).toBe(1);
+    expect(adds[0]?.enabled).toBe(false);
+    expect(adds[0]?.item.enabled).toBe(false);
+  });
+
+  it("persists enabled=false when the switch is turned off for a Routine item", async () => {
+    const { container } = await mount();
+    await clickButton(container, "Routine");
+    await act(() => { (query(container, '[role="switch"]') as HTMLButtonElement).click(); });
+    expect((query(container, '[role="switch"]') as HTMLButtonElement).getAttribute("aria-checked")).toBe("false");
+    await act(() => { typeInto(query(container, "#schedule-what") as HTMLInputElement, "Disabled stretch"); });
+    await act(() => { submitButton(container).click(); });
+    const adds = readLocalAdds(date);
+    expect(adds.length).toBe(1);
+    expect(adds[0]?.kind).toBe("routine");
+    expect(adds[0]?.enabled).toBe(false);
+    if (adds[0]?.kind === "routine") {
+      expect(adds[0].item.enabled).toBe(false);
+      expect(adds[0].routine.enabled).toBe(false);
+    }
   });
 
   it("switches to routine fields and a teal Add button", async () => {
@@ -220,6 +266,40 @@ describe("schedule add page", () => {
     expect(adds.length).toBe(1);
     expect(adds[0]?.kind).toBe("routine");
     if (adds[0]?.kind === "routine") expect(adds[0].routine.cadence).toBe("Daily");
+  });
+
+  it("shows the Session ID / Name field in both Once and Routine modes", async () => {
+    const { container } = await mount();
+    const input = query(container, "#schedule-session") as HTMLInputElement;
+    expect(input).not.toBeNull();
+    expect(input.placeholder).toBe("Session id or name");
+    expect((query(container, 'label[for="schedule-session"]') as HTMLLabelElement).textContent).toBe("Session ID / Name");
+    await clickButton(container, "Routine");
+    expect(query(container, "#schedule-session")).not.toBeNull();
+  });
+
+  it("persists a filled session value to a Once item", async () => {
+    const { container } = await mount();
+    await act(() => { typeInto(query(container, "#schedule-session") as HTMLInputElement, "  custom-session  "); });
+    await act(() => { typeInto(query(container, "#schedule-what") as HTMLInputElement, "Pay the bills"); });
+    await act(() => { submitButton(container).click(); });
+    const adds = readLocalAdds(date);
+    expect(adds[0]?.item.sessionId).toBe("custom-session");
+    expect(adds[0]?.item.sessionName).toBe("custom-session");
+  });
+
+  it("persists a filled session value to a Routine item and routine", async () => {
+    const { container } = await mount();
+    await clickButton(container, "Routine");
+    await act(() => { typeInto(query(container, "#schedule-session") as HTMLInputElement, "routine-session"); });
+    await act(() => { typeInto(query(container, "#schedule-what") as HTMLInputElement, "Stretch"); });
+    await act(() => { submitButton(container).click(); });
+    const adds = readLocalAdds(date);
+    if (adds[0]?.kind === "routine") {
+      expect(adds[0].routine.sessionId).toBe("routine-session");
+      expect(adds[0].item.sessionId).toBe("routine-session");
+      expect(adds[0].item.sessionName).toBe("routine-session");
+    }
   });
 
   it("redirects to the project picker when no project is selected", async () => {

@@ -145,6 +145,24 @@ describe("schedule-model local adds storage", () => {
     ]));
     expect(readLocalAdds("2026-11-22").map((entry) => entry.id)).toEqual(["ok"]);
   });
+
+  it("defaults legacy entries without enabled to true", () => {
+    window.localStorage.setItem("schedule:local-adds", JSON.stringify([
+      {
+        id: "legacy", title: "Legacy", kind: "routine", targetDate: "2026-11-22",
+        item: { ...mkItem("legacy"), kind: "routine", days: [0] },
+        routine: { id: "legacy", sessionId: "s", title: "Legacy", time: "08:00", cadence: "Daily", days: [0], href: "/" },
+      },
+      { id: "legacy-once", title: "Legacy once", kind: "once", targetDate: "2026-11-22", item: mkItem("legacy-once") },
+    ]));
+    const result = readLocalAdds("2026-11-22");
+    expect(result).toHaveLength(2);
+    for (const entry of result) {
+      expect(entry.enabled).toBe(true);
+      expect(entry.item.enabled).toBe(true);
+      if (entry.kind === "routine") expect(entry.routine.enabled).toBe(true);
+    }
+  });
 });
 
 describe("schedule-model notice storage", () => {
@@ -239,6 +257,26 @@ describe("schedule-model applyLocalAdds", () => {
     const res = applyLocalAdds(base, [add]);
     expect(res.routines.map((r) => r.id)).toEqual(["r3"]);
     expect(res.items).toEqual([]);
+    expect(res.countToday).toBe(0);
+  });
+
+  it("keeps disabled adds visible but excludes them from today's count", () => {
+    const disabledOnce = {
+      id: "off-once", title: "Disabled once", kind: "once" as const, project: "p", targetDate: "2026-11-22",
+      item: { ...mkItem("off-once", "09:00"), enabled: false },
+      enabled: false,
+    } as ScheduleSaved;
+    const disabledRoutine = {
+      id: "off-routine", title: "Disabled routine", kind: "routine" as const, project: "p",
+      targetDate: "2026-11-22",
+      item: { ...mkItem("off-routine", "08:00"), kind: "routine" as const, enabled: false },
+      routine: { id: "off-routine", sessionId: "s", title: "Disabled routine", time: "08:00", cadence: "Daily", days: [0], href: "/", enabled: false },
+      enabled: false,
+    } as ScheduleSaved;
+    const res = applyLocalAdds(base, [disabledOnce, disabledRoutine]);
+    expect(res.items.map((item) => item.id)).toEqual(["off-once"]);
+    expect(res.items.map((item) => item.id)).not.toContain("off-routine");
+    expect(res.routines.map((routine) => routine.id)).toEqual(["off-routine"]);
     expect(res.countToday).toBe(0);
   });
 });
