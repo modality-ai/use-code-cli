@@ -2,6 +2,7 @@
 // Regenerate with generateCommandsIndex(); the commands directory is the
 // single source of truth.
 import type { CLICommand } from "modality-cli-kit";
+import { approveCommand } from "./commands/approve";
 import { compactCommand } from "./commands/compact";
 import { logCommand } from "./commands/log";
 import { memoryCommand } from "./commands/memory";
@@ -25,4 +26,4 @@ import { talkPermitCommand } from "./commands/talk-permit";
 import { talkToAllCommand } from "./commands/talk-to-all";
 import { talkCommand } from "./commands/talk";
 
-export const commands: CLICommand[] = [compactCommand, logCommand, memoryCommand, monitorsCommand, projectDeleteCommand, projectPsCommand, projectRunStreamCommand, projectRunCommand, projectCommand, projectsCommand, promptsCommand, ptyInputCommand, pushWebCommand, schedulerCommand, sessionCreateCommand, sessionCommand, sessionsCommand, startCommand, talkHeroCommand, talkPermitCommand, talkToAllCommand, talkCommand];
+export const commands: CLICommand[] = [approveCommand, compactCommand, logCommand, memoryCommand, monitorsCommand, projectDeleteCommand, projectPsCommand, projectRunStreamCommand, projectRunCommand, projectCommand, projectsCommand, promptsCommand, ptyInputCommand, pushWebCommand, schedulerCommand, sessionCreateCommand, sessionCommand, sessionsCommand, startCommand, talkHeroCommand, talkPermitCommand, talkToAllCommand, talkCommand];

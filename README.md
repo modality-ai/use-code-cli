@@ -9,6 +9,7 @@ Claude Code's built-in tooling only ever delivers a message to a single peer. `u
 - **`talk`** — deliver a message to one session (with reply instructions, `---` literal mode, `--one-way`, `--in-reply-to`).
 - **`talk-to-all`** — deliver one message to **every** matching session in a single shot. Filter by name, status, or hero. This is the killer feature: one command, N agents.
 - **`talk-permit`** — gate inbound cross-session messages: show or set `crossSessionInbound` (`accept` | `hold` | `refuse` | `unset`) in `~/.claude/settings.json`, so a session controls whether — and how — other sessions can reach it.
+- **`sessions --waiting` / `approve`** — see which sessions are waiting, then approve a permission prompt in a use-code-cli PTY job (blind keystrokes; see the limitation below).
 
 ## Usage
 
@@ -143,8 +144,25 @@ use-code-cli session-create [project] --name <name> [--id <string>] [--timeout <
 List active (and offline) sessions.
 
 ```bash
-use-code-cli sessions [--all] [--filter-status busy,waiting,idle] [--filter-name a,b] [--recent N] [--search text]
+use-code-cli sessions [--all] [--filter-status busy,waiting,idle] [--filter-name a,b] [--recent N] [--search text] [--waiting]
 ```
+
+`--waiting` keeps only sessions in the waiting state. Each row carries `approvable` and, when available, the `jobId` of a live use-code-cli PTY job. `approvable: true` requires a waiting permission prompt **and** a live job with a reachable control socket for that session's pid; everything else is `false`, including sessions started outside use-code-cli's PTY.
+
+---
+
+## `approve`
+
+Send `y\r` to a permission prompt in a session that use-code-cli launched in a PTY.
+
+```bash
+use-code-cli sessions --waiting
+use-code-cli approve <jobId> --blind
+```
+
+The target must be an explicit, live PTY `jobId` whose session is currently waiting on a permission prompt. The keystroke is delivered through the job's per-job control socket, so it works even when the PTY is owned by another CLI process or the web server. Unknown, exited, non-terminal, non-waiting, and non-PTY targets all fail with the same `NOT APPROVABLE` message — no keystrokes are sent and there is no fallback to `talk`.
+
+**Blind-keystroke limitation:** the command writes to the terminal but cannot verify which dialog received `y\r`. `--blind` is the explicit confirmation that you checked the target with `sessions --waiting`; without it, no keystroke is sent. For automated consent, use the supported opt-in paths: a user-installed `PermissionRequest` hook with an allowlist (Phase B), or launching with `--permission-prompt-tool` (Phase C). A peer message must never install a hook or change permission settings on your behalf.
 
 ---
 
@@ -183,6 +201,18 @@ use-code-cli memory [search] [--files] [--limit <n>]
 ## Dev server
 
 Run `bun start` then open http://127.0.0.1:3000/sessions for a JSON list of sessions.
+
+## PTY benchmark
+
+`tools/pty-bench.ts` is a standalone micro-benchmark (not part of `bun test`):
+
+```bash
+bun tools/pty-bench.ts [--jobs 100] [--mb 10] [--spawns 20] [--baseline]
+```
+
+It measures register/exit latency for N PTY jobs, shell vs. fast spawn latency, and 10 MB of PTY output throughput with and without callback batching. `--baseline` skips the variants that need the spawn options. It uses a temporary `HOME`, so it never touches your live `~/.use-code-cli/pty-jobs.json`.
+
+`spawnPty(command, cwd, onData?, opts?)` keeps `bash -lic` as its default. Pass `opts.fast` with `opts.argv` (and optional `opts.env`) to spawn directly, `opts.batchOutput: false` to opt out of coalesced data callbacks, and `spawnMode` in `registerJob` metadata to record which path launched a job.
 
 ## Repository
 

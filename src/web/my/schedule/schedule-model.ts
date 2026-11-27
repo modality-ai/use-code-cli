@@ -66,6 +66,7 @@ function isWeekdayList(value: unknown): value is number[] {
   return Array.isArray(value) && value.every((day) => Number.isInteger(day) && day >= 0 && day <= 6);
 }
 
+// @legacy-keep: protects entries saved before `enabled` existed — missing flags must stay active.
 function normalizeEnabled(entry: ScheduleSaved): ScheduleSaved {
   const enabled = entry.enabled !== false;
   const item = { ...entry.item, enabled };

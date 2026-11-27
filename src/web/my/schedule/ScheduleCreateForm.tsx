@@ -238,11 +238,11 @@ export default function ScheduleCreateForm({ date, project, onSave }: ScheduleCr
     localSeq.current += 1;
     const id = `local-${Date.now()}-${localSeq.current}`;
     const projectHref = `/my/project/${encodeURIComponent(project)}`;
+    const sessionValue = session.trim();
 
     if (createKind === "once") {
       const targetDate = when === "today" ? date : when === "tomorrow" ? addDays(date, 1) : pickDate || date;
       const cadence = when === "today" ? "Today only" : when === "tomorrow" ? "Tomorrow" : shortDate(targetDate);
-      const sessionValue = session.trim();
       const item: ScheduleItem = {
         id,
         sessionId: sessionValue || project,
@@ -261,7 +261,6 @@ export default function ScheduleCreateForm({ date, project, onSave }: ScheduleCr
       return;
     }
 
-    const sessionValue = session.trim();
     const allDays = [0, 1, 2, 3, 4, 5, 6];
     const days = repeats === "daily"
       ? allDays

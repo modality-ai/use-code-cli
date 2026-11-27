@@ -2,6 +2,8 @@ import { z } from "zod";
 import { isJsonMode, optionalValueFlag, renderTable, type CLICommand } from "modality-cli-kit";
 import { oneLine } from "../../lib/output/format";
 import { filterStatusField } from "../../lib/flags";
+import { listJobs } from "../../lib/pty";
+import { isPermissionPromptWaiting } from "../../lib/permission-prompt";
 import {
   describeSessionFilter,
   matchesSessionFilter,
@@ -38,6 +40,11 @@ const SessionsArgsSchema = z.object({
     .describe(
       "Only sessions whose workspace folder name — where it launched or where it ended — matches any of these comma-separated keywords (case-insensitive). Passed bare, defaults to the current working directory.",
     ),
+  waiting: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe("Only sessions in the waiting state; each row reports whether it is approvable"),
   recent: optionalValueFlag("10")
     .refine(
       (v) => v === undefined || v === "" || (/^\d+$/.test(v) && Number(v) > 0),
@@ -68,7 +75,10 @@ export interface SessionsDeps {
   readSessions?: (includeOffline?: boolean) => Promise<import("../../lib/sessions").SessionInfo[]>;
   readTranscriptMeta?: (s: import("../../lib/sessions").SessionInfo) => Promise<import("../../lib/sessions").TranscriptMeta>;
   searchTranscript?: (s: import("../../lib/sessions").SessionInfo, term: string) => Promise<{ matches: number; line: number; snippet: string }>;
+  listJobs?: ListJobs;
 }
+
+type ListJobs = typeof listJobs;
 
 interface Row {
   state: string;
@@ -86,6 +96,8 @@ interface Row {
   matches?: number;
   line?: number;
   snippet?: string;
+  jobId?: string | null;
+  approvable: boolean;
 }
 
 /** How many transcripts to search at once — enough to hide I/O latency, few enough to spare fds. */
@@ -107,6 +119,7 @@ function baseRow(s: SessionInfo, meta: TranscriptMeta = {}): Row {
     name: s.name ?? "",
     status: s.status ?? "",
     waitingFor: s.waitingFor ?? null,
+    approvable: false,
     cwd: s.cwd,
     sessionId: s.sessionId,
     version: s.version ?? "",
@@ -151,6 +164,7 @@ async function sessions(args: SessionsArgs, deps?: SessionsDeps) {
   const readSessionsFn = deps?.readSessions ?? readSessions;
   const readTranscriptMetaFn = deps?.readTranscriptMeta ?? readTranscriptMeta;
   const searchTranscriptFn = deps?.searchTranscript ?? searchTranscript;
+  const listJobsFn = deps?.listJobs ?? listJobs;
   // Name, status, and workspace folder are in the session file; hero is only in
   // the transcript, so it is checked in its own pass once each candidate's meta
   // is read.
@@ -169,14 +183,22 @@ async function sessions(args: SessionsArgs, deps?: SessionsDeps) {
   const matching = (includeOffline ? all : all.filter((s) => s.online)).filter((s) =>
     matchesSessionFilter(s, fieldFilter),
   );
+  const statusMatches = args.waiting ? matching.filter((s) => s.status === "waiting") : matching;
+
+  // Only a job with a reachable control socket can accept a keystroke. The
+  // first one for a pid supplies the jobId the `approve` command needs.
+  const approvableJobByPid = new Map<number, string>();
+  for (const job of await listJobsFn()) {
+    if (job.approvable && !approvableJobByPid.has(job.pid)) approvableJobByPid.set(job.pid, job.jobId);
+  }
 
   // Hero is only in the transcript, so narrowing on it reads each candidate's
   // meta up front — before --recent trims the list. Keep the metas for rendering.
   const metas = new Map<SessionInfo, TranscriptMeta>();
-  let candidates = matching;
+  let candidates = statusMatches;
   if (filter.filterHero !== undefined) {
     const read = await Promise.all(
-      matching.map(async (s) => ({ s, meta: await readTranscriptMetaFn(s) })),
+      statusMatches.map(async (s) => ({ s, meta: await readTranscriptMetaFn(s) })),
     );
     for (const { s, meta } of read) metas.set(s, meta);
     candidates = read
@@ -203,14 +225,26 @@ async function sessions(args: SessionsArgs, deps?: SessionsDeps) {
     );
   }
 
+  rows = rows.map((r) => {
+    const jobId = approvableJobByPid.get(r.pid) ?? null;
+    return { ...r, jobId, approvable: jobId !== null && isPermissionPromptWaiting(r) };
+  });
+
   if (rows.length > 0 && wantsHumanOutput(args)) {
-    const headers =
-      args.search !== undefined
-        ? ["state", "name", "hero", "status", "pid", "matches", "line"]
-        : ["state", "name", "hero", "status", "pid", "branch"];
+    let headers: string[];
+    if (args.waiting) {
+      headers = ["state", "name", "hero", "status", "pid", "jobId", "approvable"];
+    } else if (args.search !== undefined) {
+      headers = ["state", "name", "hero", "status", "pid", "matches", "line"];
+    } else {
+      headers = ["state", "name", "hero", "status", "pid", "branch"];
+    }
     const tableRows = rows.map((r) => {
       const hero = r.hero ?? "-";
       const pid = String(r.pid);
+      if (args.waiting) {
+        return [r.state, r.name || r.sessionId, hero, r.status, pid, r.jobId ?? "-", r.approvable ? "yes" : "no"];
+      }
       if (args.search !== undefined) {
         return [r.state, r.name || r.sessionId, hero, r.status, pid, String(r.matches ?? 0), String(r.line ?? 0)];
       }
@@ -236,6 +270,13 @@ async function sessions(args: SessionsArgs, deps?: SessionsDeps) {
         if (r.status === "waiting" && r.waitingFor) {
           largeLines.push(`  waiting: "${oneLine(r.waitingFor, 1000)}"`);
         }
+        if (args.waiting) {
+          if (r.approvable) {
+            largeLines.push(`  approvable: yes — use-code-cli approve ${r.jobId} --blind`);
+          } else {
+            largeLines.push("  approvable: no — no live PTY job waiting on a permission prompt");
+          }
+        }
         largeLines.push(`  id:   ${r.sessionId}`);
         largeLines.push(`  cwd:  ${r.cwd}`);
         largeLines.push("");
@@ -250,7 +291,8 @@ async function sessions(args: SessionsArgs, deps?: SessionsDeps) {
     console.log(`\u2026 ${hidden} older session${hidden === 1 ? "" : "s"} hidden; raise --recent to see more.`);
   }
 
-  const filters = describeSessionFilter(filter);
+  const baseFilters = describeSessionFilter(filter);
+  const filters = args.waiting ? `${baseFilters || " matching"} --waiting` : baseFilters;
   const message =
     rows.length === 0
       ? args.search !== undefined
@@ -276,6 +318,8 @@ export const sessionsCommand: CLICommand<SessionsDeps, SessionsArgs, any> = {
     "use-code-cli sessions --all",
     "use-code-cli sessions --all --recent",
     "use-code-cli sessions --all --recent 30",
+    "use-code-cli sessions --waiting",
+    "use-code-cli sessions --waiting --json",
     "use-code-cli sessions --filter-status busy",
     "use-code-cli sessions --filter-hero JAMES",
     "use-code-cli sessions --filter-hero JAMES,WANDA",

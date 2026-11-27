@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { createConnection, createServer, type Server } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { withLock } from "./file-lock";
@@ -9,9 +10,15 @@ import { withLock } from "./file-lock";
 
 export type PtyProc = Bun.Subprocess & { terminal: NonNullable<Bun.Subprocess["terminal"]> };
 
+interface ControlSocket {
+  server: Server;
+  path: string;
+}
+
 interface PtyJob {
   proc: Bun.Subprocess;
   log?: string;
+  control?: ControlSocket;
 }
 
 interface PtyJobRecord {
@@ -24,6 +31,8 @@ interface PtyJobRecord {
   finishedAt?: number;
   exitCode?: number | null;
   background?: boolean;
+  spawnMode?: "fast" | "shell";
+  controlPath?: string;
 }
 
 const jobs = new Map<string, PtyJob>();
@@ -103,42 +112,208 @@ async function updatePersistedJobs(update: (records: PtyJobRecord[]) => void): P
   }
 }
 
+// Registrations and exits often arrive in bursts. Coalesce their state updates
+// into one locked read-modify-write instead of one disk write per event.
+const PERSIST_FLUSH_MS = 50;
+type PersistedUpdate = (records: PtyJobRecord[]) => void;
+let pendingUpdates: PersistedUpdate[] = [];
+let flushTimer: ReturnType<typeof setTimeout> | undefined;
+let flushChain: Promise<void> = Promise.resolve();
+
+function schedulePersistFlush(): void {
+  if (flushTimer || pendingUpdates.length === 0) return;
+  flushTimer = setTimeout(() => { void flushPersistedUpdates(); }, PERSIST_FLUSH_MS);
+}
+
+function queuePersistedUpdate(update: PersistedUpdate): void {
+  if (!persistJobs) {
+    const records = [...memoryRecords];
+    update(records);
+    memoryRecords = records;
+    return;
+  }
+  pendingUpdates.push(update);
+  schedulePersistFlush();
+}
+
+// Serialized so concurrent forced flushes cannot interleave two lock holders.
+function flushPersistedUpdates(): Promise<void> {
+  if (flushTimer !== undefined) { clearTimeout(flushTimer); flushTimer = undefined; }
+  const run = flushChain.then(async () => {
+    if (pendingUpdates.length === 0) return;
+    const updates = pendingUpdates;
+    pendingUpdates = [];
+    await updatePersistedJobs((records) => {
+      for (const apply of updates) apply(records);
+    });
+  });
+  flushChain = run.catch(() => {});
+  return run;
+}
+
 function isPidAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
 // Strip CLAUDE* vars: a spawned claude CLI would otherwise treat itself as a
 // child session and skip saving its transcript.
-export function cleanEnv(): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined && !/^CLAUDE/i.test(key)) env[key] = value;
+function stripClaudeVars(env: Record<string, string | undefined>): Record<string, string> {
+  const clean: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (value !== undefined && !/^CLAUDE/i.test(key)) clean[key] = value;
   }
+  return clean;
+}
+
+export function cleanEnv(): Record<string, string> {
+  const env = stripClaudeVars(process.env);
   env.TERM = "xterm-256color";
   return env;
 }
 
+interface SpawnPtyOptions {
+  fast?: boolean;
+  argv?: string[];
+  env?: Record<string, string>;
+  batchOutput?: boolean;
+}
+
 // -lic loads the profile (PATH) and interactive aliases used by web-terminal commands.
-export function spawnPty(command: string, cwd: string, onData?: (data: Uint8Array) => void): PtyProc {
-  return Bun.spawn(["bash", "-lic", command], {
+// Fast mode trusts the caller with argv/env and skips that shell startup.
+export function spawnPty(command: string, cwd: string, onData?: (data: Uint8Array) => void, opts?: SpawnPtyOptions): PtyProc {
+  const argv = opts?.fast ? opts.argv : ["bash", "-lic", command];
+  if (!argv || argv.length === 0) {
+    throw new Error("spawnPty: fast mode requires a non-empty argv");
+  }
+  const env = opts?.fast ? stripClaudeVars({ ...cleanEnv(), ...opts.env }) : cleanEnv();
+  const batchOutput = opts?.batchOutput !== false;
+  let pending: Uint8Array[] = [];
+  let batchScheduled = false;
+
+  function flushOutput(): void {
+    batchScheduled = false;
+    if (pending.length === 0) return;
+    const chunks = pending;
+    pending = [];
+    if (chunks.length === 1) {
+      const [only] = chunks;
+      if (only) onData?.(only);
+      return;
+    }
+    let size = 0;
+    for (const chunk of chunks) size += chunk.length;
+    const merged = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      merged.set(chunk, offset);
+      offset += chunk.length;
+    }
+    onData?.(merged);
+  }
+
+  const proc = Bun.spawn(argv, {
     cwd,
-    env: cleanEnv(),
+    env,
     terminal: {
       cols: 120,
       rows: 40,
       data: (_terminal, data) => {
-        onData?.(data);
+        if (!onData) return;
+        if (!batchOutput) {
+          onData(data);
+          return;
+        }
+        pending.push(data);
+        if (batchScheduled) return;
+        batchScheduled = true;
+        // PTY chunks arrive one per I/O tick; a bare microtask would flush
+        // each one. Gather the tick's chunks first, then flush in a microtask.
+        setTimeout(() => queueMicrotask(flushOutput), 0);
       },
     },
   }) as PtyProc;
+  if (batchOutput) void proc.exited.then(flushOutput, flushOutput);
+  return proc;
+}
+
+function closeControlSocket(control: ControlSocket | undefined): void {
+  if (!control) return;
+  try { control.server.close(); } catch {}
+  try { unlinkSync(control.path); } catch {}
+}
+
+// A persisted job record cannot carry a subprocess handle across CLI processes.
+// This socket lets a later process deliver the approval keystroke to the owner.
+async function startControlSocket(jobId: string, proc: PtyProc | Bun.Subprocess): Promise<ControlSocket | undefined> {
+  if (!proc.terminal) return undefined;
+  const dir = join(stateDir(), "pty-control");
+  try {
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, `${jobId}.sock`);
+    try { unlinkSync(path); } catch {}
+    const server = createServer((socket) => {
+      socket.setEncoding("utf8");
+      let input = "";
+      socket.on("data", (chunk) => {
+        input += chunk;
+        if (input.length > 8) socket.destroy();
+      });
+      socket.on("end", () => {
+        if (input !== "y\r" || proc.exitCode !== null || !proc.terminal) {
+          socket.end("err");
+          return;
+        }
+        try {
+          proc.terminal.write(input);
+          socket.end("ok");
+        } catch {
+          socket.end("err");
+        }
+      });
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(path, () => {
+        server.off("error", reject);
+        resolve();
+      });
+    });
+    try { chmodSync(path, 0o600); } catch {}
+    server.unref();
+    return { server, path };
+  } catch {
+    return undefined;
+  }
+}
+
+export async function writeJobApproval(controlPath: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = createConnection(controlPath);
+    let settled = false;
+    let reply = "";
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.destroy();
+      resolve(ok);
+    };
+    const timer = setTimeout(() => finish(false), 2000);
+    socket.setEncoding("utf8");
+    socket.on("connect", () => { socket.end("y\r"); });
+    socket.on("data", (chunk) => { reply += chunk; });
+    socket.on("end", () => finish(reply.includes("ok")));
+    socket.on("error", () => finish(false));
+  });
 }
 
 export async function registerJob(
   proc: PtyProc | Bun.Subprocess,
   log?: string,
-  meta?: { cwd?: string; command?: string; background?: boolean },
+  meta?: { cwd?: string; command?: string; background?: boolean; spawnMode?: "fast" | "shell" },
 ): Promise<string> {
   const jobId = `pty-${++jobSeq}-${proc.pid}`;
+  const control = await startControlSocket(jobId, proc);
   const record: PtyJobRecord = {
     jobId,
     pid: proc.pid,
@@ -147,18 +322,17 @@ export async function registerJob(
     command: meta?.command,
     startedAt: Date.now(),
     background: meta?.background,
+    spawnMode: meta?.spawnMode,
+    controlPath: control?.path,
   };
-  await updatePersistedJobs((records) => { records.push(record); });
-  jobs.set(jobId, { proc, log });
-  proc.exited
-    .then((code) => {
-      jobs.delete(jobId);
-      void markPersistedJobExited(jobId, code ?? null);
-    })
-    .catch(() => {
-      jobs.delete(jobId);
-      void markPersistedJobExited(jobId, null);
-    });
+  queuePersistedUpdate((records) => { records.push(record); });
+  jobs.set(jobId, { proc, log, control });
+  const finish = (code: number | null) => {
+    jobs.delete(jobId);
+    closeControlSocket(control);
+    void markPersistedJobExited(jobId, code);
+  };
+  proc.exited.then((code) => finish(code ?? null), () => finish(null));
   evictStaleJobs();
   return jobId;
 }
@@ -166,12 +340,15 @@ export async function registerJob(
 const JOB_RETENTION_MS = 60 * 60 * 1000;
 
 async function markPersistedJobExited(jobId: string, exitCode: number | null): Promise<void> {
-  await updatePersistedJobs((records) => {
+  queuePersistedUpdate((records) => {
     const rec = records.find((r) => r.jobId === jobId);
     if (!rec) return;
     rec.finishedAt = Date.now();
     rec.exitCode = exitCode;
   });
+  // A process exit is a durability boundary: land pending writes now, and
+  // batch with any other exits resolved in the same tick.
+  await flushPersistedUpdates();
 }
 
 function pruneExpiredJobs(records: PtyJobRecord[]): PtyJobRecord[] {
@@ -200,19 +377,28 @@ export function liveJobCount(): number {
 function evictStaleJobs(max = 50): void {
   if (jobs.size <= max) return;
   for (const [id, job] of jobs) {
-    if (job.proc.exitCode !== null) jobs.delete(id);
+    if (job.proc.exitCode !== null) {
+      jobs.delete(id);
+      closeControlSocket(job.control);
+    }
     if (jobs.size <= max) break;
   }
 }
 
-export async function listJobs(): Promise<Array<PtyJobRecord & { live: boolean; status: string }>> {
+export async function listJobs(): Promise<Array<PtyJobRecord & { live: boolean; status: string; approvable: boolean }>> {
+  await flushPersistedUpdates();
   const records = await updatePersistedJobs((items) => {
     const kept = pruneExpiredJobs(items);
     items.splice(0, items.length, ...kept);
   });
   return records.map((r) => {
     const live = isPidAlive(r.pid);
-    return { ...r, live, status: live ? "running" : "exited" };
+    return {
+      ...r,
+      live,
+      status: live ? "running" : "exited",
+      approvable: r.finishedAt === undefined && r.controlPath !== undefined && existsSync(r.controlPath),
+    };
   });
 }
 

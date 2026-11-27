@@ -265,14 +265,14 @@ describe("schedule-model applyLocalAdds", () => {
       id: "off-once", title: "Disabled once", kind: "once" as const, project: "p", targetDate: "2026-11-22",
       item: { ...mkItem("off-once", "09:00"), enabled: false },
       enabled: false,
-    } as ScheduleSaved;
+    };
     const disabledRoutine = {
       id: "off-routine", title: "Disabled routine", kind: "routine" as const, project: "p",
       targetDate: "2026-11-22",
       item: { ...mkItem("off-routine", "08:00"), kind: "routine" as const, enabled: false },
       routine: { id: "off-routine", sessionId: "s", title: "Disabled routine", time: "08:00", cadence: "Daily", days: [0], href: "/", enabled: false },
       enabled: false,
-    } as ScheduleSaved;
+    };
     const res = applyLocalAdds(base, [disabledOnce, disabledRoutine]);
     expect(res.items.map((item) => item.id)).toEqual(["off-once"]);
     expect(res.items.map((item) => item.id)).not.toContain("off-routine");

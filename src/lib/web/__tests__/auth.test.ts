@@ -114,7 +114,11 @@ describe("issue/verify session", () => {
   });
   it("rejects tampered token", async () => {
     const token = await issueSession("owner");
-    const tampered = token.slice(0, -2) + "xx";
+    const [header, payload, signature] = token.split(".");
+    // The first base64 character is fully significant; the signature tail has
+    // unused padding bits that can decode to the same bytes after tampering.
+    const first = payload![0] === "a" ? "b" : "a";
+    const tampered = `${header}.${first}${payload!.slice(1)}.${signature}`;
     expect(await verifySession(tampered)).toBeNull();
   });
   it("rejects null/empty/malformed", async () => {

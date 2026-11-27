@@ -47,4 +47,14 @@ describe("pty in-memory persistence (test-only bypass)", () => {
     setPtyJobPersistenceEnabled(true);
     expect((await listJobs()).map((job) => job.jobId)).not.toContain(jobId);
   });
+
+  it("records the spawn mode in the job record", async () => {
+    let resolveExited!: (code: number) => void;
+    const proc = fakeProc(999997, (resolve) => { resolveExited = resolve; });
+    const jobId = await registerJob(proc, undefined, { cwd: "/tmp", command: "true", spawnMode: "fast" });
+    resolveExited(0);
+
+    const job = (await listJobs()).find((item) => item.jobId === jobId);
+    expect(job?.spawnMode).toBe("fast");
+  });
 });
